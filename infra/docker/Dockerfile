@@ -20,8 +20,7 @@ RUN npm install --global pnpm@11.19.0
 COPY --from=build /workspace /workspace
 
 FROM runtime AS api
-CMD ["pnpm", "--filter", "@travel/api", "start"]
+CMD ["node", "apps/api/dist/main.js"]
 
 FROM runtime AS worker
-CMD ["pnpm", "--filter", "@travel/worker", "start"]
-
+CMD ["node", "apps/worker/dist/main.js"]

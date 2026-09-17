@@ -44,3 +44,30 @@ jobs:
       - run: pnpm test
       - run: pnpm test:integration
       - run: pnpm build
+
+  compose-verify:
+    name: Compose verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+      - name: Create synthetic Compose environment
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/travel-v1-compose.env" <<'EOF'
+          COMPOSE_PROJECT_NAME=travel-v1-compose-ci
+          API_PORT=39000
+          POSTGRES_DB=travel_ci_compose
+          POSTGRES_USER=travel_ci_compose
+          POSTGRES_PASSWORD=SYNTHETIC_CI_ONLY
+          POSTGRES_HOST_PORT=35432
+          WORKER_HEARTBEAT_INTERVAL_MS=1000
+          WORKER_HEARTBEAT_MAX_AGE_MS=3000
+          EOF
+      - name: Build and verify Compose services
+        run: node scripts/verify-compose.mjs --env-file "$RUNNER_TEMP/travel-v1-compose.env"

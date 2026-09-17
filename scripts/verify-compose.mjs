@@ -100,6 +100,18 @@ async function serviceHealth(compose, service) {
   return stdout.trim();
 }
 
+async function workerHeartbeatStatus(compose) {
+  const output = await compose(
+    'exec',
+    '--no-TTY',
+    'worker',
+    'cat',
+    '/tmp/travel-worker-heartbeat.json',
+  );
+  const payload = JSON.parse(output.trim());
+  return payload.status;
+}
+
 async function waitFor(description, check, timeoutMs = defaultTimeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -220,7 +232,7 @@ async function verifyCompose(compose, env) {
   );
   await waitFor(
     'Worker NOT_READY during database outage',
-    async () => (await serviceHealth(compose, 'worker')) === 'unhealthy',
+    async () => (await workerHeartbeatStatus(compose)) === 'NOT_READY',
     30_000,
   );
 
@@ -234,7 +246,9 @@ async function verifyCompose(compose, env) {
   );
   await waitFor(
     'Worker recovery',
-    async () => (await serviceHealth(compose, 'worker')) === 'healthy',
+    async () =>
+      (await serviceHealth(compose, 'worker')) === 'healthy' &&
+      (await workerHeartbeatStatus(compose)) === 'READY',
   );
 
   await compose('stop', 'postgres');

@@ -1,0 +1,847 @@
+{
+  "schemaVersion": 1,
+  "purpose": "验收规格，尚未执行软件测试",
+  "dataPolicy": "所有示例时间/费用均为SYNTHETIC，非真实Provider时刻表",
+  "cases": [
+    {
+      "id": "FND-01",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "空项目边界",
+      "given": "用户给新空目录；旧仓库地址曾在聊天出现",
+      "when": "初始化",
+      "then": "只在新目录工作；origin不明不能连接旧仓库",
+      "executed": false
+    },
+    {
+      "id": "FND-02",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "非空目录保护",
+      "given": "目录已有未知文件/未提交改动",
+      "when": "检查初始化",
+      "then": "保留并报告，不reset/clean",
+      "executed": false
+    },
+    {
+      "id": "FND-03",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "活性与就绪分开",
+      "given": "API进程运行但PG不可达",
+      "when": "请求health",
+      "then": "liveness存活；readiness不就绪且无敏感信息",
+      "executed": false
+    },
+    {
+      "id": "FND-04",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "独立Worker",
+      "given": "API停止，worker进程仍运行",
+      "when": "观察进程",
+      "then": "两个入口独立；不声称无任务骨架已有业务功能",
+      "executed": false
+    },
+    {
+      "id": "FND-05",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "测试数据持久化",
+      "given": "PG命名卷内有测试记录",
+      "when": "重启普通容器",
+      "then": "记录保留；无自动reset",
+      "executed": false
+    },
+    {
+      "id": "FND-06",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "环境隔离",
+      "given": "dev与staging同时存在",
+      "when": "写dev测试记录",
+      "then": "staging不可见，密钥和volume不串用",
+      "executed": false
+    },
+    {
+      "id": "FND-07",
+      "stage": "P0",
+      "gate": "ready",
+      "name": "发布证据",
+      "given": "本地有commit但push权限不足",
+      "when": "结束阶段",
+      "then": "报告BLOCKED；不声称已同步，不写main",
+      "executed": false
+    },
+    {
+      "id": "AUTH-01",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "邀请制",
+      "given": "未邀请邮箱",
+      "when": "申请登录",
+      "then": "不创建公开用户；响应不泄漏账号存在性",
+      "executed": false
+    },
+    {
+      "id": "AUTH-02",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "单次凭证",
+      "given": "有效Magic Link同token",
+      "when": "并发兑换两次",
+      "then": "最多一次成功，不产生两个可重放凭证",
+      "executed": false
+    },
+    {
+      "id": "AUTH-03",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "邮件扫描不消耗",
+      "given": "有效登录链接",
+      "when": "仅GET预览",
+      "then": "不直接消费；用户兑换请求才消耗",
+      "executed": false
+    },
+    {
+      "id": "AUTH-04",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "过期凭证",
+      "given": "token超过配置有效期",
+      "when": "兑换",
+      "then": "拒绝，不转为长期会话",
+      "executed": false
+    },
+    {
+      "id": "AUTH-05",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "多设备登录",
+      "given": "同用户两合法会话",
+      "when": "设备A继续登录",
+      "then": "不踢设备B",
+      "executed": false
+    },
+    {
+      "id": "AUTH-06",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "强制注销",
+      "given": "管理员撤销账号全部会话",
+      "when": "旧会话再次访问",
+      "then": "所有设备受保护请求拒绝，必须重登",
+      "executed": false
+    },
+    {
+      "id": "AUTH-07",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "禁用账号",
+      "given": "账号被禁用",
+      "when": "旧会话访问或重新申请登录",
+      "then": "都不恢复使用权限",
+      "executed": false
+    },
+    {
+      "id": "AUTH-08",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "管理员不读内容",
+      "given": "管理员与普通用户各自有资源",
+      "when": "管理员取他人的私有资源",
+      "then": "拒绝，不因ADMIN绕过owner",
+      "executed": false
+    },
+    {
+      "id": "AUTH-09",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "资源越权",
+      "given": "U1知道U2的资源ID",
+      "when": "读取/修改/下载",
+      "then": "拒绝跨owner资源；嵌套资源也检查",
+      "executed": false
+    },
+    {
+      "id": "AUTH-10",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "重定向与请求安全",
+      "given": "恶意回调地址或跨站写请求",
+      "when": "兑换/提交",
+      "then": "回调allowlist与CSRF/Origin校验拒绝",
+      "executed": false
+    },
+    {
+      "id": "JOB-01",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "任务持久化",
+      "given": "已落库任务待执行",
+      "when": "worker重启",
+      "then": "任务不丢，仍可领取",
+      "executed": false
+    },
+    {
+      "id": "JOB-02",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "租约与幂等",
+      "given": "两个worker读取同任务",
+      "when": "并发领取执行",
+      "then": "一有效租约；重试不重复业务副作用",
+      "executed": false
+    },
+    {
+      "id": "JOB-03",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "崩溃恢复",
+      "given": "worker领取后崩溃",
+      "when": "租约过期",
+      "then": "任务可恢复；按幂等键处理",
+      "executed": false
+    },
+    {
+      "id": "JOB-04",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "限制重试",
+      "given": "邮件服务持续失败",
+      "when": "执行任务",
+      "then": "有限次数退避；最终失败可见，不无限发送",
+      "executed": false
+    },
+    {
+      "id": "FILE-01",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "私有对象",
+      "given": "私有附件key已知",
+      "when": "非owner下载",
+      "then": "拒绝或签名请求失败，无公开永久URL",
+      "executed": false
+    },
+    {
+      "id": "FILE-02",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "附件轻量",
+      "given": "用户上传确认书PDF",
+      "when": "保存附件",
+      "then": "仅安全校验+元数据/文件存储，不OCR不提取订单",
+      "executed": false
+    },
+    {
+      "id": "FILE-03",
+      "stage": "P1",
+      "gate": "ready",
+      "name": "超限不损行程",
+      "given": "文件超过测试配置上限",
+      "when": "上传",
+      "then": "只拒绝上传；原Trip不变",
+      "executed": false
+    },
+    {
+      "id": "TRIP-01",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "最小创建",
+      "given": "名称、开始日期、人数",
+      "when": "创建",
+      "then": "首日空Day；结束等于开始；不要求目的地/结束日",
+      "executed": false
+    },
+    {
+      "id": "TRIP-02",
+      "stage": "P2",
+      "gate": "O-01",
+      "name": "新增空Day保护",
+      "given": "已有最后一天",
+      "when": "添加下一天",
+      "then": "不能创建后立即被裁剪；触发时机按O-01确认",
+      "executed": false
+    },
+    {
+      "id": "TRIP-03",
+      "stage": "P2",
+      "gate": "O-02",
+      "name": "同日归属",
+      "given": "TripA已占9/21",
+      "when": "TripB扩展到9/21",
+      "then": "事务提交前拒绝第二份Day，返回归属冲突",
+      "executed": false
+    },
+    {
+      "id": "TRIP-04",
+      "stage": "P2",
+      "gate": "O-02",
+      "name": "并发日期占用",
+      "given": "同用户两个请求争9/21",
+      "when": "同时创建Day",
+      "then": "最多一个成功，不出现双归属",
+      "executed": false
+    },
+    {
+      "id": "NODE-01",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "插入地点",
+      "given": "A→B原交通已选",
+      "when": "插入C",
+      "then": "旧A→B入历史；A→C/C→B待选择，不自动采用",
+      "executed": false
+    },
+    {
+      "id": "NODE-02",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "只更新受影响边",
+      "given": "A→B→C→D→E→F",
+      "when": "D移到B与C之间",
+      "then": "A→B/E→F保留；其余按新邻接变更",
+      "executed": false
+    },
+    {
+      "id": "NODE-03",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "拖动中无副作用",
+      "given": "拖拽尚未drop",
+      "when": "鼠标经过多个位置",
+      "then": "不反复写DB/查询Provider；提交时处理",
+      "executed": false
+    },
+    {
+      "id": "NODE-04",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "同Place独立Visit",
+      "given": "酒店→商场→酒店",
+      "when": "编辑第二次酒店备注",
+      "then": "第一次不变；不能因Place ID合并",
+      "executed": false
+    },
+    {
+      "id": "NODE-05",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "自定义位置",
+      "given": "名称+可靠坐标，无街道地址",
+      "when": "创建",
+      "then": "允许，不编地址；身份后续通过Replace改变",
+      "executed": false
+    },
+    {
+      "id": "NODE-06",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "FreeAction无假位置",
+      "given": "晚餐→自由行动→酒吧",
+      "when": "保存",
+      "then": "自由行动无Place/固定坐标，不造入场交通",
+      "executed": false
+    },
+    {
+      "id": "NODE-07",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "Replace清旧备注",
+      "given": "B有备注",
+      "when": "原位替换成D",
+      "then": "原备注不继承；两侧交通重新待选择",
+      "executed": false
+    },
+    {
+      "id": "VER-01",
+      "stage": "P2",
+      "gate": "ready",
+      "name": "无静默覆盖",
+      "given": "A/B设备都基于v10",
+      "when": "A保存成v11后B保存",
+      "then": "B返回VERSION_CONFLICT，不能覆盖A",
+      "executed": false
+    },
+    {
+      "id": "TIME-01",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "任意两值推第三值",
+      "given": "到达10:00+离开11:30",
+      "when": "计算",
+      "then": "停留90分钟",
+      "executed": false
+    },
+    {
+      "id": "TIME-02",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "正推",
+      "given": "到达10:00+停留90分钟",
+      "when": "计算",
+      "then": "离开11:30，来源DERIVED",
+      "executed": false
+    },
+    {
+      "id": "TIME-03",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "反推",
+      "given": "离开11:30+停留90分钟",
+      "when": "计算",
+      "then": "到达10:00，来源DERIVED",
+      "executed": false
+    },
+    {
+      "id": "TIME-04",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "C01原案例",
+      "given": "SYNTHETIC列车20:21发；预留20分钟",
+      "when": "反推并采用19:56到候选",
+      "then": "目标20:01保留；方案到达19:56；停留25分钟",
+      "executed": false
+    },
+    {
+      "id": "TIME-05",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "C02延长停留",
+      "given": "19:56到/20:21走；最低改40分钟",
+      "when": "计算",
+      "then": "目标19:41，旧方案差15分钟；不改列车",
+      "executed": false
+    },
+    {
+      "id": "TIME-06",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "C02采用早到候选",
+      "given": "最低40分钟；20:21走",
+      "when": "采用19:36到候选",
+      "then": "停留45分钟；40分钟要求仍在",
+      "executed": false
+    },
+    {
+      "id": "TIME-07",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "C03到达目标编辑",
+      "given": "旧方案19:56到/20:21走",
+      "when": "用户设19:30到达目标",
+      "then": "目标停留51分钟；旧方案仍25分钟；显式冲突，不伪造实际",
+      "executed": false
+    },
+    {
+      "id": "TIME-08",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "终点目标保留",
+      "given": "要求23:30前到",
+      "when": "采用约23:00到路线",
+      "then": "23:00方案结果与23:30要求同时存在",
+      "executed": false
+    },
+    {
+      "id": "TIME-09",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "跨夜等待",
+      "given": "21日23:00到机场；22日02:00起飞",
+      "when": "算停留",
+      "then": "3小时；不把2.5小时建议写成01:30起飞",
+      "executed": false
+    },
+    {
+      "id": "TIME-10",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "班次不凭空生成",
+      "given": "用户已就绪19:45，选定车20:21",
+      "when": "正推",
+      "then": "仍20:21发，中间等待；不生成19:45车",
+      "executed": false
+    },
+    {
+      "id": "TIME-11",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "双锚点不相容",
+      "given": "两端已采用交通；新停留超过间隔",
+      "when": "求解",
+      "then": "返回冲突/调整条件，不挪动任一班次",
+      "executed": false
+    },
+    {
+      "id": "TIME-12",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "编辑方向歧义",
+      "given": "到达和离开均独立用户输入",
+      "when": "输入不相容停留",
+      "then": "AMBIGUOUS_TIME_INPUT，要求选择保留方向",
+      "executed": false
+    },
+    {
+      "id": "TIME-13",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "缺失传播边",
+      "given": "中间交通未选，后面有独立预约",
+      "when": "计算",
+      "then": "依赖交通的到达未知；预约仍保留，不整图清空",
+      "executed": false
+    },
+    {
+      "id": "TIME-14",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "缓冲参照不匹配",
+      "given": "到机场时间与登机口截止，缺机场内耗时",
+      "when": "判断风险",
+      "then": "UNKNOWN/缺依据，不直接比较后判正常",
+      "executed": false
+    },
+    {
+      "id": "TIME-15",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "不双算步行",
+      "given": "路线总时间含换乘步行8分钟",
+      "when": "排程",
+      "then": "该8分钟只算一次",
+      "executed": false
+    },
+    {
+      "id": "TIME-16",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "三色与缺值",
+      "given": "建议20/必须8，预留15；仅建议20且预留5",
+      "when": "判定",
+      "then": "前者黄；后者黄且无伪造必须红线",
+      "executed": false
+    },
+    {
+      "id": "TIME-17",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "用户已接受风险",
+      "given": "用户锁5，建议10/必须3且已接受",
+      "when": "当前预留7",
+      "then": "可展示偏紧但不重复同层提醒；跌破3才新红风险",
+      "executed": false
+    },
+    {
+      "id": "TIME-18",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "实际事实不可改",
+      "given": "A已实际完成",
+      "when": "从未来约束向前推",
+      "then": "不重写A实际时间；从未发生部分求解",
+      "executed": false
+    },
+    {
+      "id": "TIME-19",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "空档非全额",
+      "given": "A16:20结束，B18:00约，交通未知",
+      "when": "求空档",
+      "then": "100分钟是间隔，不能宣布100分钟可自由行动",
+      "executed": false
+    },
+    {
+      "id": "TIME-20",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "有界终止",
+      "given": "互相矛盾EQ/时长条件",
+      "when": "多轮传播",
+      "then": "稳定返回冲突集，不无限振荡",
+      "executed": false
+    },
+    {
+      "id": "TIME-21",
+      "stage": "P3",
+      "gate": "ready",
+      "name": "UTC与当地时间",
+      "given": "带IANA时区的跨时区出发/到达",
+      "when": "计算时长",
+      "then": "用instants差；不以本地钟点减法得负时长",
+      "executed": false
+    },
+    {
+      "id": "API-01",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "查询只读",
+      "given": "已有正式Trip",
+      "when": "Query/Preview新路线",
+      "then": "Trip版本与正式节点不变",
+      "executed": false
+    },
+    {
+      "id": "API-02",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "采用原子性",
+      "given": "多段候选需新增两Visit/三Edge",
+      "when": "中途数据库失败",
+      "then": "全部回滚，无半条路线",
+      "executed": false
+    },
+    {
+      "id": "API-03",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "幂等采用",
+      "given": "同payload同idempotencyKey",
+      "when": "重复请求",
+      "then": "一份结果，不重复节点/通知",
+      "executed": false
+    },
+    {
+      "id": "API-04",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "过期预览",
+      "given": "Preview基于v8、当前v9",
+      "when": "Adopt",
+      "then": "拒绝并要求重算；不覆盖当前",
+      "executed": false
+    },
+    {
+      "id": "API-05",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "外部候选过期",
+      "given": "Provider有效期已过",
+      "when": "Adopt",
+      "then": "重新确认/返回PREVIEW_STALE，不当最新",
+      "executed": false
+    },
+    {
+      "id": "API-06",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "并发采用",
+      "given": "两预览基于同一版本",
+      "when": "并发Adopt",
+      "then": "最多一个成功，另一个版本冲突",
+      "executed": false
+    },
+    {
+      "id": "API-07",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "旧候选晚返回",
+      "given": "用户连续改目标19:40→19:30",
+      "when": "19:40查询后到达",
+      "then": "不覆盖19:30当前候选集，按request/basis区分",
+      "executed": false
+    },
+    {
+      "id": "API-08",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "撤销与新事实",
+      "given": "用户拖拽后航班又真实延误",
+      "when": "撤销拖拽",
+      "then": "恢复结构，不回滚延误；按新事实重新判风险",
+      "executed": false
+    },
+    {
+      "id": "API-09",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "撤销版本冲突",
+      "given": "A操作后B设备已更新",
+      "when": "A请求Undo",
+      "then": "UNDO_CONFLICT，不覆盖B",
+      "executed": false
+    },
+    {
+      "id": "PROV-01",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "失败与无车分开",
+      "given": "接口超时",
+      "when": "查询",
+      "then": "PROVIDER_UNAVAILABLE，不显示末班已过",
+      "executed": false
+    },
+    {
+      "id": "PROV-02",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "备用源不拼假值",
+      "given": "两源到达15:40/15:52且差异显著",
+      "when": "比较",
+      "then": "主源+不一致标记，不平均成15:46",
+      "executed": false
+    },
+    {
+      "id": "PROV-03",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "旧计划不是实时",
+      "given": "计划14:35到，实时服务断",
+      "when": "看后续衔接",
+      "then": "保留计划，当前预计未知，不保证能赶15:10车",
+      "executed": false
+    },
+    {
+      "id": "REC-01",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "局部交通妥协",
+      "given": "17:10出、17:30约；巴士40、出租20且增加800 CNY（全为fixture）",
+      "when": "生成候选",
+      "then": "显示出租方案+零余量风险+成本；用户采用才换",
+      "executed": false
+    },
+    {
+      "id": "REC-02",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "拒绝后安静",
+      "given": "用户关闭推荐",
+      "when": "手工缩短15分钟",
+      "then": "只更新剩余缺口，不自动弹新推荐",
+      "executed": false
+    },
+    {
+      "id": "REC-03",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "风险升级",
+      "given": "此前差5分钟已忽略；新可靠延误变25",
+      "when": "检测升级",
+      "then": "新风险提醒并按最新条件生成候选，不重放旧解",
+      "executed": false
+    },
+    {
+      "id": "REC-04",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "不伪造预约可改",
+      "given": "餐厅可改信息缺失",
+      "when": "生成18:00预约候选",
+      "then": "标需用户外部确认，不说有位或已改成功",
+      "executed": false
+    },
+    {
+      "id": "REC-05",
+      "stage": "P4",
+      "gate": "O-05",
+      "name": "体验不硬编码",
+      "given": "晚餐90分钟压到20或60",
+      "when": "比较",
+      "then": "显示损失；无规则不武断给通用最低时长",
+      "executed": false
+    },
+    {
+      "id": "REC-06",
+      "stage": "P4",
+      "gate": "ready",
+      "name": "候选不凑数",
+      "given": "只找到1个可靠候选",
+      "when": "展示",
+      "then": "只显示1个，不编满3个",
+      "executed": false
+    },
+    {
+      "id": "EXEC-01",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "生命周期不等于事实",
+      "given": "到开始日期",
+      "when": "切进行中",
+      "then": "不自动给Visit写实际时间",
+      "executed": false
+    },
+    {
+      "id": "EXEC-02",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "未执行只能用户确认",
+      "given": "整期已过且无证据",
+      "when": "归类",
+      "then": "待确认、停监控；用户说没去才NOT_TAKEN",
+      "executed": false
+    },
+    {
+      "id": "EXEC-03",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "用户关闭监控",
+      "given": "手动关，另有固定提醒",
+      "when": "次日打开",
+      "then": "不自动重开；固定提醒继续",
+      "executed": false
+    },
+    {
+      "id": "EXEC-04",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "权限受限不同于关闭",
+      "given": "位置权限临时失效",
+      "when": "恢复权限",
+      "then": "位置相关重新同步；不改用户开关，不编中断轨迹",
+      "executed": false
+    },
+    {
+      "id": "EXEC-05",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "空白日不强记",
+      "given": "当天无计划且用户未求助",
+      "when": "整天过去",
+      "then": "不造全天自由行动；不全天定位",
+      "executed": false
+    },
+    {
+      "id": "NET-01",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "无网硬失效",
+      "given": "客户端断网",
+      "when": "打开已缓存Trip",
+      "then": "只显示不可用，不展示旧行程或离线编辑",
+      "executed": false
+    },
+    {
+      "id": "NET-02",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "恢复局部故障",
+      "given": "联网但航班接口不可用",
+      "when": "重同步",
+      "then": "核心数据恢复；航班实时未知，不无限等所有源",
+      "executed": false
+    },
+    {
+      "id": "NOTICE-01",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "用户15分钟再提醒",
+      "given": "用户选择snooze且风险持续",
+      "when": "到期",
+      "then": "仅再提醒一次；解除则取消",
+      "executed": false
+    },
+    {
+      "id": "NOTICE-02",
+      "stage": "P5",
+      "gate": "ready",
+      "name": "站内不是推送",
+      "given": "没有原生Push实现",
+      "when": "关闭测试界面",
+      "then": "不得宣称已保证锁屏关键通知",
+      "executed": false
+    }
+  ]
+}

@@ -104,8 +104,13 @@ export class PrismaStoredObjectRepository implements StoredObjectRepository {
     });
   }
 
-  async findById(id: string): Promise<StoredObjectRecord | null> {
-    const result = await this.client.storedObject.findUnique({ where: { id } });
+  async findOwnedById(input: {
+    readonly id: string;
+    readonly ownerUserId: string;
+  }): Promise<StoredObjectRecord | null> {
+    const result = await this.client.storedObject.findFirst({
+      where: { id: input.id, ownerUserId: input.ownerUserId },
+    });
     return result === null ? null : toStoredObjectRecord(result);
   }
 

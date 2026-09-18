@@ -104,14 +104,22 @@ describe('StoredObject metadata and local storage integration', () => {
     ).not.toContain('SYNTHETIC_PRIVATE_OBJECT');
   });
 
-  it('prevents both another user and ADMIN from reading an owner object', async () => {
+  it('hides an owner object from other users and ADMIN', async () => {
     const stored = await store(service, userB, 'SYNTHETIC_OWNER_B');
     await expect(service.retrieve(userA, stored.id)).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'NOT_FOUND',
     });
     await expect(service.retrieve(admin, stored.id)).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'NOT_FOUND',
     });
+    await expect(service.delete(userA, stored.id)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    await expect(service.delete(admin, stored.id)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const ownerResult = await service.retrieve(userB, stored.id);
+    expect(await collect(ownerResult.content)).toBe('SYNTHETIC_OWNER_B');
   });
 
   it('fails size mismatches without leaving a READY or partial file', async () => {

@@ -201,7 +201,10 @@ export interface StoredObjectRepository {
     readonly now: Date;
   }): Promise<StoredObjectRecord>;
   markFailed(id: string): Promise<void>;
-  findById(id: string): Promise<StoredObjectRecord | null>;
+  findOwnedById(input: {
+    readonly id: string;
+    readonly ownerUserId: string;
+  }): Promise<StoredObjectRecord | null>;
   markDeleted(input: {
     readonly id: string;
     readonly ownerUserId: string;

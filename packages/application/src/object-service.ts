@@ -166,14 +166,17 @@ export class ObjectService {
     action: 'READ_PRIVATE_RESOURCE' | 'WRITE_PRIVATE_RESOURCE',
   ): Promise<StoredObjectRecord> {
     requireUuid(objectId);
-    const object = await this.repository.findById(objectId);
+    authorize(actor, action, {
+      kind: 'PRIVATE_RESOURCE',
+      ownerUserId: actor.userId,
+    });
+    const object = await this.repository.findOwnedById({
+      id: objectId,
+      ownerUserId: actor.userId,
+    });
     if (object === null) {
       throw new ApplicationError('NOT_FOUND', '存储对象不存在。', 404);
     }
-    authorize(actor, action, {
-      kind: 'PRIVATE_RESOURCE',
-      ownerUserId: object.ownerUserId,
-    });
     return object;
   }
 }

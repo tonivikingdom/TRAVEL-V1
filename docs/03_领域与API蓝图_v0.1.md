@@ -41,7 +41,8 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 
 ## 2.1 Trip 日期范围与 DateOwnership（O-01/O-02 已确认）
 
-本节冻结 P2 实现前的产品语义；**当前没有 Trip/Day 数据表、迁移或业务 API 实现**。
+本节冻结 P2 产品语义。P2A 已建立 Trip、DateOwnership、Place、ItineraryNode 与业务 API；
+Day 仍为 projection，不建立独立表。P2B 只增加当前相邻 Transport 与 resolved 时间基础。
 
 - Trip 的有效日期范围只由有效行程内容决定：最早一个有效行程内容自然日至最晚一个有效行程内容自然日。有效内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体。
 - 编辑器通过“添加下一天/前一天”产生的首尾空白日只是临时编辑态，不属于正式范围、不建立 `DateOwnership`、不占用自然日。离开编辑且没有有效内容时自动消失；删除或移动首日/末日最后一个有效内容后，范围向内收缩，连续首尾空白日一并收缩。V1 不提供保留首尾空白日开关。
@@ -64,7 +65,10 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 - 当前预测：基于最新证据的预计结果，可失效。
 - 实际记录：已确认发生的事实，自动排程不能回写过去。
 
-`TimeValue`建议包含：`localDateTime`、`timeZone`（IANA）、可确定时的`instant`、`sourceKind`、`sourceRef`、`observedAt`、`quality`。用户地点当地时间优先展示；持续时长用真实时间点之差计算。不使用服务器默认时区解析输入。
+P2B 的 resolved `TimeValue` 权威字段为明确 `instant`、`timeZone`（IANA）、`layer`、
+`pointKind`、`sourceKind`、`sourceRef` 与 `observedAt`。`localDateTime` 由 instant + timeZone
+输出时派生，不持久化第二份时间真相；持续时长用真实时间点之差计算，不使用服务器默认时区。
+用户目标、约束、最低停留与 lock 属于后续 `UserTimeIntent / TimeConstraint`，不能塞入 TimeValue。
 
 没有Trip级统一时区；生命周期日期的调度基准不能暗用服务器UTC，参见O-03。对夏令时重复/不存在钟点、跨日期线不确定归属，返回明确歧义，而不是自动纠正成看似有效的时间。
 

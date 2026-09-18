@@ -15,14 +15,15 @@ flowchart LR
   Storage --> PrivateVolume[(Dev/Test private volume)]
   Domain[packages/domain]
   Application --> Contracts
-  Application -->|P2A Trip 用例与端口| Domain
+  Application -->|P2 Trip/Transport 用例与端口| Domain
   Persistence -->|实现端口| Application
   Worker -. P1B 起调用同一用例 .-> Application
 ```
 
 P1A 建立身份 application 和 Prisma ORM，P1B1 增加持久 Job，P1B2 增加通知与可替换的
-对象存储 port。P2A 增加 Trip application 用例与 PostgreSQL repository；Day 只在契约层投影，
-不建第二套表。Dev/Test 本地适配器不代表 Staging/Production provider 已选择。
+对象存储 port。P2A 增加 Trip application 用例与 PostgreSQL repository；P2B 在同一事务边界
+增加当前相邻 Transport、历史与 resolved 时间端口。Day 与 connection 都在契约层投影，不建
+假 Transport 或第二套日期事实。Dev/Test 本地适配器不代表 Staging/Production provider 已选择。
 
 ## 依赖规则
 
@@ -70,3 +71,12 @@ ObjectStorage 都是端口/适配器，不能直接修改未来 Trip。API 与 W
   owner advisory lock、版本校验、节点写入、有效范围与 DateOwnership reconciliation。
 - DateOwnership 是唯一日期事实；中间空白日保留 ownership，首尾空白编辑态不写数据库。
 - P2A 不引入 Transport、Provider、时间传播、生命周期自动推进或跨日移动。
+
+## P2B Transport / Temporal 边界
+
+- current Transport 只能连接整个 timeline 当前相邻的两个 PLACE_VISIT；MISSING 与 FreeAction
+  状态由 projection 表达。
+- 结构写入、精确邻接失效、历史快照、日期 reconciliation 与 version+1 共享同一事务。
+- resolved TemporalValue 强关联 Node 或 Transport，并按 PLANNED/ESTIMATED/ACTUAL 分层；
+  authoritative value 仅为 absolute instant + IANA timezone。
+- P2B 不实现 Provider、传播/反推、UserTimeIntent、风险、生命周期或任意时间 HTTP 写接口。

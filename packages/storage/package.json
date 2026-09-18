@@ -1,5 +1,5 @@
 {
-  "name": "@travel/application",
+  "name": "@travel/storage",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,10 +12,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@travel/contracts": "workspace:*",
-    "@travel/storage": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.5"

@@ -12,6 +12,16 @@ export {
   type MagicLinkEmailHandlerOptions,
 } from './magic-link-email-handler.js';
 export {
+  NotificationService,
+  type NotificationServiceOptions,
+} from './notification-service.js';
+export {
+  ObjectService,
+  type ObjectServiceConfig,
+  type ObjectServiceOptions,
+  type StoredObjectView,
+} from './object-service.js';
+export {
   CapturedMailSender,
   UnconfiguredMailSender,
   type AuthRepository,
@@ -27,7 +37,12 @@ export {
   type MagicLinkDeliveryRepository,
   type MagicLinkMail,
   type MailSender,
+  type NotificationRecord,
+  type NotificationRepository,
   type PreparedMagicLinkDelivery,
+  type StoredObjectRecord,
+  type StoredObjectRepository,
+  type StoredObjectState,
 } from './ports.js';
 export {
   createOpaqueToken,

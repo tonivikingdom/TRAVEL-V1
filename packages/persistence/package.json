@@ -22,6 +22,7 @@
     "pg": "8.23.0"
   },
   "devDependencies": {
+    "@travel/storage": "workspace:*",
     "@types/pg": "8.23.1"
   }
 }

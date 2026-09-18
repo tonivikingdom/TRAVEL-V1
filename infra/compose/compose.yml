@@ -38,6 +38,10 @@ services:
       MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS: ${MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS:-300}
       MAGIC_LINK_TTL_SECONDS: ${MAGIC_LINK_TTL_SECONDS:-900}
       MAIL_PROVIDER: ${MAIL_PROVIDER:-capture}
+      OBJECT_ALLOWED_MEDIA_TYPES: ${OBJECT_ALLOWED_MEDIA_TYPES:-application/pdf,image/jpeg,image/png,text/plain}
+      OBJECT_MAX_FILE_BYTES: ${OBJECT_MAX_FILE_BYTES:-10485760}
+      OBJECT_MAX_USER_TOTAL_BYTES: ${OBJECT_MAX_USER_TOTAL_BYTES:-104857600}
+      OBJECT_STORAGE_ROOT: /var/lib/travel-objects
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-2592000}
     healthcheck:
       test:
@@ -53,6 +57,8 @@ services:
     ports:
       - '127.0.0.1:${API_PORT}:3000'
     restart: unless-stopped
+    volumes:
+      - object-storage-data:/var/lib/travel-objects
 
   worker:
     build:
@@ -100,4 +106,5 @@ services:
     restart: 'no'
 
 volumes:
+  object-storage-data:
   postgres-data:

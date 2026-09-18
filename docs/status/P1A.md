@@ -16,7 +16,7 @@
 - main CI：[`Run 35309420185`](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35309420185)，
   `verify` 与 `Compose verification` 均为 success。
 - P1B1 持久 Job、Worker 执行框架与 Magic Link 异步邮件已获单独授权。
-- P1B2 NotificationEvent / ObjectStorage 仍未授权、未实现。
+- P1B2 NotificationEvent / ObjectStorage 已获单独授权并在功能分支实施；P2 仍未授权。
 
 ## 本轮测试基础设施修正
 
@@ -104,4 +104,4 @@
 - Production 初始化与部署未完成，也未授权。
 - 本机无 Docker/PostgreSQL，因此本机真实数据库和容器未验证；须与 CI 结果分开报告。
 - 本文记录 P1A 的历史交付范围；P1B1 的当前实施状态另见 `docs/status/P1B1.md`。
-- P1B2 NotificationEvent / ObjectStorage 与 P2～P5 仍未实现、未授权。
+- P1B2 的当前实施状态另见 `docs/status/P1B2.md`；P2～P5 仍未授权。

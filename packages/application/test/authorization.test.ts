@@ -37,6 +37,26 @@ describe('central authorization policy', () => {
     ).not.toThrow();
   });
 
+  it('allows only the owner to mutate a private resource', () => {
+    const user: Actor = {
+      ...admin,
+      userId: 'SYNTHETIC-user-id',
+      role: 'USER',
+    };
+    expect(() =>
+      authorize(user, 'WRITE_PRIVATE_RESOURCE', {
+        kind: 'PRIVATE_RESOURCE',
+        ownerUserId: user.userId,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      authorize(admin, 'WRITE_PRIVATE_RESOURCE', {
+        kind: 'PRIVATE_RESOURCE',
+        ownerUserId: user.userId,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }));
+  });
+
   it('rejects account administration by a normal user', () => {
     const user: Actor = { ...admin, role: 'USER' };
     expect(() =>

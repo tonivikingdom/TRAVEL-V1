@@ -1,8 +1,8 @@
 # Compose 运行说明
 
 Dev 与 Staging 使用同一份 Compose 定义，但必须使用各自环境文件与
-`COMPOSE_PROJECT_NAME`。这会隔离容器、网络和命名卷。所有宿主机端口只绑定
-`127.0.0.1`；P0/P1A/P1B1 不开放公网入口。Compose 会先运行一次性 `migrate` 服务，
+`COMPOSE_PROJECT_NAME`。这会隔离容器、网络和 PostgreSQL/对象存储命名卷。所有宿主机端口只绑定
+`127.0.0.1`；P0/P1A/P1B1/P1B2 不开放公网入口。Compose 会先运行一次性 `migrate` 服务，
 成功应用仓库中的 Prisma migration 后才启动 API 与 Worker。
 
 ## Dev
@@ -24,7 +24,8 @@ cp .env.staging.example .env.staging
 docker compose --env-file .env.staging -f infra/compose/compose.yml up --build -d
 ```
 
-普通 `restart`、`stop` 或重新创建容器不会删除 PostgreSQL 命名卷。不要用
+普通 `restart`、`stop` 或重新创建容器不会删除 PostgreSQL 或 Development/Test 私有对象
+命名卷。不要用
 `down --volumes` 作为日常操作；本项目没有自动 drop/reset 数据库的启动脚本。
 
 P1B1 Worker 需要 Job 租约、轮询、重试与执行超时配置。Dev 使用明确的 SYNTHETIC
@@ -36,3 +37,9 @@ Production 文件只描述配置形状。P1B1 不部署 Production，也不配�
 Git 外提供至少 32-byte、由密码学安全随机源生成并以 canonical base64url 或 hex 编码的
 `MAGIC_LINK_TOKEN_KEY`。程序校验编码与解码长度，不证明生成熵；提供真实 provider 与凭证前
 不能宣称邮件可发送。
+
+P1B2 的 API 容器挂载 `/var/lib/travel-objects` 私有命名卷；对象 key 由服务端生成，目录不映射
+到 Web public root。Compose CI 写入明确标记为 SYNTHETIC 的对象，重新创建 API 容器后核对
+文件和 PostgreSQL 元数据仍存在，再执行幂等删除并确认不可读取。Staging/Production 不启用
+Local Filesystem adapter，真实 ObjectStorage provider 仍为
+`OBJECT_STORAGE_PROVIDER_UNCONFIGURED`。

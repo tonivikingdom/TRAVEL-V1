@@ -49,6 +49,15 @@ enum StoredObjectState {
   DELETED
 }
 
+enum ItineraryNodeKind {
+  PLACE_VISIT
+  FREE_ACTION
+}
+
+enum ItineraryNodeSource {
+  USER_PLANNED
+}
+
 model User {
   id              String           @id @default(uuid()) @db.Uuid
   email           String
@@ -63,6 +72,9 @@ model User {
   preference      UserPreference?
   notifications   NotificationEvent[]
   storedObjects   StoredObject[]
+  trips           Trip[]
+  places          Place[]
+  dateOwnerships  DateOwnership[]
 
   @@index([status])
 }
@@ -197,4 +209,69 @@ model Job {
 
   @@index([status, runAt, leaseUntil])
   @@index([payloadRef])
+}
+
+model Trip {
+  id                 String            @id @default(uuid()) @db.Uuid
+  ownerUserId        String            @db.Uuid
+  name               String            @db.VarChar(200)
+  planningAnchorDate DateTime          @db.Date
+  defaultPeopleCount Int
+  version            Int               @default(1)
+  effectiveStartDate DateTime?         @db.Date
+  effectiveEndDate   DateTime?         @db.Date
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+  owner              User              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  dateOwnerships     DateOwnership[]
+  nodes              ItineraryNode[]
+
+  @@unique([id, ownerUserId])
+  @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
+}
+
+model DateOwnership {
+  ownerUserId String   @db.Uuid
+  localDate   DateTime @db.Date
+  tripId      String   @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  owner       User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip        Trip     @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@id([ownerUserId, localDate])
+  @@unique([tripId, localDate])
+  @@index([tripId, localDate])
+}
+
+model Place {
+  id          String          @id @default(uuid()) @db.Uuid
+  ownerUserId String          @db.Uuid
+  name        String          @db.VarChar(200)
+  latitude    Decimal         @db.Decimal(9, 6)
+  longitude   Decimal         @db.Decimal(9, 6)
+  address     String?         @db.VarChar(500)
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+  owner       User            @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  visits      ItineraryNode[]
+
+  @@index([ownerUserId, createdAt, id])
+}
+
+model ItineraryNode {
+  id        String              @id @default(uuid()) @db.Uuid
+  tripId    String              @db.Uuid
+  kind      ItineraryNodeKind
+  localDate DateTime            @db.Date
+  position  Int
+  placeId   String?             @db.Uuid
+  note      String?             @db.VarChar(2000)
+  source    ItineraryNodeSource @default(USER_PLANNED)
+  createdAt DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime            @updatedAt @db.Timestamptz(3)
+  trip      Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  place     Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
+
+  @@unique([tripId, localDate, position])
+  @@index([tripId, localDate, position])
+  @@index([placeId])
 }

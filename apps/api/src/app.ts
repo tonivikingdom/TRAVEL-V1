@@ -2,12 +2,15 @@ import {
   ApplicationError,
   AuthService,
   NotificationService,
+  TripService,
   isApplicationError,
 } from '@travel/application';
 import type {
   ApiErrorResponse,
   LivenessResponse,
+  PlaceInput,
   ReadinessResponse,
+  TripCommandInput,
 } from '@travel/contracts';
 import type { ReadinessProbe } from '@travel/persistence';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
@@ -21,6 +24,7 @@ export interface ApiDependencies {
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
   readonly notificationService?: NotificationService;
+  readonly tripService?: TripService;
   readonly credentialTransport?: CredentialTransport;
 }
 
@@ -123,6 +127,94 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       return requireNotificationService(dependencies).dismissNotification(
         authenticated.actor,
         request.params.id,
+      );
+    },
+  );
+
+  app.post('/trips', async (request, reply) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    const body = requiredRecord(request.body);
+    const trip = await requireTripService(dependencies).createTrip(
+      authenticated.actor,
+      {
+        name: requiredString(body, 'name'),
+        planningAnchorDate: requiredString(body, 'planningAnchorDate'),
+        defaultPeopleCount: requiredNumber(body, 'defaultPeopleCount'),
+      },
+    );
+    return reply.code(201).send(trip);
+  });
+
+  app.get('/trips', async (request) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    return {
+      trips: await requireTripService(dependencies).listTrips(
+        authenticated.actor,
+      ),
+    };
+  });
+
+  app.get<{ Params: { id: string } }>('/trips/:id', async (request) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    return requireTripService(dependencies).getTrip(
+      authenticated.actor,
+      request.params.id,
+    );
+  });
+
+  app.patch<{ Params: { id: string } }>('/trips/:id', async (request) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    const body = requiredRecord(request.body);
+    return requireTripService(dependencies).updateTrip(
+      authenticated.actor,
+      request.params.id,
+      {
+        baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+        ...(hasOwn(body, 'name') ? { name: requiredString(body, 'name') } : {}),
+        ...(hasOwn(body, 'planningAnchorDate')
+          ? {
+              planningAnchorDate: requiredString(body, 'planningAnchorDate'),
+            }
+          : {}),
+        ...(hasOwn(body, 'defaultPeopleCount')
+          ? {
+              defaultPeopleCount: requiredNumber(body, 'defaultPeopleCount'),
+            }
+          : {}),
+      },
+    );
+  });
+
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/commands',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireTripService(dependencies).executeCommand(
+        authenticated.actor,
+        request.params.id,
+        requiredNumber(body, 'baseTripVersion'),
+        parseTripCommand(body.command),
       );
     },
   );
@@ -240,11 +332,121 @@ function requireNotificationService(
   return dependencies.notificationService;
 }
 
+function requireTripService(dependencies: ApiDependencies): TripService {
+  if (dependencies.tripService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '行程服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.tripService;
+}
+
 function requiredBodyString(body: unknown, key: string): string {
   if (!isRecord(body) || typeof body[key] !== 'string') {
     throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
   }
   return body[key];
+}
+
+function requiredRecord(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
+  }
+  return value;
+}
+
+function requiredString(body: Record<string, unknown>, key: string): string {
+  if (typeof body[key] !== 'string') {
+    throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
+  }
+  return body[key];
+}
+
+function requiredNumber(body: Record<string, unknown>, key: string): number {
+  if (typeof body[key] !== 'number') {
+    throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
+  }
+  return body[key];
+}
+
+function optionalNullableString(
+  body: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = body[key];
+  if (value === null || typeof value === 'string') {
+    return value;
+  }
+  throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
+}
+
+function parseTripCommand(value: unknown): TripCommandInput {
+  const command = requiredRecord(value);
+  const type = requiredString(command, 'type');
+  switch (type) {
+    case 'ADD_PLACE_VISIT':
+      return {
+        type,
+        localDate: requiredString(command, 'localDate'),
+        position: requiredNumber(command, 'position'),
+        place: parsePlaceInput(command.place),
+        ...(hasOwn(command, 'note')
+          ? { note: optionalNullableString(command, 'note') }
+          : {}),
+      };
+    case 'ADD_FREE_ACTION':
+      return {
+        type,
+        localDate: requiredString(command, 'localDate'),
+        position: requiredNumber(command, 'position'),
+        ...(hasOwn(command, 'note')
+          ? { note: optionalNullableString(command, 'note') }
+          : {}),
+      };
+    case 'DELETE_NODE':
+      return { type, nodeId: requiredString(command, 'nodeId') };
+    case 'MOVE_NODE_WITHIN_DAY':
+      return {
+        type,
+        nodeId: requiredString(command, 'nodeId'),
+        position: requiredNumber(command, 'position'),
+      };
+    case 'REPLACE_PLACE':
+      return {
+        type,
+        nodeId: requiredString(command, 'nodeId'),
+        place: parsePlaceInput(command.place),
+      };
+    default:
+      throw new ApplicationError('VALIDATION_ERROR', '不支持的行程命令。', 400);
+  }
+}
+
+function parsePlaceInput(value: unknown): PlaceInput {
+  const place = requiredRecord(value);
+  const type = requiredString(place, 'type');
+  if (type === 'EXISTING') {
+    return { type, placeId: requiredString(place, 'placeId') };
+  }
+  if (type === 'CUSTOM') {
+    return {
+      type,
+      name: requiredString(place, 'name'),
+      latitude: requiredNumber(place, 'latitude'),
+      longitude: requiredNumber(place, 'longitude'),
+      ...(hasOwn(place, 'address')
+        ? { address: optionalNullableString(place, 'address') }
+        : {}),
+    };
+  }
+  throw new ApplicationError('VALIDATION_ERROR', '不支持的地点输入。', 400);
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function optionalPositiveInteger(

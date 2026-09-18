@@ -44,6 +44,7 @@ export interface AccountAdminUserView {
 export type ApiErrorCode =
   | 'ACCOUNT_DISABLED'
   | 'CONFLICT'
+  | 'DATE_OWNED'
   | 'FORBIDDEN'
   | 'INVALID_OR_EXPIRED_TOKEN'
   | 'NOT_FOUND'
@@ -54,8 +55,10 @@ export type ApiErrorCode =
   | 'SERVICE_UNAVAILABLE'
   | 'STORAGE_UNAVAILABLE'
   | 'UNAUTHENTICATED'
+  | 'UNSUPPORTED_SCENARIO'
   | 'UNSUPPORTED_MEDIA_TYPE'
-  | 'VALIDATION_ERROR';
+  | 'VALIDATION_ERROR'
+  | 'VERSION_CONFLICT';
 
 export interface ApiErrorResponse {
   readonly error: {

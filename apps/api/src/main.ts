@@ -1,9 +1,14 @@
-import { AuthService, NotificationService } from '@travel/application';
+import {
+  AuthService,
+  NotificationService,
+  TripService,
+} from '@travel/application';
 import {
   createPostgresReadiness,
   createPrismaClient,
   PrismaAuthRepository,
   PrismaNotificationRepository,
+  PrismaTripRepository,
   type ManagedPrismaClient,
 } from '@travel/persistence';
 
@@ -17,6 +22,7 @@ const managedProbe = createPostgresReadiness(databaseUrl);
 let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
+let tripService: TripService | undefined;
 
 if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   const authConfig = readAuthRuntimeConfig(process.env);
@@ -28,12 +34,14 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   notificationService = new NotificationService(
     new PrismaNotificationRepository(managedPrisma.client),
   );
+  tripService = new TripService(new PrismaTripRepository(managedPrisma.client));
 }
 
 const app = buildApi({
   readinessProbe: managedProbe.probe,
   ...(authService === undefined ? {} : { authService }),
   ...(notificationService === undefined ? {} : { notificationService }),
+  ...(tripService === undefined ? {} : { tripService }),
 });
 let shuttingDown = false;
 

@@ -40,6 +40,7 @@ const NOW = new Date('2030-09-01T00:00:00.000Z');
 describe('P2B transport adjacency and temporal values with PostgreSQL 17', () => {
   let managed: ManagedPrismaClient;
   let app: FastifyInstance;
+  let tripRepository: PrismaTripRepository;
   let tripService: TripService;
   let userA: SyntheticIdentity;
   let userB: SyntheticIdentity;
@@ -60,7 +61,8 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
         'ADMIN',
       ),
     ]);
-    tripService = new TripService(new PrismaTripRepository(managed.client));
+    tripRepository = new PrismaTripRepository(managed.client);
+    tripService = new TripService(tripRepository);
     app = buildApi({
       readinessProbe: {
         async check() {
@@ -422,6 +424,219 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
       '2030-10-01T02:20:00.000Z',
     );
   });
+
+  it('rejects invalid resolved times without writing or advancing Trip version', async () => {
+    const trip = await tripWithPlaces(userA, ['A']);
+    const nodeId = trip.days[0]!.nodes[0]!.id;
+    for (const input of [
+      { instant: '2030-02-30T10:00:00Z', timeZone: 'UTC' },
+      { instant: '2030-02-29T10:00:00Z', timeZone: 'Asia/Tokyo' },
+      { instant: '2030-10-01T10:00:00+15:00', timeZone: 'Asia/Shanghai' },
+      { instant: '2030-10-01T10:00:00.1234Z', timeZone: 'UTC' },
+      { instant: '2030-10-01T10:00:00Z', timeZone: '+08:00' },
+      { instant: '2030-10-01T10:00:00Z', timeZone: 'Not/A_Zone' },
+    ]) {
+      await expect(
+        tripService.setResolvedTemporalValue(
+          userA.actor,
+          trip.id,
+          trip.version,
+          { type: 'NODE', nodeId },
+          {
+            layer: 'PLANNED',
+            pointKind: 'ARRIVAL',
+            instant: input.instant,
+            timeZone: input.timeZone,
+            sourceKind: 'USER_VALUE',
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    }
+    expect(await managed.client.temporalValue.count()).toBe(0);
+    expect((await getTrip(userA, trip.id)).version).toBe(trip.version);
+  });
+
+  it('protects a Node ACTUAL from delete or place replacement atomically', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    trip = await setTransport(userA, trip, 0, 1);
+    const nodeB = nodeNamed(trip, 'B');
+    trip = await setTime(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      'ACTUAL',
+      '10:12:00',
+    );
+    const protectedVersion = trip.version;
+    const transportId = trip.connections[0]!.transport!.id;
+
+    for (const command of [
+      { type: 'DELETE_NODE', nodeId: nodeB.id },
+      {
+        type: 'REPLACE_PLACE',
+        nodeId: nodeB.id,
+        place: customPlace('X'),
+      },
+    ]) {
+      const response = await commandResponse(
+        userA,
+        trip.id,
+        protectedVersion,
+        command,
+      );
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code).toBe('FACT_PROTECTED');
+    }
+
+    trip = await getTrip(userA, trip.id);
+    expect(trip.version).toBe(protectedVersion);
+    expect(nodeNames(trip)).toEqual(['A', 'B']);
+    expect(trip.connections[0]!.transport!.id).toBe(transportId);
+    expect(await history(userA, trip.id)).toEqual([]);
+    expect(await managed.client.dateOwnership.count()).toBe(1);
+    expect(
+      await managed.client.temporalValue.count({
+        where: { nodeId: nodeB.id, layer: 'ACTUAL' },
+      }),
+    ).toBe(1);
+  });
+
+  it('rejects different ACTUAL overwrites on both Node and Transport', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    trip = await setTransport(userA, trip, 0, 1);
+    const nodeId = trip.days[0]!.nodes[0]!.id;
+    const edgeId = trip.connections[0]!.transport!.id;
+
+    for (const subject of [
+      { type: 'NODE' as const, nodeId },
+      { type: 'TRANSPORT' as const, transportEdgeId: edgeId },
+    ]) {
+      trip = await setTime(userA, trip, subject, 'ACTUAL', '10:12:00');
+      const protectedVersion = trip.version;
+      await expect(
+        tripService.setResolvedTemporalValue(
+          userA.actor,
+          trip.id,
+          trip.version,
+          subject,
+          {
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: '2030-10-01T10:13:00+08:00',
+            timeZone: 'Asia/Shanghai',
+            sourceKind: 'PROVIDER_OBSERVATION',
+            sourceRef: 'SYNTHETIC_P2B_CORRECTION',
+            observedAt: '2030-10-01T10:14:00+08:00',
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'FACT_PROTECTED' });
+      trip = await getTrip(userA, trip.id);
+      expect(trip.version).toBe(protectedVersion);
+    }
+    expect(
+      await managed.client.temporalValue.count({ where: { layer: 'ACTUAL' } }),
+    ).toBe(2);
+  });
+
+  it.each(['DERIVED', 'SYSTEM_SUGGESTION'] as const)(
+    'rejects %s ACTUAL without persistence or version change',
+    async (sourceKind) => {
+      const trip = await tripWithPlaces(userA, ['A']);
+      await expect(
+        tripService.setResolvedTemporalValue(
+          userA.actor,
+          trip.id,
+          trip.version,
+          { type: 'NODE', nodeId: trip.days[0]!.nodes[0]!.id },
+          {
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: '2030-10-01T10:00:00Z',
+            timeZone: 'UTC',
+            sourceKind,
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      const repositoryResult = await tripRepository.setTemporalValue({
+        ownerUserId: userA.actor.userId,
+        tripId: trip.id,
+        baseTripVersion: trip.version,
+        subject: { type: 'NODE', nodeId: trip.days[0]!.nodes[0]!.id },
+        value: {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: new Date('2030-10-01T10:00:00.000Z'),
+          timeZone: 'UTC',
+          sourceKind,
+          sourceRef: null,
+          observedAt: null,
+        },
+      });
+      expect(repositoryResult.status).toBe('FACT_PROTECTED');
+      expect(await managed.client.temporalValue.count()).toBe(0);
+      expect((await getTrip(userA, trip.id)).version).toBe(trip.version);
+    },
+  );
+
+  it.each(['DELETE_NODE', 'REPLACE_PLACE'] as const)(
+    'serializes concurrent ACTUAL write and %s without losing a committed fact',
+    async (commandType) => {
+      const trip = await tripWithPlaces(userA, ['A']);
+      const node = trip.days[0]!.nodes[0]!;
+      const actualWrite = tripService
+        .setResolvedTemporalValue(
+          userA.actor,
+          trip.id,
+          trip.version,
+          { type: 'NODE', nodeId: node.id },
+          {
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: '2030-10-01T10:00:00Z',
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+          },
+        )
+        .then(
+          () => true,
+          () => false,
+        );
+      const structuralWrite = commandResponse(
+        userA,
+        trip.id,
+        trip.version,
+        commandType === 'DELETE_NODE'
+          ? { type: commandType, nodeId: node.id }
+          : {
+              type: commandType,
+              nodeId: node.id,
+              place: customPlace('X'),
+            },
+      );
+      const [actualSucceeded, response] = await Promise.all([
+        actualWrite,
+        structuralWrite,
+      ]);
+      const structuralSucceeded = response.statusCode === 200;
+      expect(Number(actualSucceeded) + Number(structuralSucceeded)).toBe(1);
+
+      const persistedNode = await managed.client.itineraryNode.findUnique({
+        where: { id: node.id },
+        include: { temporalValues: true, place: true },
+      });
+      if (actualSucceeded) {
+        expect(response.statusCode).toBe(409);
+        expect(persistedNode?.temporalValues).toHaveLength(1);
+        expect(persistedNode?.place?.name).toBe('A');
+      } else if (commandType === 'DELETE_NODE') {
+        expect(persistedNode).toBeNull();
+      } else {
+        expect(persistedNode?.temporalValues).toEqual([]);
+        expect(persistedNode?.place?.name).toBe('X');
+      }
+      expect((await getTrip(userA, trip.id)).version).toBe(trip.version + 1);
+    },
+  );
 
   it('requires explicit instants and IANA zones without using server timezone', async () => {
     const trip = await tripWithPlaces(userA, ['A']);

@@ -200,6 +200,120 @@ describe('TripService', () => {
     ).rejects.toMatchObject({ code: 'UNSUPPORTED_SCENARIO' });
   });
 
+  it.each([
+    '2030-02-30T10:00:00Z',
+    '2030-02-29T10:00:00Z',
+    '2030-01-01T10:00:00+15:00',
+    '2030-01-01T10:00:00.1234Z',
+  ])(
+    'rejects invalid or over-precise resolved instants: %s',
+    async (instant) => {
+      await expect(
+        service.setResolvedTemporalValue(
+          actor,
+          tripId,
+          1,
+          { type: 'NODE', nodeId: randomUUID() },
+          {
+            layer: 'PLANNED',
+            pointKind: 'ARRIVAL',
+            instant,
+            timeZone: 'Asia/Shanghai',
+            sourceKind: 'USER_VALUE',
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(repository.setTemporalValue).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses the same strict parser for observedAt', async () => {
+    await expect(
+      service.setResolvedTemporalValue(
+        actor,
+        tripId,
+        1,
+        { type: 'NODE', nodeId: randomUUID() },
+        {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: '2032-02-29T10:00:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'PROVIDER_OBSERVATION',
+          observedAt: '2030-02-30T10:00:00Z',
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(repository.setTemporalValue).not.toHaveBeenCalled();
+  });
+
+  it.each(['Asia/Tokyo', 'Asia/Shanghai', 'UTC'])(
+    'accepts an explicitly supported IANA zone: %s',
+    async (timeZone) => {
+      vi.mocked(repository.setTemporalValue).mockResolvedValue({
+        status: 'SUCCESS',
+        trip: emptyTripForId(),
+      });
+      await service.setResolvedTemporalValue(
+        actor,
+        tripId,
+        1,
+        { type: 'NODE', nodeId: randomUUID() },
+        {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2032-02-29T10:00:00Z',
+          timeZone,
+          sourceKind: 'USER_VALUE',
+        },
+      );
+    },
+  );
+
+  it.each(['+08:00', 'Not/A_Zone'])(
+    'rejects a non-IANA timeZone field: %s',
+    async (timeZone) => {
+      await expect(
+        service.setResolvedTemporalValue(
+          actor,
+          tripId,
+          1,
+          { type: 'NODE', nodeId: randomUUID() },
+          {
+            layer: 'PLANNED',
+            pointKind: 'ARRIVAL',
+            instant: '2032-02-29T10:00:00Z',
+            timeZone,
+            sourceKind: 'USER_VALUE',
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(repository.setTemporalValue).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['DERIVED', 'SYSTEM_SUGGESTION'] as const)(
+    'rejects %s as an ACTUAL source before persistence',
+    async (sourceKind) => {
+      await expect(
+        service.setResolvedTemporalValue(
+          actor,
+          tripId,
+          1,
+          { type: 'NODE', nodeId: randomUUID() },
+          {
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: '2032-02-29T10:00:00Z',
+            timeZone: 'UTC',
+            sourceKind,
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(repository.setTemporalValue).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects invalid custom Place coordinates before persistence', async () => {
     await expect(
       service.executeCommand(actor, tripId, 1, {
@@ -220,6 +334,7 @@ describe('TripService', () => {
   it.each([
     ['VERSION_CONFLICT', 'VERSION_CONFLICT'],
     ['DATE_OWNED', 'DATE_OWNED'],
+    ['FACT_PROTECTED', 'FACT_PROTECTED'],
     ['NOT_FOUND', 'NOT_FOUND'],
   ] as const)(
     'maps repository %s without leaking database errors',

@@ -42,6 +42,13 @@ enum MagicLinkDeliveryStatus {
   NOOP
 }
 
+enum StoredObjectState {
+  PENDING
+  READY
+  FAILED
+  DELETED
+}
+
 model User {
   id              String           @id @default(uuid()) @db.Uuid
   email           String
@@ -54,8 +61,45 @@ model User {
   magicLinkTokens MagicLinkToken[]
   sessions        Session[]
   preference      UserPreference?
+  notifications   NotificationEvent[]
+  storedObjects   StoredObject[]
 
   @@index([status])
+}
+
+model NotificationEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  ownerUserId String    @db.Uuid
+  kind        String    @db.VarChar(100)
+  dedupeKey   String    @db.VarChar(200)
+  title       String    @db.VarChar(200)
+  body        String    @db.VarChar(4000)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  occurredAt  DateTime  @db.Timestamptz(3)
+  dismissedAt DateTime? @db.Timestamptz(3)
+  owner       User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerUserId, dedupeKey])
+  @@index([ownerUserId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([ownerUserId, dismissedAt])
+}
+
+model StoredObject {
+  id               String            @id @default(uuid()) @db.Uuid
+  ownerUserId      String            @db.Uuid
+  storageKey       String            @unique @db.VarChar(64)
+  state            StoredObjectState @default(PENDING)
+  displayName      String            @db.VarChar(255)
+  mediaType        String            @db.VarChar(127)
+  declaredByteSize BigInt
+  byteSize         BigInt?
+  sha256           String?           @db.VarChar(64)
+  createdAt        DateTime          @default(now()) @db.Timestamptz(3)
+  readyAt          DateTime?         @db.Timestamptz(3)
+  deletedAt        DateTime?         @db.Timestamptz(3)
+  owner            User              @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, state, createdAt])
 }
 
 model Invitation {

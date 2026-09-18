@@ -1,6 +1,7 @@
 import {
   ApplicationError,
   AuthService,
+  NotificationService,
   isApplicationError,
 } from '@travel/application';
 import type {
@@ -19,6 +20,7 @@ import {
 export interface ApiDependencies {
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
+  readonly notificationService?: NotificationService;
   readonly credentialTransport?: CredentialTransport;
 }
 
@@ -88,6 +90,42 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     );
     return authenticated.user;
   });
+
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>(
+    '/notifications',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const limit = optionalPositiveInteger(request.query.limit);
+      return requireNotificationService(dependencies).listNotifications(
+        authenticated.actor,
+        {
+          ...(limit === undefined ? {} : { limit }),
+          ...(request.query.cursor === undefined
+            ? {}
+            : { cursor: request.query.cursor }),
+        },
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/notifications/:id/dismiss',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireNotificationService(dependencies).dismissNotification(
+        authenticated.actor,
+        request.params.id,
+      );
+    },
+  );
 
   app.post('/admin/invitations', async (request, reply) => {
     const authenticated = await authenticate(
@@ -188,11 +226,41 @@ function requireAuthService(dependencies: ApiDependencies): AuthService {
   return dependencies.authService;
 }
 
+function requireNotificationService(
+  dependencies: ApiDependencies,
+): NotificationService {
+  if (dependencies.notificationService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '通知服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.notificationService;
+}
+
 function requiredBodyString(body: unknown, key: string): string {
   if (!isRecord(body) || typeof body[key] !== 'string') {
     throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
   }
   return body[key];
+}
+
+function optionalPositiveInteger(
+  value: string | undefined,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!/^[1-9]\d*$/u.test(value)) {
+    throw new ApplicationError('VALIDATION_ERROR', '分页大小无效。', 400);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new ApplicationError('VALIDATION_ERROR', '分页大小无效。', 400);
+  }
+  return parsed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

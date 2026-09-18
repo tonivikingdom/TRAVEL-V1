@@ -17,3 +17,7 @@ export type {
   UserStatus,
   UserView,
 } from './auth.js';
+export type {
+  NotificationListResponse,
+  NotificationView,
+} from './notifications.js';

@@ -654,6 +654,8 @@ class FailAfterCaptureMailSender implements MailSender {
 }
 
 async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
+  await managed.client.notificationEvent.deleteMany();
+  await managed.client.storedObject.deleteMany();
   await managed.client.magicLinkRequestBucket.deleteMany();
   await managed.client.job.deleteMany();
   await managed.client.session.deleteMany();

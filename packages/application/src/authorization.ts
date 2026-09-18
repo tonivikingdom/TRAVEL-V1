@@ -15,7 +15,8 @@ export type AuthAction =
   | 'DISABLE_USER'
   | 'ENABLE_USER'
   | 'REVOKE_USER_SESSIONS'
-  | 'READ_PRIVATE_RESOURCE';
+  | 'READ_PRIVATE_RESOURCE'
+  | 'WRITE_PRIVATE_RESOURCE';
 
 export type AuthorizationResource =
   | { readonly kind: 'ACCOUNT_ADMINISTRATION' }
@@ -40,7 +41,8 @@ export function authorize(
       accountAdministrationActions.has(action) &&
       actor.role === 'ADMIN') ||
       (resource.kind === 'PRIVATE_RESOURCE' &&
-        action === 'READ_PRIVATE_RESOURCE' &&
+        (action === 'READ_PRIVATE_RESOURCE' ||
+          action === 'WRITE_PRIVATE_RESOURCE') &&
         resource.ownerUserId === actor.userId));
 
   if (!allowed) {

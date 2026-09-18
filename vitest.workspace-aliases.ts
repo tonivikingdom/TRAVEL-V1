@@ -14,4 +14,7 @@ export const workspaceSourceAliases = {
   '@travel/persistence': fileURLToPath(
     new URL('./packages/persistence/src/index.ts', import.meta.url),
   ),
+  '@travel/storage': fileURLToPath(
+    new URL('./packages/storage/src/index.ts', import.meta.url),
+  ),
 };

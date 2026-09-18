@@ -133,6 +133,82 @@ export interface MailSender {
   sendMagicLink(mail: MagicLinkMail): Promise<void>;
 }
 
+export interface NotificationRecord {
+  readonly id: string;
+  readonly ownerUserId: string;
+  readonly kind: string;
+  readonly dedupeKey: string;
+  readonly title: string;
+  readonly body: string;
+  readonly occurredAt: Date;
+  readonly createdAt: Date;
+  readonly dismissedAt: Date | null;
+}
+
+export interface NotificationRepository {
+  create(input: {
+    readonly ownerUserId: string;
+    readonly kind: string;
+    readonly dedupeKey: string;
+    readonly title: string;
+    readonly body: string;
+    readonly occurredAt: Date;
+  }): Promise<NotificationRecord>;
+  list(input: {
+    readonly ownerUserId: string;
+    readonly limit: number;
+    readonly before?: { readonly createdAt: Date; readonly id: string };
+  }): Promise<readonly NotificationRecord[]>;
+  dismissOwned(input: {
+    readonly ownerUserId: string;
+    readonly notificationId: string;
+    readonly now: Date;
+  }): Promise<NotificationRecord | null>;
+}
+
+export type StoredObjectState = 'PENDING' | 'READY' | 'FAILED' | 'DELETED';
+
+export interface StoredObjectRecord {
+  readonly id: string;
+  readonly ownerUserId: string;
+  readonly storageKey: string;
+  readonly state: StoredObjectState;
+  readonly displayName: string;
+  readonly mediaType: string;
+  readonly declaredByteSize: number;
+  readonly byteSize: number | null;
+  readonly sha256: string | null;
+  readonly createdAt: Date;
+  readonly readyAt: Date | null;
+  readonly deletedAt: Date | null;
+}
+
+export interface StoredObjectRepository {
+  reserve(input: {
+    readonly id: string;
+    readonly ownerUserId: string;
+    readonly storageKey: string;
+    readonly displayName: string;
+    readonly mediaType: string;
+    readonly declaredByteSize: number;
+    readonly maxUserTotalBytes: number;
+    readonly now: Date;
+  }): Promise<StoredObjectRecord>;
+  markReady(input: {
+    readonly id: string;
+    readonly byteSize: number;
+    readonly sha256: string;
+    readonly now: Date;
+  }): Promise<StoredObjectRecord>;
+  markFailed(id: string): Promise<void>;
+  findById(id: string): Promise<StoredObjectRecord | null>;
+  markDeleted(input: {
+    readonly id: string;
+    readonly ownerUserId: string;
+    readonly now: Date;
+  }): Promise<StoredObjectRecord | null>;
+}
+
 export interface CapturedMail extends MagicLinkMail {
   readonly kind: 'SYNTHETIC_MAGIC_LINK';
 }

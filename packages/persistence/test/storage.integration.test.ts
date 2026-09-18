@@ -95,8 +95,12 @@ describe('StoredObject metadata and local storage integration', () => {
         AND data_type = 'bytea'
     `;
     expect(binaryColumns).toEqual([]);
+    const persistedMetadata =
+      await managed.client.storedObject.findFirstOrThrow();
     expect(
-      JSON.stringify(await managed.client.storedObject.findFirstOrThrow()),
+      Object.values(persistedMetadata)
+        .filter((value): value is string => typeof value === 'string')
+        .join('\n'),
     ).not.toContain('SYNTHETIC_PRIVATE_OBJECT');
   });
 

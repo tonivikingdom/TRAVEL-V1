@@ -13,3 +13,4 @@ Thumbs.db
 .vscode/
 infra/compose/data/
 infra/compose/worker-heartbeat/
+infra/compose/mail-capture/

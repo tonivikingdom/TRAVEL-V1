@@ -6,6 +6,8 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface WorkerRuntimeDependencies {
   readonly heartbeat: () => Promise<void>;
+  readonly startJobs?: () => Promise<void>;
+  readonly stopJobs?: () => Promise<void>;
   readonly close: () => Promise<void>;
   readonly intervalMs: number;
   readonly shutdownTimeoutMs?: number;
@@ -107,6 +109,12 @@ export function createWorkerRuntime(
           return;
         }
 
+        await dependencies.startJobs?.();
+        if (currentState !== 'STARTING') {
+          await dependencies.stopJobs?.();
+          return;
+        }
+
         timer = schedule(scheduleHeartbeat, dependencies.intervalMs);
         currentState = 'RUNNING';
       } catch (error) {
@@ -149,6 +157,7 @@ export function createWorkerRuntime(
         timer = undefined;
       }
 
+      await dependencies.stopJobs?.();
       await waitForInFlight();
       try {
         await dependencies.close();

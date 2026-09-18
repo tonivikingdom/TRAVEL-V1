@@ -81,6 +81,26 @@ function composeCommand(envFile, project) {
   };
 }
 
+function quietComposeCommand(envFile, project) {
+  return async (...args) => {
+    const { stdout } = await execFileAsync(
+      'docker',
+      [
+        'compose',
+        '--project-name',
+        project,
+        '--env-file',
+        envFile,
+        '--file',
+        composeFile,
+        ...args,
+      ],
+      { cwd: repoRoot, timeout: defaultTimeoutMs, maxBuffer: 2 * 1024 * 1024 },
+    );
+    return stdout;
+  };
+}
+
 async function serviceContainerId(compose, service) {
   const output = await compose('ps', '--quiet', service);
   return output.trim().split(/\s+/u)[0] ?? '';
@@ -165,7 +185,7 @@ async function checkEnvironmentIsolation() {
   );
 }
 
-async function verifyCompose(compose, env) {
+async function verifyCompose(compose, composeQuiet, env) {
   const apiPort = env.API_PORT;
   const databaseUser = env.POSTGRES_USER;
   const databaseName = env.POSTGRES_DB;
@@ -190,6 +210,127 @@ async function verifyCompose(compose, env) {
     'Worker health',
     async () => (await serviceHealth(compose, 'worker')) === 'healthy',
   );
+
+  const adminEmail = 'synthetic-compose-admin@synthetic.example.test';
+  await compose(
+    'exec',
+    '--no-TTY',
+    '-e',
+    'ADMIN_BOOTSTRAP_ALLOWED=true',
+    '-e',
+    'BOOTSTRAP_ADMIN_EMAIL=synthetic-compose-admin@synthetic.example.test',
+    'api',
+    'pnpm',
+    'bootstrap:admin',
+  );
+  const requestResponse = await fetch(
+    `http://127.0.0.1:${apiPort}/auth/magic-link/request`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail }),
+    },
+  );
+  if (requestResponse.status !== 202) {
+    throw new Error('Synthetic Magic Link request did not return 202');
+  }
+  await waitFor(
+    'Worker consumption of the synthetic Magic Link job',
+    async () => {
+      const output = await composeQuiet(
+        'exec',
+        '--no-TTY',
+        'postgres',
+        'psql',
+        '-tA',
+        '-U',
+        databaseUser,
+        '-d',
+        databaseName,
+        '-c',
+        `SELECT count(*) FROM "Job" WHERE "type" = 'MAGIC_LINK_EMAIL' AND "status" = 'SUCCEEDED';`,
+      );
+      return output.trim() === '1';
+    },
+  );
+  const captured = await composeQuiet(
+    'exec',
+    '--no-TTY',
+    'worker',
+    'cat',
+    '/tmp/travel-mail-capture/messages.ndjson',
+  );
+  const capturedMail = JSON.parse(captured.trim().split(/\r?\n/u).at(-1));
+  const token = new URL(capturedMail.magicLink).hash.match(
+    /^#token=([A-Za-z0-9_-]{40,100})$/u,
+  )?.[1];
+  if (
+    token === undefined ||
+    new URL(capturedMail.magicLink).searchParams.has('token')
+  ) {
+    throw new Error(
+      'Synthetic capture did not contain the expected fragment credential',
+    );
+  }
+  const consumeResponse = await fetch(
+    `http://127.0.0.1:${apiPort}/auth/magic-link/consume`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    },
+  );
+  if (consumeResponse.status !== 200) {
+    throw new Error('Worker-delivered synthetic Magic Link was not consumable');
+  }
+
+  await compose('stop', '--timeout', '10', 'worker');
+  const recoveryKey = `synthetic-lease-recovery-${Date.now()}`;
+  await compose(
+    'exec',
+    '--no-TTY',
+    'postgres',
+    'psql',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-U',
+    databaseUser,
+    '-d',
+    databaseName,
+    '-c',
+    `WITH delivery AS (
+       INSERT INTO "MagicLinkDeliveryRequest"
+         ("id", "normalizedEmail", "requestedEmail", "requestedAt", "status")
+       VALUES
+         (gen_random_uuid(), 'synthetic-lease-unknown@synthetic.example.test',
+          'synthetic-lease-unknown@synthetic.example.test', clock_timestamp(), 'PENDING')
+       RETURNING "id"
+     )
+     INSERT INTO "Job"
+       ("id", "type", "status", "runAt", "attempts", "maxAttempts",
+        "leaseOwner", "leaseUntil", "uniqueKey", "payloadRef", "updatedAt")
+     SELECT gen_random_uuid(), 'MAGIC_LINK_EMAIL', 'RUNNING', clock_timestamp(), 1, 5,
+            'synthetic-crashed-worker', clock_timestamp() + interval '3 seconds',
+            '${recoveryKey}', "id", clock_timestamp()
+     FROM delivery;`,
+  );
+  await compose('start', 'worker');
+  await waitFor('lease recovery after Worker restart', async () => {
+    const output = await composeQuiet(
+      'exec',
+      '--no-TTY',
+      'postgres',
+      'psql',
+      '-tA',
+      '-U',
+      databaseUser,
+      '-d',
+      databaseName,
+      '-c',
+      `SELECT "status" FROM "Job" WHERE "uniqueKey" = '${recoveryKey}';`,
+    );
+    return output.trim() === 'SUCCEEDED';
+  });
 
   const marker = `SYNTHETIC_P0_${Date.now()}`;
   await compose(
@@ -300,7 +441,7 @@ async function verifyCompose(compose, env) {
   );
 
   process.stdout.write(
-    'Compose verification passed: live/ready, outage/recovery, worker SIGTERM, and named-volume persistence.\n',
+    'Compose verification passed: live/ready, async Job delivery, lease recovery, outage/recovery, worker SIGTERM, and named-volume persistence.\n',
   );
 }
 
@@ -308,10 +449,11 @@ const envFile = path.resolve(readOption('--env-file'));
 const env = parseEnvFile(await readFile(envFile, 'utf8'));
 const project = projectName();
 const compose = composeCommand(envFile, project);
+const composeQuiet = quietComposeCommand(envFile, project);
 
 try {
   await checkEnvironmentIsolation();
-  await verifyCompose(compose, env);
+  await verifyCompose(compose, composeQuiet, env);
 } catch (error) {
   process.stderr.write(
     `Compose verification failed: ${error instanceof Error ? error.message : 'UnknownError'}\n`,

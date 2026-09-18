@@ -1,23 +1,61 @@
 import { writeFile } from 'node:fs/promises';
 
-import { createPostgresReadiness } from '@travel/persistence';
+import {
+  MagicLinkEmailHandler,
+  UnconfiguredMailSender,
+} from '@travel/application';
+import {
+  createPostgresReadiness,
+  createPrismaClient,
+  PrismaJobRepository,
+  PrismaMagicLinkDeliveryRepository,
+} from '@travel/persistence';
 
+import { readWorkerConfig } from './config.js';
+import { FileCapturedMailSender } from './file-captured-mail-sender.js';
 import { createWorkerHeartbeat } from './heartbeat.js';
+import { createJobRunner } from './job-runner.js';
 import { createWorkerRuntime } from './runtime.js';
 
-const heartbeatFile =
-  process.env.WORKER_HEARTBEAT_FILE ?? '/tmp/travel-worker-heartbeat.json';
-const intervalMs = Number.parseInt(
-  process.env.WORKER_HEARTBEAT_INTERVAL_MS ?? '10000',
-  10,
+const config = readWorkerConfig(process.env);
+const managedProbe = createPostgresReadiness(config.databaseUrl);
+const managedPrisma = createPrismaClient(config.databaseUrl);
+const jobRepository = new PrismaJobRepository(managedPrisma.client);
+const mailSender =
+  config.mailProvider === 'capture'
+    ? new FileCapturedMailSender(config.mailCaptureFile)
+    : new UnconfiguredMailSender();
+const magicLinkHandler = new MagicLinkEmailHandler(
+  new PrismaMagicLinkDeliveryRepository(managedPrisma.client),
+  mailSender,
+  {
+    landingUrl: config.magicLinkLandingUrl,
+    tokenKey: config.magicLinkTokenKey,
+    tokenTtlSeconds: config.magicLinkTtlSeconds,
+  },
 );
-const managedProbe = createPostgresReadiness(process.env.DATABASE_URL);
+const jobRunner = createJobRunner({
+  repository: jobRepository,
+  handlers: {
+    MAGIC_LINK_EMAIL: {
+      execute: (payloadRef, signal) =>
+        magicLinkHandler.execute(payloadRef, signal),
+    },
+  },
+  workerId: config.workerId,
+  config: config.runner,
+  onError(event) {
+    process.stderr.write(
+      `${JSON.stringify({ service: 'worker', event: 'job_error', ...event })}\n`,
+    );
+  },
+});
 
 async function heartbeat(): Promise<void> {
   const database = await managedProbe.probe.check();
   const payload = createWorkerHeartbeat(database, new Date());
 
-  await writeFile(heartbeatFile, JSON.stringify(payload), {
+  await writeFile(config.heartbeatFile, JSON.stringify(payload), {
     encoding: 'utf8',
     flag: 'w',
   });
@@ -26,8 +64,13 @@ async function heartbeat(): Promise<void> {
 
 const runtime = createWorkerRuntime({
   heartbeat,
-  close: () => managedProbe.close(),
-  intervalMs,
+  startJobs: () => jobRunner.start(),
+  stopJobs: () => jobRunner.stop(),
+  close: async () => {
+    await Promise.all([managedProbe.close(), managedPrisma.close()]);
+  },
+  intervalMs: config.heartbeatIntervalMs,
+  shutdownTimeoutMs: config.runner.shutdownTimeoutMs,
   onStopping: (signal) => {
     process.stdout.write(
       `${JSON.stringify({ service: 'worker', event: 'stopping', signal })}\n`,

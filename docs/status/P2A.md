@@ -8,8 +8,7 @@
 - 推荐模型 / 强度：GPT-5.6 Sol / Extra High
 - 备选：GPT-5.6 Luna / Max
 - 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
-- P2B 已获单独授权并在 `feature/p2b-transport-temporal` 实施；P3、正式 UI、Provider 与
-  Production 均未授权
+- P2B 已通过 PR #7 合并 main；P3/P4 代码、正式 UI、Provider 与 Production 均未授权
 
 ## 数据与事务
 
@@ -44,6 +43,7 @@ owner 只来自 Session actor。普通用户与 ADMIN 均不能读取或修改�
 
 ## 停止点
 
-O-03 与 O-07 仍未解决。P2A 本身不支持跨午夜/跨时区高级 Day 投影、自动生命周期、
-Transport、时间传播、跨日移动、Trip merge/copy/share、Undo、Provider 或正式 UI；Transport
-与 resolved 三层时间基础只在后续单独授权的 P2B 分支实施。
+O-03 与 O-07 后续已在产品规则层面解决，但 P2A 本身仍不支持跨午夜/跨时区高级 Day 投影、
+自动生命周期、Transport、时间传播、跨日移动、Trip merge/copy/share、Undo、Provider 或正式
+UI；Transport 与 resolved 三层时间基础由后续已合并的 P2B 实现。产品规则解决不等于这些能力
+已在 P2A/P2B 完成。

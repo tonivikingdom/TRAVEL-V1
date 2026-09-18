@@ -131,7 +131,7 @@ describe('P3A populated database migration', () => {
             VALUES
               ('30000000-0000-4000-8000-000000000004',
                '10000000-0000-4000-8000-000000000002',
-               '${occurrences.rows[0]!.id}', 'FREE_ACTION', 0, 'cross-trip', CURRENT_TIMESTAMP)
+               '${occurrences.rows[0]!.id}', 'FREE_ACTION', 99, 'cross-trip', CURRENT_TIMESTAMP)
           `),
         ).rejects.toMatchObject({ code: '23503' });
       } finally {

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@travel/contracts": "workspace:*",
+    "@travel/domain": "workspace:*",
     "@travel/storage": "workspace:*"
   },
   "devDependencies": {

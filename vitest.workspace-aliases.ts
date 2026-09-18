@@ -11,6 +11,9 @@ export const workspaceSourceAliases = {
   '@travel/contracts': fileURLToPath(
     new URL('./packages/contracts/src/index.ts', import.meta.url),
   ),
+  '@travel/domain': fileURLToPath(
+    new URL('./packages/domain/src/index.ts', import.meta.url),
+  ),
   '@travel/persistence': fileURLToPath(
     new URL('./packages/persistence/src/index.ts', import.meta.url),
   ),

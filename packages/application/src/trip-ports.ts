@@ -169,6 +169,7 @@ export type TripMutationResult =
         | 'NOT_FOUND'
         | 'VERSION_CONFLICT'
         | 'DATE_OWNED'
+        | 'FACT_PROTECTED'
         | 'INVALID_POSITION'
         | 'INVALID_COMMAND'
         | 'NOT_ADJACENT'

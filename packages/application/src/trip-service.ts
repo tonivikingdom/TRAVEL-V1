@@ -13,6 +13,7 @@ import type {
   TripCommandInput,
   TripView,
 } from '@travel/contracts';
+import { AbsoluteInstantError, parseAbsoluteIsoInstant } from '@travel/domain';
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
@@ -268,6 +269,12 @@ function mutationResultToView(result: TripMutationResult): TripView {
       );
     case 'DATE_OWNED':
       throw new ApplicationError('DATE_OWNED', '该日期已属于另一趟行程。', 409);
+    case 'FACT_PROTECTED':
+      throw new ApplicationError(
+        'FACT_PROTECTED',
+        '已有实际时间事实，必须通过未来的显式纠错流程修改。',
+        409,
+      );
     case 'INVALID_POSITION':
       throw new ApplicationError(
         'VALIDATION_ERROR',
@@ -590,6 +597,16 @@ function validateTemporalValue(
   ) {
     throw new ApplicationError('VALIDATION_ERROR', '时间来源无效。', 400);
   }
+  if (
+    value.layer === 'ACTUAL' &&
+    (value.sourceKind === 'DERIVED' || value.sourceKind === 'SYSTEM_SUGGESTION')
+  ) {
+    throw new ApplicationError(
+      'VALIDATION_ERROR',
+      'ACTUAL 不能来自推导或系统建议。',
+      400,
+    );
+  }
   return {
     layer: value.layer,
     pointKind: value.pointKind,
@@ -605,36 +622,39 @@ function validateTemporalValue(
 }
 
 function parseAbsoluteInstant(value: string, field: string): Date {
-  if (
-    typeof value !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(
-      value,
-    )
-  ) {
-    throw new ApplicationError(
-      'UNSUPPORTED_SCENARIO',
-      `${field} 必须是带 Z 或明确 UTC offset 的绝对时刻。`,
-      400,
-    );
-  }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
+  if (typeof value !== 'string') {
     throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
   }
-  return new Date(timestamp);
+  try {
+    return parseAbsoluteIsoInstant(value, field);
+  } catch (error) {
+    if (error instanceof AbsoluteInstantError && error.reason === 'FORMAT') {
+      throw new ApplicationError(
+        'UNSUPPORTED_SCENARIO',
+        `${field} 必须是带 Z 或明确 UTC offset 的绝对时刻。`,
+        400,
+      );
+    }
+    if (error instanceof AbsoluteInstantError) {
+      throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
+    }
+    throw error;
+  }
 }
 
 function validateIanaTimeZone(value: string): string {
-  if (typeof value !== 'string' || value.length < 1 || value.length > 100) {
-    throw new ApplicationError('VALIDATION_ERROR', 'timeZone 无效。', 400);
-  }
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
-  } catch {
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 100 ||
+    (value !== 'UTC' && !SUPPORTED_IANA_TIME_ZONES.has(value))
+  ) {
     throw new ApplicationError('VALIDATION_ERROR', 'timeZone 无效。', 400);
   }
   return value;
 }
+
+const SUPPORTED_IANA_TIME_ZONES = new Set(Intl.supportedValuesOf('timeZone'));
 
 function validateTransportMode(value: TransportMode): TransportMode {
   if (

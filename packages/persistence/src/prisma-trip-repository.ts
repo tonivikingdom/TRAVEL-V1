@@ -313,6 +313,7 @@ async function applyCommand(
         input.tripId,
         input.command.nodeId,
       );
+      await assertNodeActualNotProtected(transaction, node.id);
       await archiveEndpointTransports(
         transaction,
         input.tripId,
@@ -376,6 +377,7 @@ async function applyCommand(
       if (node.kind !== 'PLACE_VISIT') {
         throw new TripTransactionAbort('INVALID_COMMAND');
       }
+      await assertNodeActualNotProtected(transaction, node.id);
       await archiveEndpointTransports(
         transaction,
         input.tripId,
@@ -570,6 +572,13 @@ async function upsertTemporalValue(
     readonly value: RepositoryTemporalValueInput;
   },
 ): Promise<void> {
+  if (
+    input.value.layer === 'ACTUAL' &&
+    (input.value.sourceKind === 'DERIVED' ||
+      input.value.sourceKind === 'SYSTEM_SUGGESTION')
+  ) {
+    throw new TripTransactionAbort('FACT_PROTECTED');
+  }
   const data = {
     layer: input.value.layer,
     pointKind: input.value.pointKind,
@@ -587,6 +596,11 @@ async function upsertTemporalValue(
     if (node === null) {
       throw new TripTransactionAbort('NOT_FOUND');
     }
+    await assertActualWriteAllowed(transaction, {
+      nodeId: node.id,
+      transportEdgeId: null,
+      value: input.value,
+    });
     await transaction.temporalValue.upsert({
       where: {
         nodeId_pointKind_layer: {
@@ -607,6 +621,11 @@ async function upsertTemporalValue(
   if (edge === null) {
     throw new TripTransactionAbort('NOT_FOUND');
   }
+  await assertActualWriteAllowed(transaction, {
+    nodeId: null,
+    transportEdgeId: edge.id,
+    value: input.value,
+  });
   await transaction.temporalValue.upsert({
     where: {
       transportEdgeId_pointKind_layer: {
@@ -618,6 +637,62 @@ async function upsertTemporalValue(
     create: { transportEdgeId: edge.id, ...data },
     update: data,
   });
+}
+
+async function assertNodeActualNotProtected(
+  transaction: Transaction,
+  nodeId: string,
+): Promise<void> {
+  const actualCount = await transaction.temporalValue.count({
+    where: { nodeId, layer: 'ACTUAL' },
+  });
+  if (actualCount > 0) {
+    throw new TripTransactionAbort('FACT_PROTECTED');
+  }
+}
+
+async function assertActualWriteAllowed(
+  transaction: Transaction,
+  input: {
+    readonly nodeId: string | null;
+    readonly transportEdgeId: string | null;
+    readonly value: RepositoryTemporalValueInput;
+  },
+): Promise<void> {
+  if (input.value.layer !== 'ACTUAL') {
+    return;
+  }
+  const existing = await transaction.temporalValue.findFirst({
+    where: {
+      nodeId: input.nodeId,
+      transportEdgeId: input.transportEdgeId,
+      pointKind: input.value.pointKind,
+      layer: 'ACTUAL',
+    },
+  });
+  if (existing !== null && !sameTemporalFact(existing, input.value)) {
+    throw new TripTransactionAbort('FACT_PROTECTED');
+  }
+}
+
+function sameTemporalFact(
+  existing: {
+    readonly instant: Date;
+    readonly timeZone: string;
+    readonly sourceKind: RepositoryTemporalValueInput['sourceKind'];
+    readonly sourceRef: string | null;
+    readonly observedAt: Date | null;
+  },
+  value: RepositoryTemporalValueInput,
+): boolean {
+  return (
+    existing.instant.getTime() === value.instant.getTime() &&
+    existing.timeZone === value.timeZone &&
+    existing.sourceKind === value.sourceKind &&
+    existing.sourceRef === value.sourceRef &&
+    (existing.observedAt?.getTime() ?? null) ===
+      (value.observedAt?.getTime() ?? null)
+  );
 }
 
 function adjacencyKey(fromNodeId: string, toNodeId: string): string {

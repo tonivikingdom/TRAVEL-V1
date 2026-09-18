@@ -1,5 +1,44 @@
 export type ItineraryNodeKind = 'PLACE_VISIT' | 'FREE_ACTION';
 export type ItineraryNodeSource = 'USER_PLANNED';
+export type TransportMode =
+  | 'WALKING'
+  | 'DRIVING'
+  | 'TAXI'
+  | 'RAIL'
+  | 'BUS'
+  | 'FERRY'
+  | 'FLIGHT'
+  | 'OTHER';
+export type TransportSource = 'MANUAL';
+export type TransportInvalidationReason =
+  | 'ADJACENCY_CHANGED'
+  | 'ENDPOINT_REPLACED'
+  | 'NODE_DELETED'
+  | 'USER_REPLACED'
+  | 'USER_CLEARED';
+export type ConnectionState =
+  'ACTIVE' | 'MISSING' | 'NOT_APPLICABLE' | 'RUNTIME_ORIGIN_REQUIRED';
+export type TemporalLayer = 'PLANNED' | 'ESTIMATED' | 'ACTUAL';
+export type TemporalPointKind = 'ARRIVAL' | 'DEPARTURE';
+export type TemporalSourceKind =
+  | 'USER_VALUE'
+  | 'ADOPTED_TRANSPORT_FACT'
+  | 'SYSTEM_SUGGESTION'
+  | 'DERIVED'
+  | 'PROVIDER_OBSERVATION';
+
+export interface TemporalValueView {
+  readonly id: string;
+  readonly layer: TemporalLayer;
+  readonly pointKind: TemporalPointKind;
+  readonly instant: string;
+  readonly timeZone: string;
+  readonly sourceKind: TemporalSourceKind;
+  readonly sourceRef: string | null;
+  readonly observedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
 
 export interface PlaceView {
   readonly id: string;
@@ -20,6 +59,44 @@ export interface ItineraryNodeView {
   readonly source: ItineraryNodeSource;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly timeValues: readonly TemporalValueView[];
+}
+
+export interface TransportEdgeView {
+  readonly id: string;
+  readonly fromNodeId: string;
+  readonly toNodeId: string;
+  readonly mode: TransportMode;
+  readonly fixedService: boolean;
+  readonly serviceLabel: string | null;
+  readonly note: string | null;
+  readonly source: TransportSource;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly timeValues: readonly TemporalValueView[];
+}
+
+export interface TransportHistoryView {
+  readonly id: string;
+  readonly originalTransportEdgeId: string;
+  readonly originalFromNodeId: string;
+  readonly originalToNodeId: string;
+  readonly mode: TransportMode;
+  readonly fixedService: boolean;
+  readonly serviceLabel: string | null;
+  readonly note: string | null;
+  readonly source: TransportSource;
+  readonly originalCreatedAt: string;
+  readonly invalidatedAt: string;
+  readonly invalidationReason: TransportInvalidationReason;
+  readonly timeValues: readonly TemporalValueView[];
+}
+
+export interface ConnectionView {
+  readonly fromNodeId: string;
+  readonly toNodeId: string;
+  readonly state: ConnectionState;
+  readonly transport: TransportEdgeView | null;
 }
 
 export interface DayView {
@@ -38,6 +115,7 @@ export interface TripView {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly days: readonly DayView[];
+  readonly connections: readonly ConnectionView[];
 }
 
 export interface TripListResponse {
@@ -83,4 +161,31 @@ export type TripCommandInput =
       readonly type: 'REPLACE_PLACE';
       readonly nodeId: string;
       readonly place: PlaceInput;
+    }
+  | {
+      readonly type: 'SET_MANUAL_TRANSPORT';
+      readonly fromNodeId: string;
+      readonly toNodeId: string;
+      readonly mode: TransportMode;
+      readonly fixedService: boolean;
+      readonly serviceLabel?: string | null;
+      readonly note?: string | null;
+    }
+  | {
+      readonly type: 'CLEAR_TRANSPORT';
+      readonly transportEdgeId: string;
     };
+
+export type TemporalSubjectInput =
+  | { readonly type: 'NODE'; readonly nodeId: string }
+  | { readonly type: 'TRANSPORT'; readonly transportEdgeId: string };
+
+export interface ResolvedTemporalValueInput {
+  readonly layer: TemporalLayer;
+  readonly pointKind: TemporalPointKind;
+  readonly instant: string;
+  readonly timeZone: string;
+  readonly sourceKind: TemporalSourceKind;
+  readonly sourceRef?: string | null;
+  readonly observedAt?: string | null;
+}

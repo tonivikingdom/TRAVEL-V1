@@ -1,7 +1,13 @@
 import type {
   PlaceRecord,
   RepositoryPlaceInput,
+  RepositoryTemporalSubject,
+  RepositoryTemporalValueInput,
   RepositoryTripCommand,
+  TemporalValueRecord,
+  TransportEdgeRecord,
+  TransportHistoryRecord,
+  TransportInvalidationReason,
   TripAggregateRecord,
   TripMutationResult,
   TripRepository,
@@ -12,13 +18,36 @@ import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 const tripInclude = {
   dateOwnerships: { orderBy: { localDate: 'asc' } },
   nodes: {
-    include: { place: true },
+    include: {
+      place: true,
+      temporalValues: { orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }] },
+    },
     orderBy: [{ localDate: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+  },
+  transportEdges: {
+    include: {
+      temporalValues: { orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }] },
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   },
 } satisfies Prisma.TripInclude;
 
+const transportInclude = {
+  temporalValues: { orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }] },
+} satisfies Prisma.TransportEdgeInclude;
+
+const historyInclude = {
+  temporalValues: { orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }] },
+} satisfies Prisma.TransportEdgeHistoryInclude;
+
 type TripWithProjectionData = Prisma.TripGetPayload<{
   include: typeof tripInclude;
+}>;
+type TransportWithTimes = Prisma.TransportEdgeGetPayload<{
+  include: typeof transportInclude;
+}>;
+type HistoryWithTimes = Prisma.TransportEdgeHistoryGetPayload<{
+  include: typeof historyInclude;
 }>;
 type Transaction = Prisma.TransactionClient;
 type FailureStatus = Exclude<TripMutationResult['status'], 'SUCCESS'>;
@@ -147,6 +176,53 @@ export class PrismaTripRepository implements TripRepository {
       return failureResult(error);
     }
   }
+
+  async setTemporalValue(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly baseTripVersion: number;
+    readonly subject: RepositoryTemporalSubject;
+    readonly value: RepositoryTemporalValueInput;
+  }): Promise<TripMutationResult> {
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        await lockOwner(transaction, input.ownerUserId);
+        await requireLockedTrip(transaction, input);
+        await upsertTemporalValue(transaction, input);
+        await transaction.trip.update({
+          where: { id: input.tripId },
+          data: { version: { increment: 1 } },
+        });
+        return {
+          status: 'SUCCESS',
+          trip: toTripRecord(
+            await loadTrip(transaction, input.tripId, input.ownerUserId),
+          ),
+        };
+      });
+    } catch (error) {
+      return failureResult(error);
+    }
+  }
+
+  async listTransportHistoryOwned(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+  }): Promise<readonly TransportHistoryRecord[] | null> {
+    const trip = await this.client.trip.findFirst({
+      where: { id: input.tripId, ownerUserId: input.ownerUserId },
+      select: { id: true },
+    });
+    if (trip === null) {
+      return null;
+    }
+    const records = await this.client.transportEdgeHistory.findMany({
+      where: { tripId: input.tripId },
+      include: historyInclude,
+      orderBy: [{ invalidatedAt: 'desc' }, { id: 'desc' }],
+    });
+    return records.map(toTransportHistoryRecord);
+  }
 }
 
 async function lockOwner(
@@ -209,6 +285,11 @@ async function applyCommand(
         placeId: place.id,
         note: input.command.note,
       });
+      await archiveNonAdjacentTransports(
+        transaction,
+        input.tripId,
+        'ADJACENCY_CHANGED',
+      );
       return;
     }
     case 'ADD_FREE_ACTION':
@@ -220,12 +301,23 @@ async function applyCommand(
         placeId: null,
         note: input.command.note,
       });
+      await archiveNonAdjacentTransports(
+        transaction,
+        input.tripId,
+        'ADJACENCY_CHANGED',
+      );
       return;
     case 'DELETE_NODE': {
       const node = await requireTripNode(
         transaction,
         input.tripId,
         input.command.nodeId,
+      );
+      await archiveEndpointTransports(
+        transaction,
+        input.tripId,
+        node.id,
+        'NODE_DELETED',
       );
       await transaction.itineraryNode.delete({ where: { id: node.id } });
       const remaining = await orderedNodeIds(
@@ -238,6 +330,11 @@ async function applyCommand(
         input.tripId,
         node.localDate,
         remaining,
+      );
+      await archiveNonAdjacentTransports(
+        transaction,
+        input.tripId,
+        'ADJACENCY_CHANGED',
       );
       return;
     }
@@ -263,6 +360,11 @@ async function applyCommand(
         node.localDate,
         withoutNode,
       );
+      await archiveNonAdjacentTransports(
+        transaction,
+        input.tripId,
+        'ADJACENCY_CHANGED',
+      );
       return;
     }
     case 'REPLACE_PLACE': {
@@ -274,6 +376,12 @@ async function applyCommand(
       if (node.kind !== 'PLACE_VISIT') {
         throw new TripTransactionAbort('INVALID_COMMAND');
       }
+      await archiveEndpointTransports(
+        transaction,
+        input.tripId,
+        node.id,
+        'ENDPOINT_REPLACED',
+      );
       const place = await resolvePlace(
         transaction,
         input.ownerUserId,
@@ -285,7 +393,235 @@ async function applyCommand(
       });
       return;
     }
+    case 'SET_MANUAL_TRANSPORT':
+      await setManualTransport(transaction, input.tripId, input.command);
+      return;
+    case 'CLEAR_TRANSPORT':
+      await clearTransport(
+        transaction,
+        input.tripId,
+        input.command.transportEdgeId,
+      );
+      return;
   }
+}
+
+async function setManualTransport(
+  transaction: Transaction,
+  tripId: string,
+  command: Extract<
+    RepositoryTripCommand,
+    { readonly type: 'SET_MANUAL_TRANSPORT' }
+  >,
+): Promise<void> {
+  const timeline = await transaction.itineraryNode.findMany({
+    where: { tripId },
+    select: { id: true, kind: true },
+    orderBy: [{ localDate: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+  });
+  const fromIndex = timeline.findIndex(
+    (node) => node.id === command.fromNodeId,
+  );
+  const toIndex = timeline.findIndex((node) => node.id === command.toNodeId);
+  if (fromIndex < 0 || toIndex < 0) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+  if (toIndex !== fromIndex + 1) {
+    throw new TripTransactionAbort('NOT_ADJACENT');
+  }
+  const from = timeline[fromIndex];
+  const to = timeline[toIndex];
+  if (from?.kind !== 'PLACE_VISIT' || to?.kind !== 'PLACE_VISIT') {
+    throw new TripTransactionAbort('TRANSPORT_NOT_APPLICABLE');
+  }
+
+  const existing = await transaction.transportEdge.findFirst({
+    where: {
+      tripId,
+      fromNodeId: command.fromNodeId,
+      toNodeId: command.toNodeId,
+    },
+    include: transportInclude,
+  });
+  if (existing !== null) {
+    await archiveTransports(transaction, [existing], 'USER_REPLACED');
+  }
+  await transaction.transportEdge.create({
+    data: {
+      tripId,
+      fromNodeId: command.fromNodeId,
+      toNodeId: command.toNodeId,
+      mode: command.mode,
+      fixedService: command.fixedService,
+      serviceLabel: command.serviceLabel,
+      note: command.note,
+      source: 'MANUAL',
+    },
+  });
+}
+
+async function clearTransport(
+  transaction: Transaction,
+  tripId: string,
+  transportEdgeId: string,
+): Promise<void> {
+  const edge = await transaction.transportEdge.findFirst({
+    where: { id: transportEdgeId, tripId },
+    include: transportInclude,
+  });
+  if (edge === null) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+  await archiveTransports(transaction, [edge], 'USER_CLEARED');
+}
+
+async function archiveEndpointTransports(
+  transaction: Transaction,
+  tripId: string,
+  nodeId: string,
+  reason: TransportInvalidationReason,
+): Promise<void> {
+  const edges = await transaction.transportEdge.findMany({
+    where: {
+      tripId,
+      OR: [{ fromNodeId: nodeId }, { toNodeId: nodeId }],
+    },
+    include: transportInclude,
+  });
+  await archiveTransports(transaction, edges, reason);
+}
+
+async function archiveNonAdjacentTransports(
+  transaction: Transaction,
+  tripId: string,
+  reason: TransportInvalidationReason,
+): Promise<void> {
+  const timeline = await transaction.itineraryNode.findMany({
+    where: { tripId },
+    select: { id: true },
+    orderBy: [{ localDate: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+  });
+  const adjacency = new Set<string>();
+  for (let index = 0; index + 1 < timeline.length; index += 1) {
+    const from = timeline[index];
+    const to = timeline[index + 1];
+    if (from !== undefined && to !== undefined) {
+      adjacency.add(adjacencyKey(from.id, to.id));
+    }
+  }
+  const current = await transaction.transportEdge.findMany({
+    where: { tripId },
+    include: transportInclude,
+  });
+  await archiveTransports(
+    transaction,
+    current.filter(
+      (edge) => !adjacency.has(adjacencyKey(edge.fromNodeId, edge.toNodeId)),
+    ),
+    reason,
+  );
+}
+
+async function archiveTransports(
+  transaction: Transaction,
+  edges: readonly TransportWithTimes[],
+  reason: TransportInvalidationReason,
+): Promise<void> {
+  const invalidatedAt = new Date();
+  for (const edge of edges) {
+    await transaction.transportEdgeHistory.create({
+      data: {
+        originalTransportEdgeId: edge.id,
+        tripId: edge.tripId,
+        originalFromNodeId: edge.fromNodeId,
+        originalToNodeId: edge.toNodeId,
+        mode: edge.mode,
+        fixedService: edge.fixedService,
+        serviceLabel: edge.serviceLabel,
+        note: edge.note,
+        source: edge.source,
+        originalCreatedAt: edge.createdAt,
+        invalidatedAt,
+        invalidationReason: reason,
+        temporalValues: {
+          create: edge.temporalValues.map((value) => ({
+            layer: value.layer,
+            pointKind: value.pointKind,
+            instant: value.instant,
+            timeZone: value.timeZone,
+            sourceKind: value.sourceKind,
+            sourceRef: value.sourceRef,
+            observedAt: value.observedAt,
+            originalCreatedAt: value.createdAt,
+            originalUpdatedAt: value.updatedAt,
+          })),
+        },
+      },
+    });
+    await transaction.transportEdge.delete({ where: { id: edge.id } });
+  }
+}
+
+async function upsertTemporalValue(
+  transaction: Transaction,
+  input: {
+    readonly tripId: string;
+    readonly subject: RepositoryTemporalSubject;
+    readonly value: RepositoryTemporalValueInput;
+  },
+): Promise<void> {
+  const data = {
+    layer: input.value.layer,
+    pointKind: input.value.pointKind,
+    instant: input.value.instant,
+    timeZone: input.value.timeZone,
+    sourceKind: input.value.sourceKind,
+    sourceRef: input.value.sourceRef,
+    observedAt: input.value.observedAt,
+  };
+  if (input.subject.type === 'NODE') {
+    const node = await transaction.itineraryNode.findFirst({
+      where: { id: input.subject.nodeId, tripId: input.tripId },
+      select: { id: true },
+    });
+    if (node === null) {
+      throw new TripTransactionAbort('NOT_FOUND');
+    }
+    await transaction.temporalValue.upsert({
+      where: {
+        nodeId_pointKind_layer: {
+          nodeId: node.id,
+          pointKind: input.value.pointKind,
+          layer: input.value.layer,
+        },
+      },
+      create: { nodeId: node.id, ...data },
+      update: data,
+    });
+    return;
+  }
+  const edge = await transaction.transportEdge.findFirst({
+    where: { id: input.subject.transportEdgeId, tripId: input.tripId },
+    select: { id: true },
+  });
+  if (edge === null) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+  await transaction.temporalValue.upsert({
+    where: {
+      transportEdgeId_pointKind_layer: {
+        transportEdgeId: edge.id,
+        pointKind: input.value.pointKind,
+        layer: input.value.layer,
+      },
+    },
+    create: { transportEdgeId: edge.id, ...data },
+    update: data,
+  });
+}
+
+function adjacencyKey(fromNodeId: string, toNodeId: string): string {
+  return `${fromNodeId}:${toNodeId}`;
 }
 
 async function insertNode(
@@ -500,8 +836,74 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
       source: node.source,
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,
+      timeValues: node.temporalValues.map(toTemporalValueRecord),
+    })),
+    transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
+  };
+}
+
+function toTransportEdgeRecord(edge: TransportWithTimes): TransportEdgeRecord {
+  return {
+    id: edge.id,
+    tripId: edge.tripId,
+    fromNodeId: edge.fromNodeId,
+    toNodeId: edge.toNodeId,
+    mode: edge.mode,
+    fixedService: edge.fixedService,
+    serviceLabel: edge.serviceLabel,
+    note: edge.note,
+    source: edge.source,
+    createdAt: edge.createdAt,
+    updatedAt: edge.updatedAt,
+    timeValues: edge.temporalValues.map(toTemporalValueRecord),
+  };
+}
+
+function toTransportHistoryRecord(
+  record: HistoryWithTimes,
+): TransportHistoryRecord {
+  return {
+    id: record.id,
+    originalTransportEdgeId: record.originalTransportEdgeId,
+    tripId: record.tripId,
+    originalFromNodeId: record.originalFromNodeId,
+    originalToNodeId: record.originalToNodeId,
+    mode: record.mode,
+    fixedService: record.fixedService,
+    serviceLabel: record.serviceLabel,
+    note: record.note,
+    source: record.source,
+    originalCreatedAt: record.originalCreatedAt,
+    invalidatedAt: record.invalidatedAt,
+    invalidationReason: record.invalidationReason,
+    timeValues: record.temporalValues.map((value) => ({
+      id: value.id,
+      layer: value.layer,
+      pointKind: value.pointKind,
+      instant: value.instant,
+      timeZone: value.timeZone,
+      sourceKind: value.sourceKind,
+      sourceRef: value.sourceRef,
+      observedAt: value.observedAt,
+      createdAt: value.originalCreatedAt,
+      updatedAt: value.originalUpdatedAt,
     })),
   };
+}
+
+function toTemporalValueRecord(value: {
+  readonly id: string;
+  readonly layer: TemporalValueRecord['layer'];
+  readonly pointKind: TemporalValueRecord['pointKind'];
+  readonly instant: Date;
+  readonly timeZone: string;
+  readonly sourceKind: TemporalValueRecord['sourceKind'];
+  readonly sourceRef: string | null;
+  readonly observedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}): TemporalValueRecord {
+  return value;
 }
 
 function toPlaceRecord(place: {

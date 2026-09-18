@@ -1,0 +1,35 @@
+{
+  "name": "travel-v1",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Greenfield travel planning backend foundation",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "dev:api": "pnpm --filter @travel/api dev",
+    "dev:worker": "pnpm --filter @travel/worker dev",
+    "format": "prettier --write \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"scripts/**/*.mjs\" \".github/**/*.yml\" \"infra/**/*.{yml,md}\" \"docs/architecture/**/*.md\" \"docs/status/**/*.md\" \"docs/adr/0001-stack.md\" \"README.md\" \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig.base.json\" \"eslint.config.mjs\" \"vitest.config.ts\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,json}\" \"packages/**/*.{ts,json}\" \"scripts/**/*.mjs\" \".github/**/*.yml\" \"infra/**/*.{yml,md}\" \"docs/architecture/**/*.md\" \"docs/status/**/*.md\" \"docs/adr/0001-stack.md\" \"README.md\" \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig.base.json\" \"eslint.config.mjs\" \"vitest.config.ts\"",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:integration": "pnpm --filter @travel/persistence test:integration",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.5",
+    "eslint": "10.10.0",
+    "globals": "17.12.0",
+    "prettier": "3.9.7",
+    "tsx": "4.23.13",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.1"
+  }
+}

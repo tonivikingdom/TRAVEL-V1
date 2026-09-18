@@ -1,0 +1,2365 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>旅途计划｜首轮开发交接</title><style>
+:root{--ink:#183655;--muted:#617387;--line:#dce4ec;--paper:#fff;--bg:#f4f7fa;--accent:#2d638d}*{box-sizing:border-box}body{margin:0;font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","Noto Sans CJK SC",sans-serif;color:#25364a;background:var(--bg)}
+header{background:var(--ink);color:white;padding:24px 32px;display:flex;justify-content:space-between;gap:16px;align-items:center}header h1{font-size:24px;margin:0;color:white}header p{margin:3px 0 0;color:#d2deea;font-size:14px}.badge{padding:7px 13px;border:1px solid #6f8da8;border-radius:20px;font-size:13px;white-space:nowrap}
+.layout{display:grid;grid-template-columns:218px minmax(0,1fr);max-width:1480px;margin:auto}nav{padding:22px 12px;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto}.nav-item{display:block;width:100%;padding:9px 15px;border:none;background:transparent;color:#475c71;text-align:left;border-radius:8px;font:inherit;font-size:14px;cursor:pointer;margin-bottom:3px}.nav-item.active{background:#e4eef7;color:#164d79;font-weight:600}.panel{display:none;background:white;border:1px solid var(--line);border-radius:12px;margin:24px 24px 48px 6px;padding:30px 38px;min-height:640px;overflow-wrap:anywhere}.panel.active{display:block}.doc-meta{font-size:12px;color:var(--muted);letter-spacing:.4px;margin-bottom:20px}article h1{font-size:29px;line-height:1.4;margin:0 0 20px;color:var(--ink)}article h2{font-size:22px;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line);color:var(--ink)}article h3{font-size:18px;margin:22px 0 8px}p{margin:12px 0}li{margin:4px 0}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}blockquote{margin:16px 0;padding:9px 20px;background:#eef4f9;border-left:4px solid #5a83a5;border-radius:0 6px 6px 0}blockquote p{margin:7px 0}pre{padding:16px;background:#172f45;color:#e4edf7;border-radius:8px;overflow:auto;font:13px/1.7 ui-monospace,Consolas,monospace}code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#eef2f6;padding:2px 4px;border-radius:3px}pre code{background:none;padding:0;color:inherit}table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.7;margin:18px 0}th{background:#edf3f8;color:var(--ink);text-align:left}td,th{padding:10px 12px;border:1px solid var(--line);vertical-align:top}hr{border:0;border-top:1px solid var(--line);margin:28px 0}.diagram{border:1px solid var(--line);border-radius:10px;overflow:hidden}.diagram svg{display:block;width:100%;height:auto}.notice{font-size:13px;padding:8px 16px;background:#fff5e5;color:#755016;text-align:center}
+@media(max-width:800px){header{padding:18px;display:block}.badge{display:inline-block;margin-top:10px}.layout{display:block}nav{position:static;display:flex;overflow:auto;max-height:none;padding:12px}.nav-item{width:auto;white-space:nowrap;display:inline-block;margin:0 3px}.panel{margin:0 12px 30px;padding:22px 18px}article h1{font-size:24px}table{display:block;overflow:auto}header h1{font-size:21px}}
+@media print{header,nav,.notice,.doc-meta{display:none}.layout{display:block}.panel{display:block;break-before:page;border:0;margin:0;padding:0}pre{white-space:pre-wrap;background:#f2f2f2;color:black}}
+</style></head><body><header><div><h1>旅途计划 · 首轮开发交接</h1><p>新建空白项目 / 开发要求 v1.0 / 产品基线 v0.6 / 2026-09-17</p></div><span class="badge">先执行 P0 · 后续逐阶段授权</span></header><div class="notice">本包是开发规格，不是已完成的软件。新仓库地址尚待确认；没有向旧仓库推送。</div><div class="layout"><nav><button data-tab="s0" class="nav-item active">开始阅读</button><button data-tab="s1" class="nav-item">工作规范</button><button data-tab="s2" class="nav-item">当前变更</button><button data-tab="s3" class="nav-item">完整产品</button><button data-tab="s4" class="nav-item">首轮范围</button><button data-tab="s5" class="nav-item">领域/API</button><button data-tab="s6" class="nav-item">排程规则</button><button data-tab="s7" class="nav-item">验收案例</button><button data-tab="s8" class="nav-item">工程规范</button><button data-tab="s9" class="nav-item">模型强度</button><button data-tab="s10" class="nav-item">未决闸门</button><button data-tab="s11" class="nav-item">首次指令</button><button data-tab="s12" class="nav-item">官方来源</button><button data-tab="diagrams" class="nav-item">可编辑图预览</button></nav><main><article id="s0" class="panel active"><div class="doc-meta">README_从这里开始.md</div><h1>旅途计划｜首轮开发要求与 Codex 指令包</h1>
+<p><strong>开发要求版本：v1.0　产品基线：v0.6　导出日期：2026-09-17</strong></p>
+<blockquote>
+<p>当前是一个<strong>新建空白项目</strong>，不是旧仓库改造。本包是开发规格与交接资料，不是已经实现或测试通过的软件。</p>
+</blockquote>
+<h2>现在怎么用</h2>
+<ol>
+<li>将本包解压到你确认的新项目工作目录，保留目录结构。不要覆盖另一个项目已有的 AGENTS.md。</li>
+<li>在 Codex 中打开包含 <code>AGENTS.md</code> 的那一级项目目录，不要打开外层下载目录。第一次只发送 <code>prompts/00_首次开发_空白项目初始化.md</code> 的完整内容。</li>
+<li><strong>推荐模型：GPT-5.6 Sol；推理强度：Extra High（xhigh）。</strong> 成本优先备选：GPT-5.6 Luna / Max；核心模型设计必须另做复核。实际选项以当前客户端为准。</li>
+<li>Codex 完成 P0 后必须提交、推送到新仓库功能分支并创建 PR，交回测试结果。检查通过、你同意后，才执行下一阶段。</li>
+</ol>
+<p><strong>不要一次把 P0～P5 全部交给 Codex 自动连续开发。</strong> 完整产品蓝图不等于本轮任务清单。</p>
+<h2>本包保留了什么</h2>
+<ul>
+<li>完整产品方向与已确认规则：<code>docs/01_完整产品基线_v0.6.md</code></li>
+<li>首轮做到哪里、不做什么：<code>docs/02_首轮开发要求_v1.0.md</code></li>
+<li>跨终端领域 / API / 数据边界：<code>docs/03_领域与API蓝图_v0.1.md</code></li>
+<li>多方向排程、交通查询、冲突和采用：<code>docs/04_多方向排程_执行基线_v0.3.md</code></li>
+<li>可转换成自动化测试的验收案例：<code>docs/05_验收场景与测试清单.md</code> 与 <code>tests/acceptance-scenarios.json</code></li>
+<li>GitHub、账户、任务、部署规范：<code>docs/06_工程安全部署与GitHub规范.md</code></li>
+<li><strong>每次开发要求必须推荐模型和强度</strong>：<code>docs/07_模型与强度建议.md</code>、<code>AGENTS.md</code>、任务模板。</li>
+<li>未决事项与阻塞范围：<code>docs/08_未决事项与阶段闸门.md</code></li>
+<li>可编辑图：<code>diagrams/开发路线与领域边界.drawio</code></li>
+<li>离线阅读本资料：<code>浏览器阅读版.html</code>（这是文档预览，不是产品离线模式）。</li>
+</ul>
+<h2>新仓库尚未指定</h2>
+<p>新 GitHub 仓库地址尚未提供。本包不会猜测地址，也没有向任何仓库上传。</p>
+<p>Codex 开始时须检查本地 <code>origin</code>；若没有远程地址或无法确认归属，只询问<strong>新仓库地址</strong>。禁止自动将旧仓库 <code>tonivikingdom/travel-planner-v2</code> 设为目标。</p>
+<p>如果新 GitHub 仓库还没有 <code>main</code> 的任何提交，需要先建立一个仅含 README / .gitignore 的初始基线，才能正常做功能分支 PR。<strong>这一步必须由用户完成，或获得单独的初始化授权；不能借此直接向 main 提交业务代码。</strong></p>
+<h2>本轮部署目标</h2>
+<p>现有 x86-64 电脑（用户提供：i7-12700 / 32GB），同时在线不超过5人；先 Dev + Staging，只有测试数据。Web/API 与 Worker 独立进程，同机 Docker Compose；PostgreSQL；附件对象存储；受控邀请制、Magic Link、可撤销会话、多账号隔离。</p>
+<p><strong>首轮不等于全功能 App。</strong> 不做正式桌面/移动 UI，不打包 Windows/macOS/iOS/Android，不做同行协作、公开注册、原生 Push、天气、预算、OCR、完整审计或自动异地灾备。</p>
+<h2>交接方式</h2>
+<p>每个阶段都使用 feature branch → 测试 → commit → push → PR → 检查 → 用户同意后合并 main。任何失败、缺权限、缺服务、未运行测试都要原样报告，不得声称完成。</p>
+<p>规则有矛盾时：先看 <code>docs/00_需求优先级与变更记录.md</code>；未决项按 <code>docs/08_未决事项与阶段闸门.md</code> 处理。只暂停相关能力，不用旧逻辑或猜测填补。</p>
+</article><article id="s1" class="panel"><div class="doc-meta">AGENTS.md</div><h1>项目级 Codex 工作规范</h1>
+<h2>最高前提</h2>
+<p>这是用户授权的新建空白项目。旧仓库不是起点；不得默认连接、克隆或改造<code>tonivikingdom/travel-planner-v2</code>。在用户确认的新目录中工作，远程不明确时只询问新仓库地址。不要移动/清理任何未知文件。</p>
+<h2>每次任务必须先写模型建议</h2>
+<p>在任务说明和阶段计划开头填写：推荐模型、推理强度、备选、理由、升级条件。本包默认P0架构用GPT-5.6 Sol / Extra High（xhigh），明确施工子任务可Luna / Max；以客户端实际可用选项为准。
+不能声称提示词已自动切换模型；当前配置无法确认就说未知。未来发任务要重新核对官方可用性，不永久沿用旧型号。</p>
+<h2>阅读顺序</h2>
+<ol>
+<li>当前授权的<code>prompts/</code>任务。</li>
+<li><code>docs/00_需求优先级与变更记录.md</code>。</li>
+<li><code>docs/02_首轮开发要求_v1.0.md</code>。</li>
+<li>本阶段相关的03/04/05/06文档。</li>
+<li><code>docs/08_未决事项与阶段闸门.md</code>。</li>
+<li>完整产品基线01仅用于理解背景，不能当“全部立即实现”清单。
+<code>archive/</code>只存历史，不用于覆盖当前规则。</li>
+</ol>
+<h2>范围纪律</h2>
+<ul>
+<li>每次只执行用户授权的一个阶段。P0完成必须停止，不能顺手做P1。</li>
+<li>先核对目录、Git、remote、版本、依赖与环境。缺失是事实，不猜。</li>
+<li>Domain与UI/网络/ORM解耦；只共享业务契约，不强迫多端共用UI。</li>
+<li>只实现当前需要的可扩展边界，不为协作/微服务/原生端做过度设计。</li>
+<li>未决项只暂停对应能力；记录问题与影响，向用户一次问一个关键点。</li>
+<li>不擅自新增产品入口、字段、商业服务、付费API调用或全局默认分钟数。</li>
+</ul>
+<h2>数据与业务底线</h2>
+<p>不编地点、班次、价格、时区、用户轨迹、订单状态、测试结果。fixture必须明示SYNTHETIC，dev/test专用。
+计划、预计、实际、用户要求和来源分开；已执行事实不被重排覆盖。
+Query/Preview不改正式行程；Adopt需权限/版本/幂等/事务验证。
+不自动订票、叫车或对外改预约；拒绝/关闭建议进入安静辅助。
+无网不展示过时行程；单一Provider失效局部未知；位置缺失不能由服务器猜。</p>
+<h2>安全底线</h2>
+<p>邀请制多用户；管理员不默认访问他人内容。私有资源逐请求授权，不能只检查角色。
+会话可服务端撤销；不提交密钥、token、真实.env、数据库或附件。
+对象存储私有；默认不做附件内容提取；保留必要格式/大小/授权校验。
+只使用隔离测试数据；reset须明确dev/staging，不动未知或生产数据库。</p>
+<h2>GitHub是阶段完成的一部分</h2>
+<p>所有正式开发：feature branch → 真实测试 → commit → push → PR → 等待检查。
+禁止直推main、force push、未经授权合并、擅自切换远程、删除他人修改。
+空仓库没有main首提交时，用户先建最小基线或单独授权bootstrap；本规范不授权main业务提交。
+若push/PR权限不可用，汇报BLOCKED、保留成果；不得宣称“已同步”。</p>
+<h2>测试与汇报</h2>
+<p>lint/typecheck/test/build按阶段实际运行。关键集成须真实PostgreSQL；环境不能跑就标未验证。不要skip/弱化断言凑绿灯。
+最终中文汇报简短，细节写<code>docs/status/</code>：阶段、分支、SHA、PR、改动、测试证据、限制、停止点。
+不能将“文档已写”“夹具测试通过”“真实Provider已接通”“跨平台已支持”混为一谈。</p>
+<h2>未来UI任务</h2>
+<p>本轮不做正式UI。未来桌面和移动各自设计/测试；共享契约、设计token和已确认SVG，不用桌面缩放冒充移动端。遵守用户视觉居中偏好，具体视觉以后单独验收。</p>
+</article><article id="s2" class="panel"><div class="doc-meta">docs/00_需求优先级与变更记录.md</div><h1>需求优先级与本次变更</h1>
+<h2>1. 解释顺序</h2>
+<ol>
+<li>用户最新明确指令与后续经确认的变更单。</li>
+<li>本包首轮范围、阶段闸门及已确认架构条件。</li>
+<li>本包领域 / 排程专项规范中的语义澄清。</li>
+<li>完整产品基线 v0.6。</li>
+<li><code>archive/</code> 中旧稿，仅查历史，禁止作为施工清单。</li>
+</ol>
+<p>“工程提案”不是已确认的产品行为；Codex 可以在 P0 的 ADR 中落实合理的实现方式，但不得自行改变用户选择权、数据真实性、权限或本期范围。遇到产品含义冲突，只问一个最关键问题。</p>
+<h2>2. 本轮新增且已确认</h2>
+<table>
+<thead>
+<tr>
+<th>编号</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ARC-01</td>
+<td>新建空白项目；不克隆旧业务实现，不要求迁移旧数据库。</td>
+</tr>
+<tr>
+<td>ARC-02</td>
+<td>共享平台无关领域核心，未来服务桌面网页、手机网页、Windows、macOS、iOS、Android。</td>
+</tr>
+<tr>
+<td>ARC-03</td>
+<td>多用户、首版管理员邀请；≤5人同时在线；每个用户独立数据。</td>
+</tr>
+<tr>
+<td>ARC-04</td>
+<td>协作仅保留未来扩展位置，首版不实现成员邀请或共同编辑。</td>
+</tr>
+<tr>
+<td>ARC-05</td>
+<td>同账号多设备同时登录；云端数据为准；拒绝静默覆盖。</td>
+</tr>
+<tr>
+<td>ARC-06</td>
+<td>邮箱 Magic Link；长期但可撤销的会话；管理员可禁用和强制注销，不默认查看别人旅行。</td>
+</tr>
+<tr>
+<td>ARC-07</td>
+<td>x86单机 Docker Compose；Web/API 与 Worker 独立进程；PostgreSQL；对象存储抽象。</td>
+</tr>
+<tr>
+<td>ARC-08</td>
+<td>Dev / Staging / Production 隔离设计；首版先运行前两者，仅测试数据。</td>
+</tr>
+<tr>
+<td>ARC-09</td>
+<td>无网全局不可用，不展示旧行程；联网重新同步后恢复；单一 Provider 故障仅局部失效。</td>
+</tr>
+<tr>
+<td>ARC-10</td>
+<td>首版无自动异地备份、完整审计；仍需持久化、迁移、版本号和计算原因。</td>
+</tr>
+<tr>
+<td>ARC-11</td>
+<td>首版通知事件 + 站内提醒；Magic Link邮件可实际发送，原生 Push 后续接。</td>
+</tr>
+<tr>
+<td>DEV-01</td>
+<td>每个阶段必须 feature branch + commit + push + PR；不直接改 main，不自动合并。</td>
+</tr>
+<tr>
+<td>DEV-02</td>
+<td>以后每份开发要求开头必须给出推荐模型、推理强度、备选和升级条件。</td>
+</tr>
+<tr>
+<td>DEV-03</td>
+<td>导出本包已获授权；导出不等于自动授权全部阶段施工或新建远程仓库。</td>
+</tr>
+</tbody>
+</table>
+<h2>3. 需要明确覆盖旧说法的条目</h2>
+<ul>
+<li>“重构旧 travel-planner-v2 / 迁移旧表”不适用于本项目。旧稿只作需求历史。</li>
+<li>“最后才看真实 Provider 数据”不采用：先做契约验证/样本探针；不能到正式 UI 接入才发现没有需要的字段。正式集成按阶段、凭证、覆盖范围推进。</li>
+<li>“后台由服务器负责”不表示服务器能读取手机定位；客户端采集经授权的位置、上报时间/精度/能力状态，服务器只处理收到的证据。</li>
+<li>“先把所有未来表建出来”不采用；第一阶段只做必要骨架，未来能力保留边界/文档，不造空实现。</li>
+<li>“退款必须到账状态机”已取消；用户直接记负数，无复杂跟踪。</li>
+<li>“用户设置的所有时间绝不可自动变化”指独立意图/锁定/班次事实不能暗改；用户明确采用路线时，允许其所授权的派生时间联动。</li>
+<li>“无班次交通可自动更新”仅指<strong>既有选择内、无语义变化的估算刷新</strong>；不包括重新叫车、改路、改方式或产生新费用承诺。</li>
+<li>“风险高=交通立即删除”不成立；预计赶不上与已确认错过分开。</li>
+<li>未知信息可以保留，不等于任何实时判断可继续输出正常。</li>
+<li>起床/闹钟建议不在首轮；保留最晚离开时间的核心计算。</li>
+<li>最终记录交通展示方式仍标为暂定；不得以其为由删除未执行交通历史、费用或附件。</li>
+</ul>
+<h2>4. 时间模型的必要澄清</h2>
+<p>用户把到达目标改成19:30而旧交通仍19:56到时，不存成一个“到达19:30却由19:56交通支持”的自洽正式结果。存储<strong>新的要求</strong>与<strong>旧采用方案</strong>，投影显示目标停留51分钟和当前方案停留25分钟（具体UI后置）。不把目标、预测和实际混为一列。</p>
+<p><code>必须值</code>、<code>建议值</code>必须绑定它们真正适用的位置/环节。到机场、过安检、停止检票不是同一参照。只有语义可比较时才显示正常/黄/红；这不是新增用户字段，是防止错误算术的内部契约。</p>
+<h2>5. 状态说明</h2>
+<p>本包未执行任何应用代码、数据库迁移、PR或推送。验收场景是规格，不是“测试已通过”。文件生成检查与软件开发测试必须分开报告。</p>
+</article><article id="s3" class="panel"><div class="doc-meta">docs/01_完整产品基线_v0.6.md</div><h1>旅途计划｜完整产品基线 V0.6</h1>
+<p>版本日期：2026-09-17<br />
+状态：完整产品蓝图；本次实施范围以《首轮开发要求 v1.0》为准<br />
+说明：本稿承接V0.5；新增架构边界见文首说明与末尾补充。V0.5 以 V0.4 为基础，合并后续已确认的「旅行生命周期、分享与复制、Trip 日期归属与合并、创建字段、全局基准货币、实时监控、回顾页、多人/费用、双向排程与冲突求解」规则。未确认或被替换的旧规则不再作为开发依据。</p>
+<blockquote>
+<p><strong>新项目声明：</strong> 用户明确本次是空白项目；全文的功能规则不代表已有实现。旧实现和旧仓库不是起点。
+<strong>阅读优先级：</strong> 本包 <code>00_需求优先级与变更记录.md</code>、<code>02_首轮开发要求_v1.0.md</code>、<code>08_未决事项与阶段闸门.md</code> 优先于本稿历史文字。全文不是第一阶段施工清单。
+<strong>工程约束：</strong> 未来所有开发指令必须附模型/强度推荐；每阶段提交、推送并创建PR；新仓库地址待确认。</p>
+</blockquote>
+<hr />
+<h2>0. 产品宪法 / North Star</h2>
+<p>终极目标：基于用户自己的需求、偏好与约束，为用户规划一套对这个用户而言尽可能合适的旅程，并尽可能帮助用户把这套行程顺利落地；减少行前与旅行中的繁琐操作；旅行结束后留下真实、尽可能完整的旅行记录。</p>
+<p>一句话愿景：</p>
+<blockquote>
+<p>根据用户真正想要的旅行，帮他规划好、执行好、少操心，并留下真实而完整的旅行记录。</p>
+</blockquote>
+<p>核心原则：</p>
+<ul>
+<li>计划服务于旅行，旅行不服务于计划；</li>
+<li>系统是助手，不是监督者；</li>
+<li>机械、可验证的工作尽量自动化，偏好与取舍由用户决定；</li>
+<li>用户偏离计划本身不是错误；</li>
+<li>重大变化优先最小改动；</li>
+<li>真实性优先于形式完整；</li>
+<li>不完整 ≠ 错误；</li>
+<li>没有可靠依据的信息不能编，估算必须标明；</li>
+<li>用户选择高风险方案可以继续，系统负责说明后果；</li>
+<li>产品逻辑先想完整，版本功能分阶段开放。</li>
+</ul>
+<hr />
+<h2>1. Trip 创建与基础属性</h2>
+<h3>1.1 新建旅行最小字段</h3>
+<p>新建旅行只要求：</p>
+<ul>
+<li>旅行名称；</li>
+<li>开始日期；</li>
+<li>人数。</li>
+</ul>
+<p>规则：</p>
+<ul>
+<li>开始日期必填；</li>
+<li>人数必填，默认可由界面给出合理值，用户最终确认；</li>
+<li>结束日期不要求填写，初始结束日期 = 开始日期；</li>
+<li>随 Day、跨日节点和实际行程自动扩展/收缩；</li>
+<li>目的地/国家/城市不是必填字段，由行程地点自动推导；</li>
+<li>旅行名称任何生命周期均可修改；</li>
+<li>Trip 人数可修改，前期主要影响费用，不自动改地点/时间/交通。</li>
+</ul>
+<h3>1.2 Trip 级信息</h3>
+<p>保留：</p>
+<ul>
+<li>旅行总备注：可选纯文本，任何阶段可编辑；</li>
+<li>旅行总待办：标题、完成状态、备注、可选提醒时间；</li>
+<li>无提醒时间的总待办只在旅行总览展示，不主动通知；</li>
+<li>用户设定具体提醒时间后才通知。</li>
+</ul>
+<h3>1.3 用户级基准货币</h3>
+<ul>
+<li>基准货币属于用户级全局偏好，不属于 Trip；</li>
+<li>与 UI 语言、目的地、系统地区解耦；英文界面也可以 CNY 为基准货币；</li>
+<li>用户修改基准货币后，所有旅行汇总视角同步切换；</li>
+<li>原始金额与原始币种永远不变。</li>
+</ul>
+<hr />
+<h2>2. Day、日期范围与 Trip 日期归属</h2>
+<h3>2.1 Day 扩展</h3>
+<ul>
+<li>新建后先有开始日期当天；</li>
+<li>通过「添加下一天」向后扩展；</li>
+<li>可以「添加前一天」向前扩展，不移动已有行程；</li>
+<li>可以在中间「插入一天」，插入点之后行程整体顺延，日期相关信息重新校验；</li>
+<li>可以「将后续行程整体提前一天」，当地钟点保持，日期相关信息重新校验；</li>
+<li>Day 不作为普通可删除对象：头尾空白日自动收缩，中间空白日合法保留；新建空白Day的编辑保护与收缩时机尚待确认，不得创建后立即删除（O-01）。</li>
+<li>日期整体移动不能从跨日地点、自由行动或跨日交通中间切断连续关系。</li>
+</ul>
+<h3>2.2 修改出发日期</h3>
+<ul>
+<li>旅行尚未开始执行时允许整趟改期；</li>
+<li>整体平移的是当地日历日期，不做 UTC 机械平移；</li>
+<li>各节点原当地计划钟点保留；</li>
+<li>具体班次、营业时间、季节运营等按新日期重新校验；</li>
+<li>进行中不能整趟改出发日期，只调整尚未发生部分；</li>
+<li>正常已结束旅行不能靠改日期重新激活，需要复制为新旅行。</li>
+</ul>
+<h3>2.3 日期唯一归属</h3>
+<p>核心规则：</p>
+<blockquote>
+<p>同一个自然日，同一账户只能归属于一个 Trip。</p>
+</blockquote>
+<p>补充：</p>
+<ul>
+<li>两趟旅行日期连续不代表自动属于同一 Trip；用户建立两个 Trip，默认就是两个；</li>
+<li>当某 Trip 扩展到已经归属于另一个 Trip 的日期时，不能先创建第二份同日期 Day；</li>
+<li>先提示日期冲突，用户可选择合并旅行，或先处理/释放原 Trip 的该日期；</li>
+<li>“旅行日期区间重叠即禁止”的旧规则废弃，改为“自然日唯一归属 + 冲突解决”。</li>
+</ul>
+<h3>2.4 合并旅行</h3>
+<ul>
+<li>日期冲突时可触发合并；无冲突时也允许用户主动合并；</li>
+<li>合并不要求日期连续，中间可形成合法空白日；</li>
+<li>合并是无损改变 Trip 归属，不是复制；</li>
+<li>两边已有地点、自由行动、交通、计划/预计/实际时间、执行事实、备注、待办、费用、附件等全部保留；</li>
+<li>已发生部分保持历史事实锁定；未来部分保持计划状态；</li>
+<li>如果前面已有实际发生内容、后面还有未来内容，即使中间为空白日，合并后的 Trip 整体仍可处于进行中；空白日不自动切断 Trip；</li>
+<li>合并时用户重新输入新的旅行名称；</li>
+<li>两边默认人数不同则由用户重新确认合并后 Trip 默认人数；</li>
+<li>两边总备注、总待办无损合并；</li>
+<li>合并后无法再拆分为原来的两趟，执行前必须明确提醒不可逆；</li>
+<li>不提供“拆分旅行”能力。</li>
+</ul>
+<hr />
+<h2>3. 地点、自由行动与相邻交通</h2>
+<h3>3.1 地点</h3>
+<ul>
+<li>空白日可添加第一个地点；搜索选中后立即加入，不强制先配完整时间；</li>
+<li>地点可插入或末尾追加；</li>
+<li>同一真实地点可重复出现，每次是独立 Visit；</li>
+<li>地点卡支持同日拖拽排序；只移动地点，不把原交通固定绑走；</li>
+<li>拖动完成后只重算发生邻接变化的边；</li>
+<li>删除地点不二次确认，提供短暂单步 Undo；</li>
+<li>Replace 地点在原位置替换，旧相邻交通失效，新边待选择；旧备注不继承；</li>
+<li>地点名称/地址（身份）不直接编辑，要改变身份用 Replace。</li>
+</ul>
+<h3>3.2 自定义地点</h3>
+<ul>
+<li>最小创建信息 = 名称 + 可定位的位置；</li>
+<li>有可靠地址则显示，没有正式地址但坐标可靠也允许创建；</li>
+<li>不为了完整性虚构地址；</li>
+<li>电话、分类、营业时间等不是必填。</li>
+</ul>
+<h3>3.3 自由行动</h3>
+<p>“自由行动”是特殊行程节点，不是假 Place：</p>
+<ul>
+<li>固定名称“自由行动”；</li>
+<li>无 Place ID/固定地点身份；</li>
+<li>支持计划/实际时间、备注、待办、费用、🔒、拖拽、删除、撤销；</li>
+<li>可首尾、可跨日；</li>
+<li>不因为定位或消费自动拆成地点；</li>
+<li>用户可事后转换为正式地点或拆为多个正式地点+交通；</li>
+<li>若两个自由行动因删除中间地点而相邻，不自动合并，轻提示用户决定；</li>
+<li>meaningful gap（当前测试阈值约 30 分钟）可询问是否填入自由行动，但不自动填满。</li>
+</ul>
+<hr />
+<h2>4. 交通、采用与换乘节点</h2>
+<h3>4.1 邻接交通</h3>
+<ul>
+<li>当前有效时间轴只维护相邻行程节点之间的有效交通；</li>
+<li>插入/删除/拖拽只影响邻接变化的交通；</li>
+<li>旧失效交通进入历史，不参与当前排程；</li>
+<li>路线查询/预览绝不修改正式行程；点击 Adopt 后才落地。</li>
+</ul>
+<h3>4.2 多段交通展开</h3>
+<p>若 A→D 方案实际为 A→公交→B→火车→C→公交→D，采用后主时间轴展开为 A→B→C→D。</p>
+<ul>
+<li>真正上下车/换乘/等待的节点可成为正式交通生成节点；</li>
+<li>单纯途经站不展开；</li>
+<li>步行是交通段；</li>
+<li>同站内部换乘只保留一个站点卡，内部停留包含下车、站内步行、找站台、等待；</li>
+<li>用户计划地点与交通生成地点底层来源必须区分；</li>
+<li>重规划可替换交通生成节点，但不能静默跳过用户计划地点。</li>
+</ul>
+<h3>4.3 固定班次是事实型时间锚点</h3>
+<ul>
+<li>已采用的具体火车、航班、巴士等班次，其出发/到达时刻天然成为事实型锚点；</li>
+<li>用户不需要再手动🔒一次；</li>
+<li>要改变该时间，需要换班次/换交通，不能直接把班次时间改成任意数字。</li>
+</ul>
+<hr />
+<h2>5. 时间模型与多方向排程</h2>
+<h3>5.1 三层时间</h3>
+<p>Planned / Estimated / Actual 三层互不覆盖：</p>
+<ul>
+<li>Planned：正式计划；</li>
+<li>Estimated：当前动态预计；</li>
+<li>Actual：真实事实。</li>
+</ul>
+<h3>5.2 地点三变量</h3>
+<p>普通地点核心关系：</p>
+<blockquote>
+<p>到达时间 + 停留时长 = 离开时间</p>
+</blockquote>
+<p>任意两个可推第三个：</p>
+<ul>
+<li>到达 + 离开 → 停留；</li>
+<li>到达 + 停留 → 离开；</li>
+<li>离开 + 停留 → 到达。</li>
+</ul>
+<p>但必须同时记录每个值的来源/语义，至少能区分：</p>
+<ul>
+<li>用户正式计划值；</li>
+<li>用户约束/目标；</li>
+<li>已采用交通推导结果；</li>
+<li>系统建议；</li>
+<li>Estimated；</li>
+<li>Actual。</li>
+</ul>
+<h3>5.3 目标 vs 当前方案结果</h3>
+<p>例如：</p>
+<ul>
+<li>用户要求“23:30 前到浦东机场”；</li>
+<li>当前选定路线实际预计“23:00 到”。</li>
+</ul>
+<p>二者必须同时保留：</p>
+<ul>
+<li>23:30 是用户条件；</li>
+<li>23:00 是当前方案结果；</li>
+<li>后续方案变成 23:10 仍可能满足原目标；</li>
+<li>不能用方案结果覆盖用户条件。</li>
+</ul>
+<p>同理：</p>
+<ul>
+<li>用户希望南京南至少预留 20 分钟；</li>
+<li>当前交通算出实际停留 25 分钟；</li>
+<li>20 分钟继续作为要求，25 分钟是方案结果。</li>
+</ul>
+<h3>5.4 从任意方向推导</h3>
+<p>同一套引擎必须支持：</p>
+<ul>
+<li>从头向后推；</li>
+<li>从尾向前反推；</li>
+<li>从中间锚点同时向前/向后推；</li>
+<li>在同一规划过程中随时换方向，不需要切换“模式”。</li>
+</ul>
+<p>真实交通不是纯算术：</p>
+<ul>
+<li>先计算查询条件（如最晚到站、最早出发）；</li>
+<li>再查询真实路线/班次；</li>
+<li>用户采用后，真实交通结果回填相邻地点时间；</li>
+<li>到得比目标更早，显示真实时间，不为了凑目标伪造时间。</li>
+</ul>
+<h3>5.5 修改时间后的自动化</h3>
+<p>例：南京南当前 19:56 到，G93 20:21 出发，停留25分钟；用户把到达时间改成19:30。</p>
+<ul>
+<li>20:21 班次事实保持；</li>
+<li>停留自动重算为51分钟；</li>
+<li>原前段交通若仍19:56到，则与新计划19:30冲突；</li>
+<li>系统自动以“到达南京南 ≤ 19:30”为条件重新查询前段交通；</li>
+<li>无班次交通仅可在既有选择不变且无歧义时刷新估算；新路线、方式变化或新的费用选择仍需采用，不自动订车。</li>
+<li>有具体路线/班次选择的交通，系统自动查询、推荐，但用户确认 Adopt 后才替换。</li>
+</ul>
+<hr />
+<h2>6. 🔒、客观约束、缓冲与风险</h2>
+<h3>6.1 约束优先层</h3>
+<p>当前原则：</p>
+<blockquote>
+<p>客观规则/事实 &gt; 用户明确保护的约束 🔒 &gt; 用户正式计划值 &gt; 尚未采用的系统建议</p>
+</blockquote>
+<p>说明：用户仍可选择冒险，但系统不能把客观事实降级为不存在。</p>
+<h3>6.2 🔒 的用途</h3>
+<p>🔒用于用户自己的重要意图：</p>
+<ul>
+<li>固定时间；</li>
+<li>最早/最晚；</li>
+<li>最低停留；</li>
+<li>个人预留；</li>
+<li>重要偏好。</li>
+</ul>
+<p>固定班次本身不需要再🔒。</p>
+<h3>6.3 缓冲</h3>
+<p>不做全球统一“火车20分钟、航班2小时”的死表。按具体场景维护：</p>
+<ul>
+<li>mandatory：客观必须值；</li>
+<li>recommended：更稳妥建议值；</li>
+<li>用户自己的预留要求。</li>
+</ul>
+<p>如果只有 mandatory：正常/红；只有 recommended：正常/黄；缺依据不制造红线。</p>
+<p>不同安排约束语义不同：</p>
+<ul>
+<li>火车/航班/末班车等不等人，客观截止更硬；</li>
+<li>餐厅预约可能有迟到容忍，但没有可靠规则时不能瞎猜；</li>
+<li>没有明确硬规则时，把“时间非常紧张”交给用户判断，用户可保持不改；</li>
+<li>用户已接受同一层级风险后不重复催，除非风险升级/事实变化。</li>
+</ul>
+<hr />
+<h2>7. 冲突求解与方案推荐（持续迭代模块）</h2>
+<h3>7.1 核心目标</h3>
+<p>系统不能只报“还差20分钟”，而应该主动把可行妥协算出来。</p>
+<blockquote>
+<p>系统负责算时间账和后果，用户负责选择自己愿意接受的妥协。</p>
+</blockquote>
+<h3>7.2 最小改动优先</h3>
+<p>当中间停留延长导致后续冲突：</p>
+<ol>
+<li>先检查能否只改局部交通解决；</li>
+<li>若可行，给出时间收益、额外费用、风险；</li>
+<li>用户接受 → 只改这一段；</li>
+<li>用户拒绝/代价不可接受 → 再向前或向后传播调整；</li>
+<li>后续预约/活动本身可调整时，也可成为候选解，但要计算对更后面时间轴和体验的影响。</li>
+</ol>
+<p>例：美术馆17:10离开、餐厅17:30预约；巴士40分钟，打车20分钟但贵很多：</p>
+<ul>
+<li>优先可以提示“换打车即可保住当前美术馆停留和17:30预约，预计增加费用800”；</li>
+<li>用户接受则局部解决；</li>
+<li>不接受再考虑提前前段到达、压缩地点、修改预约等。</li>
+</ul>
+<h3>7.3 方案不能只看可行性，还要看质量</h3>
+<p>例如把餐厅改到18:00：</p>
+<ul>
+<li>若还能吃约60分钟，可能是合理妥协；</li>
+<li>若只能吃20分钟，即使数学上赶得上后续演出，也可能体验明显过差；</li>
+<li>方案推荐必须评估“剩余体验”，而不是只求时间可行。</li>
+</ul>
+<h3>7.4 推荐排序</h3>
+<p>已知用户偏好时，允许基于偏好标出“更适合你的方案”，但不自动采用。
+未知偏好时默认：</p>
+<ol>
+<li>保住重要/受保护安排；</li>
+<li>风险更低；</li>
+<li>影响范围更小；</li>
+<li>再综合费用、时间与体验质量。</li>
+</ol>
+<p>不能把“最便宜”或“最快”天然当成最优。</p>
+<h3>7.5 方案展示数量与打扰尺度</h3>
+<ul>
+<li>默认 1 个主推荐 + 最多2个备选；</li>
+<li>都不接受，用户可自行调整；</li>
+<li>用户拒绝/关闭推荐面板后，同一风险进入安静辅助：只实时更新剩余缺口和风险，不再主动弹新方案；</li>
+<li>用户主动“帮我优化”才重新生成方案；</li>
+<li>同一冲突解决后，风险标识静默消失，不弹“优化成功”；</li>
+<li>风险明显升级/事实变化 = 新风险事件，可重新提醒，并必须基于新现实生成新方案。</li>
+</ul>
+<h3>7.6 Preview / Adopt</h3>
+<p>所有涉及：</p>
+<ul>
+<li>换具体交通；</li>
+<li>增加显著费用；</li>
+<li>改预约；</li>
+<li>改重要行程；
+都必须 Preview → 用户确认 → Adopt。</li>
+</ul>
+<p>计算可以自动、查询可以自动、推荐可以自动，但决策不能被系统静默采用。</p>
+<hr />
+<h2>8. 执行生命周期与实时监控</h2>
+<h3>8.1 Trip 生命周期</h3>
+<ul>
+<li>到达旅行开始日期后，系统默认 Trip 已进入进行中；</li>
+<li>“进行中”不等于从00:00开始持续定位；</li>
+<li>用户晚出发、睡过头、第一天被打乱，仍属于进行中的意外情况；</li>
+<li>系统不能仅因未检测到执行证据就自动判“未执行”；</li>
+<li>“未执行”必须由用户确认；</li>
+<li>计划周期结束但最终结果不明时，进入内部“待确认”状态，停止实时监控，不自动判完成/未执行；</li>
+<li>用户下次进入时确认“实际发生了 / 没有去”；</li>
+<li>发生了 → 历史整理，未知事实保持未知；</li>
+<li>没有去 → 未执行计划。</li>
+</ul>
+<h3>8.2 正常结束与异常收尾</h3>
+<ul>
+<li>最终终点实际到达确认 → 自动进入历史旅行；</li>
+<li>有可靠证据证明曾实际执行、但未正常确认终点且计划期结束 → 可结束为记录不完整；若连是否发生也无法确认，则进入待确认，不自动归为未执行。边界验收见未决项。</li>
+<li>只有“自动异常收尾、记录不完整”的旅行允许恢复为进行中；</li>
+<li>正常已结束旅行不可通过改日期重新激活。</li>
+</ul>
+<h3>8.3 实时监控启动</h3>
+<p>状态和监控分离：</p>
+<ul>
+<li>Trip 可以已经进行中，但实时监控尚未启动；</li>
+<li>用户当天主动打开旅行 → 可启动监控；</li>
+<li>当天第一个有明确计划时间且值得监控的节点进入临近窗口 → 可启动；</li>
+<li>无明确时间 + 用户未打开 App → 不主动全天监控。</li>
+</ul>
+<h3>8.4 监控持续与停止</h3>
+<ul>
+<li>一旦启动，可在锁屏/退出 App 后后台继续；</li>
+<li>只有仍有实时执行价值时持续；</li>
+<li>无剩余实时判断价值时自动停止，即使最后事实未确认也可留下未知；</li>
+<li>跨日交通/地点/自由行动有执行价值时可跨0点继续；</li>
+<li>用户可主动“停止实时监控”，只关闭实时执行层，不结束旅行；</li>
+<li>用户主动停止后跨天保持关闭，直到用户主动重新开启；</li>
+<li>系统自然停止后，后续满足条件可自动恢复；</li>
+<li>普通用户定时提醒不受“停止实时监控”影响；</li>
+<li>用户主动停止实时监控后，位置、实时交通刷新、动态ETA、最新出发时间、自动到达判断、风险计算等都暂停。</li>
+</ul>
+<h3>8.5 定位/后台能力失效</h3>
+<ul>
+<li>定位权限失效 ≠ 用户主动停止监控；</li>
+<li>实时层仍开启，只暂停位置依赖能力；权限恢复自动恢复；</li>
+<li>后台被系统暂停/杀进程后，恢复时重新同步当前时间、位置、交通状态；</li>
+<li>中断期间未知事实保持未知，不续算旧ETA、不补造轨迹；必要时提示一次“实时监控曾中断，已重新同步”。</li>
+</ul>
+<hr />
+<h2>9. 实际执行、延误与重规划</h2>
+<ul>
+<li>Actual 已发生部分锁定，未来重规划不能改写过去；</li>
+<li>偏离本身不是风险，影响受保护安排才形成风险；</li>
+<li>延误不默认整天整体后移，先看当前缓冲/停留能否吸收；</li>
+<li>一个地点可吸收时可建议具体缩短值；多个地点需释放时间时，系统应算出少量可行妥协方案，不把算术丢给用户；</li>
+<li>用户可以拒绝所有方案自行调整；</li>
+<li>错过具体服务后同时比较下一班/替代交通，Preview 后 Adopt；</li>
+<li>当前实际位置作为重规划起点；若实际位置成为执行事实，可进入最终记录；</li>
+<li>用户计划地点不能静默跳过，交通生成节点可随新路线替换。</li>
+</ul>
+<p>提醒：</p>
+<ul>
+<li>延误/明显偏离先一次聚合提醒；</li>
+<li>每个受保护安排临界点可再提醒一次；</li>
+<li>同一风险用户忽略/拒绝后不重复催；</li>
+<li>风险升级、事实变化、新受保护安排受威胁 = 新风险事件；</li>
+<li>普通提醒 App 内；关键风险/需决策可系统通知 + App 内。</li>
+</ul>
+<hr />
+<h2>10. 跨日与时间显示</h2>
+<h3>10.1 跨日关系</h3>
+<p>相邻 Day 可合法存在：</p>
+<ol>
+<li>同地点连续；</li>
+<li>交通本身跨日；</li>
+<li>用户接受未连接。</li>
+</ol>
+<ul>
+<li>跨日地点/自由行动是同一连续节点，不拆成两份；</li>
+<li>跨日交通按出发日→到达日连续记录；</li>
+<li>不为了公式完整制造假节点/假时间。</li>
+</ul>
+<h3>10.2 时区</h3>
+<ul>
+<li>没有 Trip 级统一时区；</li>
+<li>每个地点/事件按事件所在地当地时间展示；</li>
+<li>底层保留时区与UTC；</li>
+<li>跨时区航班轻提示“出发/到达均为当地时间”；其他普通行程不重复提示。</li>
+</ul>
+<hr />
+<h2>11. 待办、附件、备注</h2>
+<h3>11.1 待办</h3>
+<p>用户侧刻意做轻：</p>
+<ul>
+<li>标题；</li>
+<li>未完成/已完成；</li>
+<li>备注；</li>
+<li>可选提醒时间。</li>
+</ul>
+<p>日级待办：每天第一次打开该旅行时集中展示当天相关待办一次；当天不反复弹；未完成不自动滚到下一天。</p>
+<p>Trip 总待办：无明确提醒时间仅在总览展示。</p>
+<h3>11.2 附件</h3>
+<ul>
+<li>可挂地点、交通、Trip；</li>
+<li>单附件一个主要归属；</li>
+<li>图片/PDF/常见文档；</li>
+<li>当前只做存储/查看/下载/删除；</li>
+<li>不默认OCR/AI解析/二维码识别；未来只有用户明确触发才解析。</li>
+</ul>
+<hr />
+<h2>12. 费用 / 记账</h2>
+<h3>12.1 定位</h3>
+<p>行程是主线，记账是辅助；不记费用不影响行程成立。</p>
+<h3>12.2 原始记录与汇总</h3>
+<ul>
+<li>原始金额/币种永久保留；</li>
+<li>实际费用按消费发生日历史汇率快照换算；</li>
+<li>用户切换基准货币后，历史旅行汇总按发生日历史汇率关系切换到新基准币，不用今天汇率重算过去消费；</li>
+<li>没有可靠历史汇率就待换算，不编造。</li>
+</ul>
+<h3>12.3 计划费用 / 实际费用</h3>
+<ul>
+<li>两层都可选；</li>
+<li>计划费用可按人计价或整笔计价；</li>
+<li>Trip 人数是默认人数，单笔计划费用可覆盖人数；</li>
+<li>只有继承 Trip 默认人数的计划费用随 Trip 人数变化；</li>
+<li>实际费用记录真实总金额，一旦发生不再随人数变化；</li>
+<li>实际支付可由计划费用预填，但用户以真实付款修改；</li>
+<li>退款/补差/手续费用正负新记录追加，不覆盖原记录。</li>
+</ul>
+<h3>12.4 汇总</h3>
+<ul>
+<li>当天只显示计划总数、实际总数；</li>
+<li>整趟显示 Plan Total vs Actual Spent，并可看分类；</li>
+<li>不做“当前预计总花费”；</li>
+<li>预算系统暂缓。</li>
+</ul>
+<hr />
+<h2>13. 历史回顾与分享</h2>
+<h3>13.1 历史回顾</h3>
+<p>旅行结束后自动形成回顾视图，不要求用户额外生成或查看。</p>
+<p>回顾默认极简：</p>
+<ul>
+<li>日期；</li>
+<li>可可靠识别的城市/区域；</li>
+<li>当天实际去过的地点；</li>
+<li>自由行动；</li>
+<li>按实际发生顺序；</li>
+<li>同一地点去两次保留两次；</li>
+<li>跳过/未确认默认不展示；</li>
+<li>不默认展示交通、交通时长、风险历史、计划vs实际等执行细节。</li>
+</ul>
+<p>回顾页默认只读；修改事实进入单独“整理/编辑实际行程”状态。历史编辑不重新启动实时执行。</p>
+<h3>13.2 一键分享图片</h3>
+<p>用途：给人看。</p>
+<ul>
+<li>一键生成整趟旅行一张长图；</li>
+<li>顶部旅行标题；</li>
+<li>按日期/城市区域展示极简地点主线；</li>
+<li>旅行前/进行中：取当前有效计划；</li>
+<li>旅行结束后：取最终实际去过的主线；</li>
+<li>不含交通、费用、执行状态；</li>
+<li>即时生成，不保存分享历史。</li>
+</ul>
+<h3>13.3 行程分享链接</h3>
+<p>用途：给别人拿去用。</p>
+<ul>
+<li>分享的是可复用行程骨架，不是展示网页；</li>
+<li>一次性领取链接；</li>
+<li>打开预览不消耗；成功复制到接收者账户后链接失效；</li>
+<li>7天未领取自动过期；</li>
+<li>不绑定指定接收人，第一个成功领取者获得；</li>
+<li>每次点击分享生成新的独立链接；</li>
+<li>原作者不需要分享状态管理/领取者/查看次数；</li>
+<li>可匿名预览，复制时登录；</li>
+<li>分享链接是静态快照，与原旅行后续编辑不联动。</li>
+</ul>
+<p>复制范围：</p>
+<ul>
+<li>地点卡片；</li>
+<li>自由行动；</li>
+<li>计划时间；</li>
+<li>参考交通（类型、班次/线路、上下车与换乘路径、参考时间、用时）；</li>
+<li>参考交通复制后必须按接收者新日期重新校验，不能直接视为有效；</li>
+<li>不复制票价；</li>
+<li>不复制任务、总待办、备注、总备注、费用、附件、订单/预约事实、实际执行状态、历史记录。</li>
+</ul>
+<p>复制流程：</p>
+<ul>
+<li>预览以 Day 1～Day N 为核心，不突出原作者绝对日期；</li>
+<li>点击复制 → 选择新出发日期 + 确认/修改人数 + 确认/修改名称 → 创建 → 直接进入编辑页；</li>
+<li>名称默认“原名称 copy”，重复复制为“copy 2 / copy 3 …”；</li>
+<li>日期平移保留当地计划钟点；</li>
+<li>日期相关客观事实重新校验；</li>
+<li>中间空白 Day、跨日结构保留；</li>
+<li>局部交通查不到或地点失效不阻止复制，标记待处理/已失效；</li>
+<li>原行程不完整也可分享。</li>
+</ul>
+<p>旅行结束后分享/复制：</p>
+<ul>
+<li>取最终实际执行形成的骨架；</li>
+<li>实际时间作为新计划参考；</li>
+<li>实际时间缺失就留空，不拿旧计划冒充；</li>
+<li>实际交通确认过则保留为参考交通，未知则留空；</li>
+<li>交通生成换乘节点作为参考交通路径信息，不锁死为接收者正式旅行目的地。</li>
+</ul>
+<p>自己“历史旅行复制为新旅行”与别人领取分享链接共用同一底层复制能力。</p>
+<hr />
+<h2>14. 网络、数据可靠性、保存与多设备</h2>
+<h3>14.1 网络与供应商</h3>
+<ul>
+<li>无网络：产品采取硬失效态，不把旧缓存伪装成当前可靠界面；</li>
+<li>网络恢复后先重同步关键数据再恢复正常界面；</li>
+<li>单一供应商失败：只让对应能力失效，不让全App失效；</li>
+<li>已确认计划事实可以显示，实时状态明确“当前未知”；</li>
+<li>可靠备份供应商可自动接管，但不能为了有结果而降质量；</li>
+<li>多个可靠来源冲突不做平均，按预设主来源并暴露冲突。</li>
+</ul>
+<h3>14.2 自动保存</h3>
+<ul>
+<li>普通编辑自动保存，无常驻 Save；</li>
+<li>显示 Saving / Saved；</li>
+<li>持续失败明确 unsynced，不假装已保存；</li>
+<li>自动重试少量次数；</li>
+<li>离开时若仍有未保存失败编辑，提示重试/放弃；</li>
+<li>多设备用乐观版本，不做 silent last-write-wins；</li>
+<li>冲突时保留本地未同步编辑但不自动提交/合并。</li>
+</ul>
+<h3>14.3 Undo</h3>
+<ul>
+<li>重要编辑支持短时单步 Undo；</li>
+<li>一个业务动作及其自动副作用作为一个原子动作一起撤销；</li>
+<li>只保留最近一次，不做复杂历史。</li>
+</ul>
+<hr />
+<h2>15. 当前开发策略</h2>
+<p>现在已经具备进入 Backend Domain Blueprint 和领域引擎开发的条件。</p>
+<p>建议顺序：</p>
+<ol>
+<li>Domain model / 状态机 / 时间与约束模型；</li>
+<li>多方向排程引擎；</li>
+<li>冲突检测与 explainable reason/source；</li>
+<li>Preview / Adopt 事务边界；</li>
+<li>自动化测试；</li>
+<li>薄测试 UI；</li>
+<li>正式 Desktop / Mobile UI 后置。</li>
+</ol>
+<p>必须保证：</p>
+<ul>
+<li>计算与采用彻底分开；</li>
+<li>每个推导结果最好带 reason/source，能解释“为什么是这个时间/为什么冲突”；</li>
+<li>冲突求解推荐策略独立成可替换/可迭代策略层，不写死进核心时间传播；</li>
+<li>后续新增案例优先变成自动化测试。</li>
+</ul>
+<hr />
+<h2>16. 仍在持续讨论 / 不应写死的部分</h2>
+<p>主要开放项集中在“冲突求解推荐策略”：</p>
+<ul>
+<li>体验质量如何量化/分级；</li>
+<li>成本、时间、影响范围、风险、偏好的综合排序；</li>
+<li>不同预约类型的可调整性与外部变更能力；</li>
+<li>推荐解数量、解释语言、触发时机的 UX 细化；</li>
+<li>更多真实案例验证。</li>
+</ul>
+<p>这些不阻止领域底座开始开发，但必须设计成可演进规则，而不是散落硬编码。</p>
+<hr />
+<h2>17. 已废弃 / 被替换的旧规则</h2>
+<p>以下不再作为开发依据：</p>
+<ul>
+<li>“整个日期区间不允许重叠，一碰到别的Trip就禁止” → 改为自然日唯一归属 + 合并/释放冲突；</li>
+<li>“日期全部过去后自动判未执行” → 未执行只能由用户确认；</li>
+<li>“必须有可靠执行证据才进入进行中” → 到开始日期默认进入进行中，监控另行启动；</li>
+<li>“当天执行开始 = 第一个地点离开时间” → 生命周期与实时监控拆开；</li>
+<li>“创建旅行必须填结束日期” → 只填开始日期，结束日期由行程推导；</li>
+<li>“无具体日期也可以先做 Day1～DayN 规划” → 创建必须有开始日期；</li>
+<li>“自定义地点必须有规范地址” → 名称 + 可定位位置即可；</li>
+<li>“交通生成节点分享时完全不复制” → 作为参考交通路径信息保留，但不锁死为正式地点；</li>
+<li>“分享都是链接/分享都是展示” → 一键分享图片给人看；行程分享链接给别人用；</li>
+<li>“行程分享长期链接” → 一次性领取链接，7天过期；</li>
+<li>“行程分享复制任务/可复用任务” → 不复制任务/备注等，只复制行程骨架；</li>
+<li>“历史旅行通过改日期重新用” → 复制为新旅行；</li>
+<li>“拆分旅行” → 取消；</li>
+<li>“地点时间以开始+停留为唯一主要输入” → 到达/停留/离开三变量任意两个推第三个；</li>
+<li>“固定班次也需要用户手动锁时间” → 已采用固定班次天然为事实型时间锚点；</li>
+<li>“多个地点可压缩时只告诉用户缺多少时间” → 系统应生成少量具体可行妥协方案，用户选择；</li>
+<li>“用户拒绝推荐后继续动态弹新方案” → 用户拒绝/关闭后进入安静辅助，仅风险升级时重新提醒。</li>
+</ul>
+<hr />
+<h2>18. 本次已确认的新项目与首版架构条件</h2>
+<ul>
+<li>新建空白项目，不重构旧仓库，不迁移旧实际数据；新远程地址尚未指定。</li>
+<li>未来支持桌面网页、移动网页、Windows、macOS、iOS、Android；一套服务端业务规则，不要求所有客户端共用UI代码。</li>
+<li>后端领域优先，正式客户端后置；仅做必要的薄测试界面验证，不同时开发六个端。</li>
+<li>多用户与数据隔离从首轮开始；管理员邀请开通，首版无公开注册。</li>
+<li>首版无协作；预留集中授权边界，不提前做成员/共同编辑/共享位置系统。</li>
+<li>同一账号可多设备登录，修改走服务端版本校验，不做最后写入覆盖。</li>
+<li>邮箱Magic Link；持久、可撤销会话；管理员可禁用和强制登出，不获得读取他人旅行的默认权限。</li>
+<li>首版同时在线不超过5人；当前主机为用户现有i7-12700、32GB x86电脑。实际操作系统和Docker能力由开发时检测。</li>
+<li>单体模块化；Web/API与Worker独立进程，同一台主机Docker Compose运行。PostgreSQL保存业务数据；文件走对象存储。</li>
+<li>Dev、Staging、Production配置与数据库隔离；当前只部署前两者且只有测试数据。</li>
+<li>接受测试数据丢失风险，首版不做异地灾备；不能因此取消持久化或泄露数据。</li>
+<li>不做完整审计平台；保留创建/更新时间、版本、来源、计算原因、必要安全操作记录。</li>
+<li>后端先做通知事件与站内提醒；原生Push后续接；不能宣称手机锁屏关键提醒已可用。</li>
+<li>客户端无网进入不可用页，不继续显示缓存行程或编辑；网络恢复先重同步，单个Provider失败单独标未知。</li>
+<li>每阶段功能分支、测试、commit、push、PR；检查后经用户同意再合并main。</li>
+<li>每次开发要求必须明确推荐模型与推理强度；选择须随任务难度和实际可用模型更新。</li>
+</ul>
+<h2>19. 与当前工程范围的关系</h2>
+<p>完整蓝图描述产品最终需要的行为；首轮P0只建立受控的工程骨架和架构蓝图。P1～P5每段独立授权。复杂推荐质量、正式UI、多终端原生能力等继续迭代，不在P0硬编码。</p>
+<h2>20. 仍保留在完整蓝图的细则（不因首轮后置而丢失）</h2>
+<h3>费用与人数</h3>
+<ul>
+<li>用户手工记账核心只有名称、金额、币种；不增加强制分类/备注/付款人表单。</li>
+<li>日期默认来自当前记录上下文，补录以用户填写的消费/服务归属日期为准；支付日期和录入日期不覆盖行程归属日期。</li>
+<li>具体节点关联只推荐，用户确认；不选就先按天，不强制挂地点。</li>
+<li>用户主动选择币种永远优先；所在地仅用于预选，不按界面语言强行改变。跨国票据有明确计价币种时按该币种。</li>
+<li>分类少而稳定：交通、住宿、餐饮、门票/活动、购物、其他；当天不做分类展开，整趟可看分类。</li>
+<li>计划/实际分开，未实际记账不把预计当已花；实际与某计划费用的对应只推荐，由用户确认。</li>
+<li>计划费用跟当前有效行程，失效预计退出当前计划合计；实际已花不因地点/交通删除而消失。删除归属节点时保留实际费用及必要说明，不级联删除真实支出。</li>
+<li>退款直接负数记录，不维护到账状态；补差/手续费追加；用户可随时纠正或删除错误账目。</li>
+<li>跨多晚酒店费用底层一笔，日汇总按已确认服务周期展示性分摊；计划按计划周期、实际按实际周期。跨日交通整笔归出发日。</li>
+<li>按人计划费用可用Trip默认人数或单笔覆盖；人数变化不能改历史实际总金额。</li>
+<li>预算、多人分摊、OCR小票识别留未来，不进入首轮。</li>
+</ul>
+<h3>记录与附件</h3>
+<ul>
+<li>最终一条时间轴保留地点执行状态（已执行/已跳过/未确认）；删除是编辑移除，跳过是执行结果，不混用。</li>
+<li>未执行的原交通不占默认最终主线；实际交通未知显示未记录。此展示方式暂定，原交通仍可留后台历史。</li>
+<li>自由行动的消费/备注不使其自动变成POI；只有用户主动转换，才变成普通地点或细化多个节点。</li>
+<li>节点上的备注/待办/附件在记录整理阶段仍可编辑；旅行级附件可放签证/保险等，单附件一个主要归属，不做文件夹网盘。</li>
+<li>所有附件有类型/数量/大小限制，具体数字后续工程阶段确定；默认不解析内容。</li>
+<li>旅行回顾只按日期、可靠区域和已执行地点/自由行动排序，重复到访不去重；交通、金额、状态等不默认出现在极简回顾。</li>
+</ul>
+<h3>分享与删除</h3>
+<ul>
+<li>图片即时生成整趟长图，带标题；不带费用/私有附件，不存图片分享历史。</li>
+<li>行程分享是静态可领取骨架：匿名预览，登录后复制；有效7天，成功复制才消耗，不以预览/邮件扫描消耗。</li>
+<li>领取成功和新Trip创建需原子事务；创建因日期归属冲突失败不得消耗链接。每次生成独立链接，不做分享管理列表。</li>
+<li>自定义地点按普通地点一起复制，不另加用户已拒绝的隐私弹窗；系统仍限制分享范围，不把私有附件/备注带出。</li>
+<li>复制时保留参考交通类型/班次/路径/用时，但不复制票价；原车站只随参考路径保留，新路线确认后再展开，不把过时换乘点强制设必经。</li>
+<li>新日期若能证明实质同方案，可自动验证；发生实质选择变化仍须采用。局部验证失败不阻止复制，不伪造有效性。</li>
+<li>Trip永久删除前强警告，不输入名称二次验证；删除数据并使尚未领取链接失效，别人的独立副本不受影响。</li>
+<li>不可逆合并不得伪装可Undo；无损合并保留来源、备注/任务/费用/附件，人数差异先由用户选默认人数。</li>
+</ul>
+<p>这些规则分别纳入后续模块任务，不代表P0～P5自动授权开发全部功能。</p>
+</article><article id="s4" class="panel"><div class="doc-meta">docs/02_首轮开发要求_v1.0.md</div><h1>首轮开发要求 v1.0｜新建空白项目</h1>
+<h2>1. 本次目标</h2>
+<p>从空白项目建立一个<strong>可测试、可解释、可迁移、多终端共用</strong>的旅行后端。用户是首次开发软件的新手；需要中文、简明、可操作的阶段反馈，不能让他自己排查一大堆未说明的工程问题。</p>
+<p>完整产品愿景维持不变：根据用户需求规划合适旅程，辅助执行与临时调整，减少繁琐操作，留下真实记录。但首轮只做支撑这些能力的必要内核，不一次做完产品。</p>
+<h2>2. 项目与仓库前提（不可忽略）</h2>
+<ul>
+<li>这是Greenfield空白项目；不要克隆、复用或修改旧业务仓库作为默认起点。</li>
+<li>使用用户确认的新项目目录和新GitHub远程。地址未给时，禁止猜测。</li>
+<li>先检查目录、Git、origin、分支、工具环境；有未知文件不得清空。</li>
+<li>若用户仅提供空目录，可在其中初始化本地骨架；缺失远程/基线时记录发布阻塞，不得伪报已push/PR。</li>
+<li>新远程没有main首提交时，要求用户先建立最小基线或单独授权初始化；没有“无条件直推main”的例外。</li>
+</ul>
+<h2>3. 建议技术基线（工程选择，不是旧项目事实）</h2>
+<ul>
+<li>TypeScript strict；Node.js 24 LTS作为本次建议大版本，开工核验支持状态与兼容性。[S04]</li>
+<li>pnpm workspace（锁定具体版本）、模块化单体，不上微服务/Kubernetes。</li>
+<li>轻量HTTP API框架优先Fastify；数据库PostgreSQL；ORM优先Prisma。P0核验相互兼容版本，写ADR和lockfile；不在本包猜具体补丁号。</li>
+<li>建议测试框架Vitest；HTTP契约与领域测试分层；真实PostgreSQL集成测试不能以SQLite代替。</li>
+<li>Web/API和Worker两个运行入口，共享domain/application packages；同机Docker Compose。[S05]</li>
+<li>ObjectStorage接口；本地测试可用实现该契约的磁盘后端，文件在隔离volume，不塞数据库；云S3兼容实现以后替换。</li>
+<li>首轮不锁定Electron/Tauri/React Native/Flutter/Swift/Kotlin。正式双端UI与原生框架后续单独选型。</li>
+</ul>
+<h2>4. 目录边界提案</h2>
+<pre><code class="language-text">apps/
+  api/                  # HTTP、鉴权入口、DTO映射
+  worker/               # 持久任务执行入口
+  debug-web/            # P5才实现，测试台不是正式产品UI
+packages/
+  domain/               # 纯时间/约束/邻接/冲突规则
+  application/          # 用例编排、权限、事务边界
+  contracts/            # 平台无关请求/响应/错误码
+  persistence/          # PostgreSQL/ORM/事务适配
+  providers/            # 地点/交通/航班/汇率接口与适配
+  storage/              # 对象存储契约/本地测试实现
+  test-fixtures/        # 明确标记虚构的测试样本
+infra/compose/          # dev/staging独立配置与卷
+prisma/migrations/      # 确认采用Prisma后创建
+scripts/
+docs/
+</code></pre>
+<p>只创建本阶段真正需要的包；不为表面架构完整建几十个空服务。</p>
+<h2>5. 首轮阶段与授权边界</h2>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>主要交付</th>
+<th>不做</th>
+<th>推荐模型 / 强度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P0 首次任务</strong></td>
+<td>架构蓝图、规则登记、workspace、API/Worker健康骨架、Compose、CI、最小smoke测试</td>
+<td>完整登录、复杂业务表、真实外部Provider、正式UI</td>
+<td><strong>GPT-5.6 Sol / Extra High（xhigh）</strong>；备选Luna / Max</td>
+</tr>
+<tr>
+<td>P1 基础安全与任务</td>
+<td>邀请/Magic Link/会话撤销、账号隔离、持久任务、存储契约、dev/staging</td>
+<td>协作、公开注册、订单系统</td>
+<td>Sol / Extra High；明确子任务可Luna / Max</td>
+</tr>
+<tr>
+<td>P2 行程领域</td>
+<td>Trip/Day/Visit/Transport骨架、邻接失效、版本、基础生命周期与三层时间数据</td>
+<td>未决日边界自动处理、旅行拆分</td>
+<td>Sol / Extra High</td>
+</tr>
+<tr>
+<td>P3 纯计算内核</td>
+<td>正反双向传播、来源解释、约束/缓冲冲突、固定夹具测试</td>
+<td>全网路线、体验质量评分硬编码</td>
+<td>Sol / Extra High；疑难用Max复核</td>
+</tr>
+<tr>
+<td>P4 查询与采用</td>
+<td>Provider契约探针、候选、Preview/Adopt、乐观锁/幂等/撤销、受控推荐策略</td>
+<td>擅自订票/改签/改预约</td>
+<td>Sol / Extra High</td>
+</tr>
+<tr>
+<td>P5 内测验证</td>
+<td>最小调试界面、站内通知、已确认流程的端到端验收、部署说明</td>
+<td>正式设计、原生包装/Push</td>
+<td>Luna / Max实施；Sol / Extra High审查</td>
+</tr>
+</tbody>
+</table>
+<p>这些推荐是针对任务风险的工程判断，不是模型质量保证。可用性和强度以实际Codex版本为准，详见模型文档。</p>
+<p><strong>每阶段独立分支和PR。P0完成停住；未获确认不能自动执行P1。</strong> P2之后的详细任务在前一阶段真实代码基础上复核再发，不照纸面臆测路径。</p>
+<h2>6. 当前必须实现/预留/后置</h2>
+<h3>必须从基础阶段做对</h3>
+<p>多用户隔离；长期可撤销会话；服务端时间/版本/授权；数据不编；Preview不改行程；采用原子性；真实记录保护；错误可解释；任务落数据库；开发环境隔离；GitHub可追溯。</p>
+<h3>建接口/边界，不等于实现完整功能</h3>
+<p>位置证据输入、NotificationEvent、Provider、ObjectStorage、RecommendationPolicy、未来客户端凭证方案、集中授权函数。</p>
+<h3>不在本轮批量开发</h3>
+<p>正式Web/桌面/移动界面；Windows/macOS安装包；iOS/Android应用；原生推送、后台定位采集；同行协作；公众注册；天气；预算；票据订单管理；OCR/附件解析；多人分摊；分享长图与一次性领取完整UI；无损Trip合并完整交互；跨天推荐；完整审计和自动异地灾备。</p>
+<p>费用、附件、待办、分享、合并的<strong>完整产品规则仍保留</strong>，不因本轮后置而删除；P1/P2只建必要的可扩展边界，不提前铺全部业务接口。</p>
+<h2>7. P0验收清单</h2>
+<ul>
+<li>新项目位置、origin和分支已明确；若远程未配置须标BLOCKED。</li>
+<li>架构蓝图列出不可变事实、用户意图、计算结果的区分；未决项不写成已确认。</li>
+<li>能安装锁定依赖、lint、typecheck、unit test、build。</li>
+<li>API提供liveness/readiness；readiness区分DB依赖，不能总返回ok。</li>
+<li>Worker独立启动、优雅停止和健康心跳；此阶段没有业务任务时不得宣称后台通知已完成。</li>
+<li>Compose启动API、Worker、PostgreSQL；重启普通容器不丢命名卷内测试数据。</li>
+<li>P0不开放业务API给外部；测试服务默认绑定本机。</li>
+<li>Dev/Staging环境模板不含真实密钥；生产配置默认禁用、不自动部署。</li>
+<li>CI真实执行可执行的检查；数据库测试若暂未存在应如实标未实现，不以空测试套件“绿灯”。</li>
+<li>文件变更分组提交，push分支，PR存在；报告真实链接、SHA和测试证据。</li>
+</ul>
+<h2>8. 首轮能力限制必须写在测试界面/说明中</h2>
+<ul>
+<li>本轮没有原生Push，不保证App关闭后的关键通知触达；站内提醒不是锁屏通知的替代品。</li>
+<li>没有移动端定位采集时，只能使用标明来源的测试/用户主动输入证据；服务器不能凭空获取用户位置。</li>
+<li>无真实Provider凭证/覆盖时，接口返回UNAVAILABLE或只运行明确标记的fixtures，不展示虚假生产交通。</li>
+<li>测试期间接受数据重置，不意味着正式可用；允许重置仅限隔离测试库，必须明确环境并保护其他数据。</li>
+</ul>
+<h2>9. 停止条件</h2>
+<p>遇到仓库目标不明、权限不足、密钥缺失、产品边界矛盾或无法运行关键测试：完成不受影响部分，列明BLOCKED项，停止对应实现。不能为了交付自行取消鉴权、把假数据放生产或绕过用户选择权。</p>
+</article><article id="s5" class="panel"><div class="doc-meta">docs/03_领域与API蓝图_v0.1.md</div><h1>Backend Domain Blueprint v0.1</h1>
+<p><strong>性质：工程蓝图提案。已确认产品规则不变，表名/路径可在P0 ADR中微调。未决事项按阶段闸门处理。</strong></p>
+<h2>1. 同一核心，多个终端</h2>
+<pre><code class="language-text">桌面网页 / 手机网页 / Windows / macOS / iOS / Android
+                         │  相同业务契约
+                         ▼
+                    Web / API
+          身份 → 授权 → 用例编排 → 事务
+                         │
+             平台无关 Domain Core
+         时间传播 / 约束 / 邻接 / 冲突 / 解释
+                         │
+          PostgreSQL + Provider + ObjectStorage
+                         ▲
+                Worker（独立进程）
+           持久任务 / 邮件 / 状态刷新 / 通知事件
+</code></pre>
+<p>Domain不得依赖React、Next页面状态、DOM、浏览器、移动SDK、数据库连接或网络。时间、ID、随机源通过参数/端口注入；相同输入与策略版本得到相同结果。</p>
+<p>Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Worker调用同一用例，不绕过授权、版本、事务和监控开关。</p>
+<h2>2. 关键对象与责任</h2>
+<table>
+<thead>
+<tr>
+<th>对象</th>
+<th>作用</th>
+<th>首轮落点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>User / Invitation / Session</td>
+<td>受控账号、角色、会话失效</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>UserPreference</td>
+<td>基准货币、语言分别保存</td>
+<td>P1必要字段</td>
+</tr>
+<tr>
+<td>Trip</td>
+<td>所有者、名称、默认人数、日期范围、生命周期</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>Day / DateOwnership</td>
+<td>日期组织、用户内日期归属约束</td>
+<td>P2；O-01/O-02先过闸门</td>
+</tr>
+<tr>
+<td>Place</td>
+<td>真实地图地点身份/坐标，不是每次访问</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>Visit</td>
+<td>某次出现；PLACE或FREE_ACTION；来源与执行状态</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>TransportEdge / AdoptedRoute</td>
+<td>相邻连接、已采用快照、历史失效</td>
+<td>P2/P4</td>
+</tr>
+<tr>
+<td>RouteCandidate / RouteReference</td>
+<td>尚未采用的查询候选 / 复制来的旧方案参考</td>
+<td>P4；不直接当现行事实</td>
+</tr>
+<tr>
+<td>UserTimeIntent / TimeConstraint</td>
+<td>固定/最早/最晚/最低停留/预留要求</td>
+<td>P3</td>
+</tr>
+<tr>
+<td>ScheduleProjection</td>
+<td>从当前版本与证据计算出的结果</td>
+<td>P3</td>
+</tr>
+<tr>
+<td>Evidence / ProviderSnapshot</td>
+<td>观测时间、来源、适用位置、可靠性</td>
+<td>P3/P4</td>
+</tr>
+<tr>
+<td>Preview / OperationReceipt</td>
+<td>变更预览与采用回执、幂等与撤销依据</td>
+<td>P4</td>
+</tr>
+<tr>
+<td>Job / NotificationEvent</td>
+<td>持久任务与站内通知</td>
+<td>P1骨架/P5业务</td>
+</tr>
+<tr>
+<td>Expense / Task / Attachment / ShareClaim</td>
+<td>完整蓝图中保留的数据边界</td>
+<td>分阶段另发，不在P0全建</td>
+</tr>
+</tbody>
+</table>
+<h2>3. 数据归属与权限</h2>
+<p>所有私有资源必须通过owner和所属Trip检查权限。owner从服务端会话取得，不信任客户端传来的ownerId。管理员仅能开通/禁用/撤销账号会话，不继承读取他人Trip、附件、位置、费用的权限。[S07]</p>
+<p>首版一趟Trip一个owner；预留<code>authorize(actor, action, resource)</code>集中入口。不要提前建复杂协作表、共享定位或多人账本。</p>
+<p>同一Place可有多个Visit；来源为USER_PLANNED / ROUTE_GENERATED / EXECUTION_ADDED，但三者可表现为普通地点卡。FREE_ACTION没有假Place/假坐标。</p>
+<h2>4. 时间不能仅有startTime/endTime两列</h2>
+<p>至少区分：</p>
+<ul>
+<li>输入意图：用户想要的目标时间/停留要求，包含比较运算EQ/NOT_AFTER/NOT_BEFORE/AT_LEAST与是否🔒。</li>
+<li>已采用的计划结果：路线和独立计划值支持的排程快照。</li>
+<li>当前预测：基于最新证据的预计结果，可失效。</li>
+<li>实际记录：已确认发生的事实，自动排程不能回写过去。</li>
+</ul>
+<p><code>TimeValue</code>建议包含：<code>localDateTime</code>、<code>timeZone</code>（IANA）、可确定时的<code>instant</code>、<code>sourceKind</code>、<code>sourceRef</code>、<code>observedAt</code>、<code>quality</code>。用户地点当地时间优先展示；持续时长用真实时间点之差计算。不使用服务器默认时区解析输入。</p>
+<p>没有Trip级统一时区；生命周期日期的调度基准不能暗用服务器UTC，参见O-03。对夏令时重复/不存在钟点、跨日期线不确定归属，返回明确歧义，而不是自动纠正成看似有效的时间。</p>
+<h2>5. 一个节点，不复制跨日实体</h2>
+<p>跨日Visit或Transport是同一实体，在覆盖的Day里投影显示。费用不因重复显示而重复计数。跨日交通由真实出发/到达事实判断，不让用户手动给普通卡贴跨日标签。</p>
+<p>不要只比较终点本地日期是否“大于”起点本地日期来推时长；跨时区航班可能本地到达钟点看起来更早。首轮先完成同一时区跨午夜与UTC时长测试；跨日期线Day投影待O-03。</p>
+<h2>6. 行程状态与监控状态分开</h2>
+<p>Trip生命周期提案：PLANNED、IN_PROGRESS、AWAITING_OUTCOME、FINISHED、NOT_TAKEN。FINISHED另带finishReason NORMAL/INCOMPLETE，不把不完整伪装成未去。</p>
+<ul>
+<li>到起始日期进入IN_PROGRESS是运行假设，不自动生成Actual事实。</li>
+<li>NOT_TAKEN只能由用户确认；无数据不等于没旅行。</li>
+<li>无法确认整趟是否发生，计划周期后AWAITING_OUTCOME并停止任务。</li>
+<li>已有实际执行但尾段未知，可异常收尾；有争议按O-07不自动归类。</li>
+</ul>
+<p>监控用户开关与当前运行状态也分开：<code>userEnabled</code> + OFF/IDLE/RUNNING/LIMITED。用户关掉后不因第二天或重新打开界面自动恢复；系统自然停止不改变userEnabled。</p>
+<p>设备证据必须有deviceId、capturedAt、accuracy、source、receivedAt；晚到数据不能覆盖较新证据。位置输入只认用户授权客户端/主动填写，不通过服务器猜测。</p>
+<h2>7. Query / Preview / Adopt的事务规则</h2>
+<p><strong>Query</strong>：传起終点、最早出发/最晚到达、日期时区、已有方案参考；返回候选与来源/有效期。不得写当前Trip。</p>
+<p><strong>Preview</strong>：以baseTripVersion、用户动作、provider snapshot和policyVersion计算变更。可保存临时候选，但不得修改正式节点/交通/通知。</p>
+<p><strong>Adopt</strong>：服务端重新校验权限、Trip版本、预览过期和Provider适用性；有效则一次事务落地节点、交通、来源与相关结果，并产生outbox事件。</p>
+<p>必须有requestId/idempotencyKey；同一请求重试不能重复插入Visit、费用、任务或通知。相同key不同payload要拒绝。两设备同时采用同一baseVersion最多一个成功；另一个明确VERSION_CONFLICT。[S09]</p>
+<p>一次采用失败不能只写了一半路线。外部API调用不要包在长数据库事务中：先取候选，事务提交时核验版本/快照有效性；必要时返回PREVIEW_STALE。</p>
+<h2>8. 撤销不是把世界倒回过去</h2>
+<p>单步、短时撤销恢复上一用户操作及其内部连带数据；不得回滚后续真实航班更新、实际位置或已发生事实。</p>
+<p>若自上次操作后Trip版本已被其他设备修改，撤销返回UNDO_CONFLICT，不覆盖新改动。撤销成功后按最新可靠证据重新计算风险，不能恢复一个已经失真的“正常”状态。</p>
+<p>Trip永久删除与不可逆合并不享有普通Undo；须用其已确认强提示流程。</p>
+<h2>9. API契约目录（蓝图，不要求P0全部实现）</h2>
+<table>
+<thead>
+<tr>
+<th>范围</th>
+<th>示例接口</th>
+<th>必要边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>健康</td>
+<td>GET /health/live, /health/ready</td>
+<td>不含敏感配置</td>
+</tr>
+<tr>
+<td>登录</td>
+<td>POST /auth/magic-link/request, /auth/magic-link/consume</td>
+<td>邀请、单次、过期、限流</td>
+</tr>
+<tr>
+<td>会话</td>
+<td>POST /auth/logout, GET /me</td>
+<td>server端撤销</td>
+</tr>
+<tr>
+<td>管理</td>
+<td>POST /admin/invitations, POST /admin/users/{id}/disable, /revoke-sessions</td>
+<td>管理员不读取Trip</td>
+</tr>
+<tr>
+<td>行程</td>
+<td>POST /trips, GET /trips/{id}, PATCH /trips/{id}</td>
+<td>owner验证、baseVersion</td>
+</tr>
+<tr>
+<td>节点</td>
+<td>POST /trips/{id}/commands</td>
+<td>类型化业务command，不接收随意数据库patch</td>
+</tr>
+<tr>
+<td>计算</td>
+<td>POST /trips/{id}/schedule/evaluate</td>
+<td>可解释、无正式写入</td>
+</tr>
+<tr>
+<td>路线</td>
+<td>POST /trips/{id}/routes/query</td>
+<td>候选≠采用</td>
+</tr>
+<tr>
+<td>预览</td>
+<td>POST /trips/{id}/previews</td>
+<td>baseVersion+输入快照</td>
+</tr>
+<tr>
+<td>采用</td>
+<td>POST /trips/{id}/previews/{pid}/adopt</td>
+<td>幂等+事务+版本</td>
+</tr>
+<tr>
+<td>撤销</td>
+<td>POST /trips/{id}/operations/{oid}/undo</td>
+<td>仅最近一次且不覆盖新事实</td>
+</tr>
+<tr>
+<td>通知</td>
+<td>GET /notifications, POST /notifications/{id}/dismiss</td>
+<td>归属隔离、抑制同一事件</td>
+</tr>
+<tr>
+<td>附件</td>
+<td>POST /attachments/upload-intent, /complete, GET /attachments/{id}/download</td>
+<td>私有访问、类型/配额校验</td>
+</tr>
+</tbody>
+</table>
+<p>命名可在P0调整，语义不可暗改。DTO不能暴露ORM内部表，也不能叫desktop-card/mobile-card。</p>
+<h2>10. 统一错误与解释结果</h2>
+<p>错误建议包含<code>code</code>、面向用户的中文<code>message</code>、<code>requestId</code>、<code>retryable</code>、必要的非敏感详情。示例：
+UNAUTHENTICATED / FORBIDDEN / VERSION_CONFLICT / PREVIEW_STALE / DATE_OWNED / PROVIDER_UNAVAILABLE / NO_MATCHING_CANDIDATE / LOCATION_UNKNOWN / CONSTRAINT_CONFLICT / AMBIGUOUS_TIME_INPUT / UNSUPPORTED_SCENARIO。</p>
+<p><code>NO_MATCHING_CANDIDATE</code>与<code>PROVIDER_UNAVAILABLE</code>分开；都不能自动变成“今天没车”。数据错误不能以空数组悄悄隐藏。</p>
+<p>每个时间结果/冲突至少带sourceRefs、规则ID、输入值、计算式的简短解释和policyVersion，不记录模型隐藏思维过程。示例：“20:21固定发车−40分钟最低预留=19:41到站目标”。</p>
+<h2>11. 测试与真实数据严格分开</h2>
+<p>Fixture数据明示SYNTHETIC，禁用于真实交通展示、Provider回退或production。Provider contract sample如含个人信息须脱敏且核对使用条款；测试日志不保存完整票据或令牌。</p>
+<p>至少在正式UI前做一次真实接口字段与覆盖探针：到达/出发含义、时区、班次、站内步行、价格范围、停运、日期支持。探针失败记录缺口，不能用夹具“证明”接入完成。</p>
+</article><article id="s6" class="panel"><div class="doc-meta">docs/04_多方向排程_执行基线_v0.3.md</div><h1>多方向排程与冲突求解｜执行基线 v0.3</h1>
+<p><strong>基于已确认v0.2和本轮案例；复杂推荐质量仍在迭代。以下样例不是已核验时刻表。</strong></p>
+<h2>1. 核心关系</h2>
+<p>Visit：arrival + dwell = departure。Transport：fromDeparture = routeStart，toArrival = routeEnd。均需引用具体位置/环节和完整日期时区。</p>
+<p>同一引擎支持forward、backward、bidirectional、mixed；不是四套模式或四份状态。先确定哪一端/哪一段，就从已有锚点传播约束。</p>
+<h2>2. 必须分开存储</h2>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>例子</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>用户目标</td>
+<td>浦东23:30前到</td>
+<td>不被23:00路线结果覆盖</td>
+</tr>
+<tr>
+<td>用户停留要求</td>
+<td>南京南至少40分钟</td>
+<td>到得早时可以实际留45分钟</td>
+</tr>
+<tr>
+<td>当前采用结果</td>
+<td>19:36到、20:21发车</td>
+<td>计算45分钟，不伪造为19:41</td>
+</tr>
+<tr>
+<td>预测</td>
+<td>实时预计19:42到</td>
+<td>不覆盖原定/实际</td>
+</tr>
+<tr>
+<td>实际</td>
+<td>真实确认19:38到</td>
+<td>后续自动重排不能改写</td>
+</tr>
+</tbody>
+</table>
+<h2>3. 字段编辑如何决定方向</h2>
+<ul>
+<li>到达为独立输入、离开为派生：修改停留默认保持到达，推离开。</li>
+<li>离开为独立输入/已选班次、到达为派生：修改停留默认保持离开，推到达目标。</li>
+<li>两端均由已采用交通确定：停留是结果；用户改停留，形成新要求与当前方案冲突，不改班次。</li>
+<li>有🔒先尊重锁；两个用户独立输入仍无法辨别保留方向，返回AMBIGUOUS_TIME_INPUT并只问必要的一项。</li>
+<li>普通计划到达、最晚到达、精确到达不同；接口明确intent，不把所有输入自动解释为≤。</li>
+<li>缺少变量允许留空；从一个时间不能虚构另两个。无起点到达/无终点离开无需补假值。</li>
+</ul>
+<h2>4. 三个基准案例</h2>
+<h3>C01 中间固定车次反推</h3>
+<p>固定列车20:21南京南出发、21:22虹桥到达。南京南预留20分钟 → 到站目标≤20:01。前段候选19:20出发/19:56到；采用后南京南当前计划停留25分钟。</p>
+<h3>C02 增加最低停留</h3>
+<p>当前19:56到、20:21走；改为至少40分钟 → 目标≤19:41；旧方案冲突15分钟。旧交通不改，查询前段候选。采用19:36到的新方案 → 停留45分钟；仍保留最低40分钟要求。</p>
+<h3>C03 直接编辑到达目标</h3>
+<p>用户设19:30到，20:21已固定 → 目标停留51分钟；旧采用方案仍是19:56到/25分钟并显示冲突。查询带明确到达语义；采用19:24到候选时，当前方案停留57分钟，但19:30目标继续保留。不能在正式结果里把19:30当19:56交通的到达事实。</p>
+<h2>5. 交通查询不是时间减法</h2>
+<p>Forward先求最早可出发；Backward先求最晚可到达；再查真实候选。固定发车不能跟着时间加减平移成不存在的班次。</p>
+<p>先沿当前已选方案评估冲突；可为解冲突搜索替代，不以“最快20分钟”冒充用户已采用的40分钟方案。替代成本、风险、后续影响一起进入预览。</p>
+<p>对已采用步行/驾车/出租车等，仅无选择改变的ETA刷新可自动进行。更换路径、交通类型、新增费用承诺必须用户采用；绝不自动下单。</p>
+<h2>6. 缓冲的参照和去重</h2>
+<p>必须值/建议值只用于其适用位置和截止环节；进站检票截止与到站提前量不可直接比较。缺少必要连接耗时就标UNKNOWN，不输出“安全”。</p>
+<p>路线已包含站内步行则不重复加；station dwell包含步行+等待，不再额外加一次dwell。两端候车区间不是乘车时长。</p>
+<p>浦东23:00到、次日02:00发：区间3小时；2.5小时是建议预留则已满足，不把航班改到01:30。</p>
+<p>状态：达到可用建议为正常；低于建议/用户🔒但未突破必须为黄色；低于可靠必须值为红色。数据不够时UNKNOWN与三色并列，不把未知当正常。</p>
+<p>用户接受风险只抑制同层重复提醒，不修改客观阈值。不能将红色方案标成“已解决”，仍可以用户明确接受保留。</p>
+<h2>7. 传播遇到边界</h2>
+<p>固定班次、用户独立约束、已发生事实都不能自动挪动，但可继续计算影响。未选边使依赖它的结果变未知，不抹掉其他锚点。两侧不可同时满足时返回冲突集，不循环覆盖两端直到看似收敛。</p>
+<p>对每个可计算区间做上下界传播；约束不一致给出最小可解释冲突。算法必须有有界终止条件和循环检测；不以“反复加减直到误差很小”处理约束。</p>
+<h2>8. 冲突候选生成与排序</h2>
+<p>先评估局部交通替代能否保住现有安排。失败或不接受，再考虑前序压缩/提前、后续顺延、用户确认的预约调整、保留风险。每个候选包含：改哪些点/边、释放多少时间、增加费用（未知则未知）、影响哪些受保护安排、体验时长变化、依赖哪些未确认外部条件。</p>
+<p>默认展示1推荐+最多2备选，不要求凑满3个。若只有2个真实候选，就只给2个。没有可靠解时说没有可确认方案，并保留用户主动编辑入口。</p>
+<p>约束：不动已执行部分、不假设餐厅18:00有位、不篡改班次。调预约只能标为“需先联系确认”；在没有外部确认前不能标可执行新预约。</p>
+<p>推荐策略与纯传播分开。已知偏好可参与排序；未知偏好参考受保护安排、风险、改动范围、额外成本和体验影响。<strong>不硬编码全局评分权重，不宣称最优。</strong></p>
+<p>晚餐剩60分钟与20分钟是测试对照，不是全世界餐厅的质量阈值。没有用户要求/可靠依据，展示“90→20分钟”的损失，不武断禁止；策略细化继续讨论。</p>
+<h2>9. 安静辅助</h2>
+<p>首次实质冲突可给方案。用户拒绝/关闭后进入quiet-assist：只更新缺口和状态，不重复主动推荐。用户要求或新事实导致风险明显升级才再生成。解决时状态静默消失。</p>
+<p>时刻每过一分钟不视为“新的重大风险”。事件需有stable event key、severity、basisVersion和acceptedAt；防止重复发通知。15分钟再提醒是用户主动触发，解除风险取消预约提醒任务。</p>
+<h2>10. Preview / Adopt与撤销</h2>
+<p>计算、查询、预览可以自动；修改选择必须经采用。保存用户的新要求不等于自动采用为解决它而生成的路线。</p>
+<p>Adopt基于版本、候选有效期、授权、幂等键原子提交。版本过期先重算，不把旧预览强行写进去。撤销用户动作与内部连带结果，但不能撤销之后发生的外部事实；按最新证据重算风险。</p>
+<h2>11. 可直接测试的状态与限制</h2>
+<ul>
+<li>计划=当前正式已采用输入，预计=最新可确认的计算，实际=已发生证据；互不覆盖。</li>
+<li>计划编排可从中间开始；旅行正在执行时不允许反推改写已完成时间。</li>
+<li>Query失败 / 无候选 / 确认停运必须不同结果。</li>
+<li>缺少路径时不能把两项目标时间之差全部算自由空档。</li>
+<li>不做AI推理必依赖：确定性规则和测试先行；未来推荐服务只能调用同一Preview/Adopt边界。</li>
+</ul>
+</article><article id="s7" class="panel"><div class="doc-meta">docs/05_验收场景与测试清单.md</div><h1>验收场景与测试清单</h1>
+<p>本清单共 <strong>84 个场景</strong>。它们是待转化为自动化测试的规格，<strong>不是已执行或已通过的测试</strong>。所有时刻/票价示例均为明确的合成测试数据。</p>
+<p>按stage过滤实施；gate不是ready的场景待对应产品边界确认。P0不要求实现全部用例，不得为刷绿而写空测试。</p>
+<h2>P0</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>场景</th>
+<th>前提 / 操作</th>
+<th>预期</th>
+<th>闸门</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FND-01</td>
+<td>空项目边界</td>
+<td>用户给新空目录；旧仓库地址曾在聊天出现；初始化</td>
+<td>只在新目录工作；origin不明不能连接旧仓库</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FND-02</td>
+<td>非空目录保护</td>
+<td>目录已有未知文件/未提交改动；检查初始化</td>
+<td>保留并报告，不reset/clean</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FND-03</td>
+<td>活性与就绪分开</td>
+<td>API进程运行但PG不可达；请求health</td>
+<td>liveness存活；readiness不就绪且无敏感信息</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FND-04</td>
+<td>独立Worker</td>
+<td>API停止，worker进程仍运行；观察进程</td>
+<td>两个入口独立；不声称无任务骨架已有业务功能</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FND-05</td>
+<td>测试数据持久化</td>
+<td>PG命名卷内有测试记录；重启普通容器</td>
+<td>记录保留；无自动reset</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FND-06</td>
+<td>环境隔离</td>
+<td>dev与staging同时存在；写dev测试记录</td>
+<td>staging不可见，密钥和volume不串用</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FND-07</td>
+<td>发布证据</td>
+<td>本地有commit但push权限不足；结束阶段</td>
+<td>报告BLOCKED；不声称已同步，不写main</td>
+<td>ready</td>
+</tr>
+</tbody>
+</table>
+<h2>P1</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>场景</th>
+<th>前提 / 操作</th>
+<th>预期</th>
+<th>闸门</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AUTH-01</td>
+<td>邀请制</td>
+<td>未邀请邮箱；申请登录</td>
+<td>不创建公开用户；响应不泄漏账号存在性</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-02</td>
+<td>单次凭证</td>
+<td>有效Magic Link同token；并发兑换两次</td>
+<td>最多一次成功，不产生两个可重放凭证</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-03</td>
+<td>邮件扫描不消耗</td>
+<td>有效登录链接；仅GET预览</td>
+<td>不直接消费；用户兑换请求才消耗</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-04</td>
+<td>过期凭证</td>
+<td>token超过配置有效期；兑换</td>
+<td>拒绝，不转为长期会话</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-05</td>
+<td>多设备登录</td>
+<td>同用户两合法会话；设备A继续登录</td>
+<td>不踢设备B</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-06</td>
+<td>强制注销</td>
+<td>管理员撤销账号全部会话；旧会话再次访问</td>
+<td>所有设备受保护请求拒绝，必须重登</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-07</td>
+<td>禁用账号</td>
+<td>账号被禁用；旧会话访问或重新申请登录</td>
+<td>都不恢复使用权限</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-08</td>
+<td>管理员不读内容</td>
+<td>管理员与普通用户各自有资源；管理员取他人的私有资源</td>
+<td>拒绝，不因ADMIN绕过owner</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-09</td>
+<td>资源越权</td>
+<td>U1知道U2的资源ID；读取/修改/下载</td>
+<td>拒绝跨owner资源；嵌套资源也检查</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>AUTH-10</td>
+<td>重定向与请求安全</td>
+<td>恶意回调地址或跨站写请求；兑换/提交</td>
+<td>回调allowlist与CSRF/Origin校验拒绝</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>JOB-01</td>
+<td>任务持久化</td>
+<td>已落库任务待执行；worker重启</td>
+<td>任务不丢，仍可领取</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>JOB-02</td>
+<td>租约与幂等</td>
+<td>两个worker读取同任务；并发领取执行</td>
+<td>一有效租约；重试不重复业务副作用</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>JOB-03</td>
+<td>崩溃恢复</td>
+<td>worker领取后崩溃；租约过期</td>
+<td>任务可恢复；按幂等键处理</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>JOB-04</td>
+<td>限制重试</td>
+<td>邮件服务持续失败；执行任务</td>
+<td>有限次数退避；最终失败可见，不无限发送</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FILE-01</td>
+<td>私有对象</td>
+<td>私有附件key已知；非owner下载</td>
+<td>拒绝或签名请求失败，无公开永久URL</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FILE-02</td>
+<td>附件轻量</td>
+<td>用户上传确认书PDF；保存附件</td>
+<td>仅安全校验+元数据/文件存储，不OCR不提取订单</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>FILE-03</td>
+<td>超限不损行程</td>
+<td>文件超过测试配置上限；上传</td>
+<td>只拒绝上传；原Trip不变</td>
+<td>ready</td>
+</tr>
+</tbody>
+</table>
+<h2>P2</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>场景</th>
+<th>前提 / 操作</th>
+<th>预期</th>
+<th>闸门</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TRIP-01</td>
+<td>最小创建</td>
+<td>名称、开始日期、人数；创建</td>
+<td>首日空Day；结束等于开始；不要求目的地/结束日</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TRIP-02</td>
+<td>新增空Day保护</td>
+<td>已有最后一天；添加下一天</td>
+<td>不能创建后立即被裁剪；触发时机按O-01确认</td>
+<td>O-01</td>
+</tr>
+<tr>
+<td>TRIP-03</td>
+<td>同日归属</td>
+<td>TripA已占9/21；TripB扩展到9/21</td>
+<td>事务提交前拒绝第二份Day，返回归属冲突</td>
+<td>O-02</td>
+</tr>
+<tr>
+<td>TRIP-04</td>
+<td>并发日期占用</td>
+<td>同用户两个请求争9/21；同时创建Day</td>
+<td>最多一个成功，不出现双归属</td>
+<td>O-02</td>
+</tr>
+<tr>
+<td>NODE-01</td>
+<td>插入地点</td>
+<td>A→B原交通已选；插入C</td>
+<td>旧A→B入历史；A→C/C→B待选择，不自动采用</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NODE-02</td>
+<td>只更新受影响边</td>
+<td>A→B→C→D→E→F；D移到B与C之间</td>
+<td>A→B/E→F保留；其余按新邻接变更</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NODE-03</td>
+<td>拖动中无副作用</td>
+<td>拖拽尚未drop；鼠标经过多个位置</td>
+<td>不反复写DB/查询Provider；提交时处理</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NODE-04</td>
+<td>同Place独立Visit</td>
+<td>酒店→商场→酒店；编辑第二次酒店备注</td>
+<td>第一次不变；不能因Place ID合并</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NODE-05</td>
+<td>自定义位置</td>
+<td>名称+可靠坐标，无街道地址；创建</td>
+<td>允许，不编地址；身份后续通过Replace改变</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NODE-06</td>
+<td>FreeAction无假位置</td>
+<td>晚餐→自由行动→酒吧；保存</td>
+<td>自由行动无Place/固定坐标，不造入场交通</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NODE-07</td>
+<td>Replace清旧备注</td>
+<td>B有备注；原位替换成D</td>
+<td>原备注不继承；两侧交通重新待选择</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>VER-01</td>
+<td>无静默覆盖</td>
+<td>A/B设备都基于v10；A保存成v11后B保存</td>
+<td>B返回VERSION_CONFLICT，不能覆盖A</td>
+<td>ready</td>
+</tr>
+</tbody>
+</table>
+<h2>P3</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>场景</th>
+<th>前提 / 操作</th>
+<th>预期</th>
+<th>闸门</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TIME-01</td>
+<td>任意两值推第三值</td>
+<td>到达10:00+离开11:30；计算</td>
+<td>停留90分钟</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-02</td>
+<td>正推</td>
+<td>到达10:00+停留90分钟；计算</td>
+<td>离开11:30，来源DERIVED</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-03</td>
+<td>反推</td>
+<td>离开11:30+停留90分钟；计算</td>
+<td>到达10:00，来源DERIVED</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-04</td>
+<td>C01原案例</td>
+<td>SYNTHETIC列车20:21发；预留20分钟；反推并采用19:56到候选</td>
+<td>目标20:01保留；方案到达19:56；停留25分钟</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-05</td>
+<td>C02延长停留</td>
+<td>19:56到/20:21走；最低改40分钟；计算</td>
+<td>目标19:41，旧方案差15分钟；不改列车</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-06</td>
+<td>C02采用早到候选</td>
+<td>最低40分钟；20:21走；采用19:36到候选</td>
+<td>停留45分钟；40分钟要求仍在</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-07</td>
+<td>C03到达目标编辑</td>
+<td>旧方案19:56到/20:21走；用户设19:30到达目标</td>
+<td>目标停留51分钟；旧方案仍25分钟；显式冲突，不伪造实际</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-08</td>
+<td>终点目标保留</td>
+<td>要求23:30前到；采用约23:00到路线</td>
+<td>23:00方案结果与23:30要求同时存在</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-09</td>
+<td>跨夜等待</td>
+<td>21日23:00到机场；22日02:00起飞；算停留</td>
+<td>3小时；不把2.5小时建议写成01:30起飞</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-10</td>
+<td>班次不凭空生成</td>
+<td>用户已就绪19:45，选定车20:21；正推</td>
+<td>仍20:21发，中间等待；不生成19:45车</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-11</td>
+<td>双锚点不相容</td>
+<td>两端已采用交通；新停留超过间隔；求解</td>
+<td>返回冲突/调整条件，不挪动任一班次</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-12</td>
+<td>编辑方向歧义</td>
+<td>到达和离开均独立用户输入；输入不相容停留</td>
+<td>AMBIGUOUS_TIME_INPUT，要求选择保留方向</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-13</td>
+<td>缺失传播边</td>
+<td>中间交通未选，后面有独立预约；计算</td>
+<td>依赖交通的到达未知；预约仍保留，不整图清空</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-14</td>
+<td>缓冲参照不匹配</td>
+<td>到机场时间与登机口截止，缺机场内耗时；判断风险</td>
+<td>UNKNOWN/缺依据，不直接比较后判正常</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-15</td>
+<td>不双算步行</td>
+<td>路线总时间含换乘步行8分钟；排程</td>
+<td>该8分钟只算一次</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-16</td>
+<td>三色与缺值</td>
+<td>建议20/必须8，预留15；仅建议20且预留5；判定</td>
+<td>前者黄；后者黄且无伪造必须红线</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-17</td>
+<td>用户已接受风险</td>
+<td>用户锁5，建议10/必须3且已接受；当前预留7</td>
+<td>可展示偏紧但不重复同层提醒；跌破3才新红风险</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-18</td>
+<td>实际事实不可改</td>
+<td>A已实际完成；从未来约束向前推</td>
+<td>不重写A实际时间；从未发生部分求解</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-19</td>
+<td>空档非全额</td>
+<td>A16:20结束，B18:00约，交通未知；求空档</td>
+<td>100分钟是间隔，不能宣布100分钟可自由行动</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-20</td>
+<td>有界终止</td>
+<td>互相矛盾EQ/时长条件；多轮传播</td>
+<td>稳定返回冲突集，不无限振荡</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>TIME-21</td>
+<td>UTC与当地时间</td>
+<td>带IANA时区的跨时区出发/到达；计算时长</td>
+<td>用instants差；不以本地钟点减法得负时长</td>
+<td>ready</td>
+</tr>
+</tbody>
+</table>
+<h2>P4</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>场景</th>
+<th>前提 / 操作</th>
+<th>预期</th>
+<th>闸门</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API-01</td>
+<td>查询只读</td>
+<td>已有正式Trip；Query/Preview新路线</td>
+<td>Trip版本与正式节点不变</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-02</td>
+<td>采用原子性</td>
+<td>多段候选需新增两Visit/三Edge；中途数据库失败</td>
+<td>全部回滚，无半条路线</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-03</td>
+<td>幂等采用</td>
+<td>同payload同idempotencyKey；重复请求</td>
+<td>一份结果，不重复节点/通知</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-04</td>
+<td>过期预览</td>
+<td>Preview基于v8、当前v9；Adopt</td>
+<td>拒绝并要求重算；不覆盖当前</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-05</td>
+<td>外部候选过期</td>
+<td>Provider有效期已过；Adopt</td>
+<td>重新确认/返回PREVIEW_STALE，不当最新</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-06</td>
+<td>并发采用</td>
+<td>两预览基于同一版本；并发Adopt</td>
+<td>最多一个成功，另一个版本冲突</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-07</td>
+<td>旧候选晚返回</td>
+<td>用户连续改目标19:40→19:30；19:40查询后到达</td>
+<td>不覆盖19:30当前候选集，按request/basis区分</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-08</td>
+<td>撤销与新事实</td>
+<td>用户拖拽后航班又真实延误；撤销拖拽</td>
+<td>恢复结构，不回滚延误；按新事实重新判风险</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>API-09</td>
+<td>撤销版本冲突</td>
+<td>A操作后B设备已更新；A请求Undo</td>
+<td>UNDO_CONFLICT，不覆盖B</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>PROV-01</td>
+<td>失败与无车分开</td>
+<td>接口超时；查询</td>
+<td>PROVIDER_UNAVAILABLE，不显示末班已过</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>PROV-02</td>
+<td>备用源不拼假值</td>
+<td>两源到达15:40/15:52且差异显著；比较</td>
+<td>主源+不一致标记，不平均成15:46</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>PROV-03</td>
+<td>旧计划不是实时</td>
+<td>计划14:35到，实时服务断；看后续衔接</td>
+<td>保留计划，当前预计未知，不保证能赶15:10车</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>REC-01</td>
+<td>局部交通妥协</td>
+<td>17:10出、17:30约；巴士40、出租20且增加800 CNY（全为fixture）；生成候选</td>
+<td>显示出租方案+零余量风险+成本；用户采用才换</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>REC-02</td>
+<td>拒绝后安静</td>
+<td>用户关闭推荐；手工缩短15分钟</td>
+<td>只更新剩余缺口，不自动弹新推荐</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>REC-03</td>
+<td>风险升级</td>
+<td>此前差5分钟已忽略；新可靠延误变25；检测升级</td>
+<td>新风险提醒并按最新条件生成候选，不重放旧解</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>REC-04</td>
+<td>不伪造预约可改</td>
+<td>餐厅可改信息缺失；生成18:00预约候选</td>
+<td>标需用户外部确认，不说有位或已改成功</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>REC-05</td>
+<td>体验不硬编码</td>
+<td>晚餐90分钟压到20或60；比较</td>
+<td>显示损失；无规则不武断给通用最低时长</td>
+<td>O-05</td>
+</tr>
+<tr>
+<td>REC-06</td>
+<td>候选不凑数</td>
+<td>只找到1个可靠候选；展示</td>
+<td>只显示1个，不编满3个</td>
+<td>ready</td>
+</tr>
+</tbody>
+</table>
+<h2>P5</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>场景</th>
+<th>前提 / 操作</th>
+<th>预期</th>
+<th>闸门</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EXEC-01</td>
+<td>生命周期不等于事实</td>
+<td>到开始日期；切进行中</td>
+<td>不自动给Visit写实际时间</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>EXEC-02</td>
+<td>未执行只能用户确认</td>
+<td>整期已过且无证据；归类</td>
+<td>待确认、停监控；用户说没去才NOT_TAKEN</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>EXEC-03</td>
+<td>用户关闭监控</td>
+<td>手动关，另有固定提醒；次日打开</td>
+<td>不自动重开；固定提醒继续</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>EXEC-04</td>
+<td>权限受限不同于关闭</td>
+<td>位置权限临时失效；恢复权限</td>
+<td>位置相关重新同步；不改用户开关，不编中断轨迹</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>EXEC-05</td>
+<td>空白日不强记</td>
+<td>当天无计划且用户未求助；整天过去</td>
+<td>不造全天自由行动；不全天定位</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NET-01</td>
+<td>无网硬失效</td>
+<td>客户端断网；打开已缓存Trip</td>
+<td>只显示不可用，不展示旧行程或离线编辑</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NET-02</td>
+<td>恢复局部故障</td>
+<td>联网但航班接口不可用；重同步</td>
+<td>核心数据恢复；航班实时未知，不无限等所有源</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NOTICE-01</td>
+<td>用户15分钟再提醒</td>
+<td>用户选择snooze且风险持续；到期</td>
+<td>仅再提醒一次；解除则取消</td>
+<td>ready</td>
+</tr>
+<tr>
+<td>NOTICE-02</td>
+<td>站内不是推送</td>
+<td>没有原生Push实现；关闭测试界面</td>
+<td>不得宣称已保证锁屏关键通知</td>
+<td>ready</td>
+</tr>
+</tbody>
+</table>
+<h2>通用不变量</h2>
+<ul>
+<li>Query/Preview不变更正式Trip；Adopt要么全部提交要么全部不提交。</li>
+<li>相同基线、输入、Provider快照与policyVersion的纯计算结果一致。</li>
+<li>单个用户不可能通过并发创建持久化两份相同自然日归属。</li>
+<li>真实时间与交通不能为了让公式满足而被虚构。</li>
+<li>未知不降成正常；接受风险不修改官方规则。</li>
+<li>实际费用不随人数变化；无票价不会自动补零当真实金额。</li>
+<li>任意用户、管理员、worker、附件下载都遵守资源归属。</li>
+<li>后台持久任务重启不丢；重复请求不重复业务副作用。</li>
+</ul>
+<p>JSON版本用于Codex生成参数化测试，具体test文件应随实现提交。</p>
+</article><article id="s8" class="panel"><div class="doc-meta">docs/06_工程安全部署与GitHub规范.md</div><h1>工程、安全、部署与 GitHub 硬性规范</h1>
+<h2>1. GitHub是代码交付路径，不是部署服务器或数据库备份</h2>
+<p>每个阶段：确认新仓库 → fetch → 基于已审查main建feature分支 → 小步开发 → 真实测试 → commit → push → PR → 等待审查与用户合并确认。[S06]</p>
+<p>必须报告：分支、HEAD SHA、远程对应SHA、PR URL、测试命令与结果、改动文件、已知限制、未完成项。只commit不push，不算完成交付；push失败不得说“已同步”。PR创建失败要明确，不用口头总结替代PR。</p>
+<p><strong>禁止</strong>：force push、直接改main、重置/清理未知工作区、覆盖他人变更、未经确认自动merge、提交密钥或本机数据、使用旧仓库作为新项目远程、擅自公开仓库。</p>
+<p>建议核验命令（需先确认路径和remote）：</p>
+<pre><code class="language-bash">git status --short --branch
+git remote -v
+git fetch origin
+git log -5 --oneline
+# 已确认main有基线后再建分支；工作区有用户改动先停止可能覆盖的操作
+# 阶段完成后核实本地与远程分支的提交一致
+git rev-parse HEAD
+git ls-remote origin refs/heads/&lt;当前分支&gt;
+</code></pre>
+<p>不要盲目执行git pull导致未审查merge；已确认分支可fast-forward更新。缺GitHub权限应走用户授权工具/正常认证，不要求用户把token贴聊天。</p>
+<h2>2. 空仓库PR起点</h2>
+<p>没有main首提交就没有通常PR的对比基线。用户先在新仓库创建最小README/.gitignore，或单独授权无业务代码的bootstrap。Codex不能在本包授权下直推main。</p>
+<p>首轮只保留一个活跃开发阶段。上一阶段未合并时，不默认另开并行依赖分支；必须记录明确base SHA。</p>
+<h2>3. 账号与会话</h2>
+<p>首版只开普通用户与管理员；邀请邮箱白名单；无公众自助注册。</p>
+<p>Magic Link工程要求：短期有效、一次性、随机高熵；存摘要而非可直接重放的原token；请求/兑换限流、统一响应防枚举；消费原子性。邮件预览GET不直接消耗凭证，最终兑换使用用户发起的安全请求；重定向目标做allowlist，不能任意open redirect。</p>
+<p>浏览器首版优先HttpOnly/Secure/SameSite cookie会话，敏感写操作做CSRF/Origin检查；长期登录仍有服务端过期/撤销，不做永久JWT且不能撤销。[S08]</p>
+<p>账号禁用必须阻止新登录并使已有会话失效。管理员强制注销所有设备时，下一次受保护请求立即重新认证；必要时停止对应用户的后台任务。初始管理员通过受控bootstrap命令建立，不写固定通用口令进seed。</p>
+<p>管理员可以管理账号状态，但访问他人Trip/费用/文件仍拒绝。每个入口、worker用例、附件下载都检查归属；不能只依赖前端隐藏按钮。[S07]</p>
+<p>未来原生客户端认证通过独立client adapter扩展，不能把浏览器cookie直接硬塞所有平台。P0/P1只记录方案边界，原生SDK后置。</p>
+<h2>4. 文件存储</h2>
+<p>ObjectStorage端口至少提供put/get/delete、私有访问授权或短期下载凭证、大小/类型元数据。数据库存key、owner、归属、文件名、MIME、bytes、createdAt，不存文件正文。</p>
+<p>不做默认OCR、AI解析、内容索引、二维码识别。<strong>安全检查不等于业务提取</strong>：格式allowlist、大小/配额、扩展名与类型核验、路径清理、私有访问仍必须有。[S10]</p>
+<p>原始文件不写web公开目录。默认不内联执行HTML/SVG/宏等主动内容。预览为受控查看，浏览器内容安全策略隔离；下载每次鉴权，短期URL设短过期。</p>
+<p>限额是必须项，但具体值不是用户已确认产品规则：环境变量配置开发测试上限、注明暂定值，P5实测后确认。大于上限只影响该上传，不损坏Trip。</p>
+<h2>5. Web/API 与 Worker</h2>
+<p>必须两个进程，但同一机器/同一Compose可部署。不要求额外服务器、Redis或Kubernetes。</p>
+<p>Job必须持久化在PostgreSQL：runAt/status/attempts/leaseUntil/uniqueKey/payloadRef。建议以行锁/租约领取，worker崩溃租约过期后可重试，使用SKIP LOCKED等机制时明示队列语义。[S09]</p>
+<p>每个任务幂等、有限重试、退避、超时、失败可见、支持撤销。绝不把关键提醒唯一保存在setTimeout中。不得宣称“严格exactly once”：邮件等外部副作用需幂等键/投递回执，异常时避免盲目重发。</p>
+<p>事务写业务和outbox；worker消费后生成NotificationEvent。用户手动停止监控时取消实时刷新/风险任务，但用户固定定时提醒不受影响。</p>
+<p>首版通知事件持久化和站内可读即可；没有APNs/FCM/Web Push凭证时不得报告系统通知已可用。</p>
+<h2>6. Provider契约</h2>
+<ul>
+<li>类型化返回OK / NO_MATCH / UNAVAILABLE / OUT_OF_COVERAGE / STALE / INCONSISTENT等，禁止全失败都返回[]。</li>
+<li>记录source、observedAt、validUntil、适用时区/位置、语义、是否估算；不得把候选/历史确认值伪装实时事实。</li>
+<li>配置超时、有限重试、缓存、并发限制和费用调用计数，具体TTL参考服务条款与场景；不固定“所有路线缓存一天”。</li>
+<li>备用源只在语义等价且可靠时接管；结果冲突不取均值，不拼不存在的路线。</li>
+<li>真实字段核验应在P4/正式UI前完成，不把所有Provider研究拖到最后。</li>
+<li>缺凭证可实现接口、fixture适配及失败测试；fixture必须显式标记，仅dev/test加载。</li>
+</ul>
+<h2>7. 网络边界</h2>
+<p>客户端无网或核心后端不可达：显示不可用/无法加载，隐藏旧行程；不做离线编辑队列。此前已产生但未同步改动可私下暂存，不能显示已保存。</p>
+<p>网络恢复先与服务端同步当前版本，再加载关键状态。个别Provider未恢复时按局部未知展示，不能让“等待所有服务成功”造成永久无法进入。</p>
+<p><strong>客户端无网，不意味着服务器知道客户端的所有状态或停止一切任务。</strong> worker按其开关、已有事实和新鲜度做可靠部分；位置相关结果无新鲜证据就暂停。此项投递/计费政策若需要细分，登记未决项，不扩大产品离线能力。</p>
+<h2>8. Dev / Staging / Production</h2>
+<p>三个环境逻辑隔离：数据库、账号、密钥、对象存储前缀或桶、邮件目标、任务表和端口不串用。Compose可用项目名前缀和独立env/volume。Production保留配置形状，不默认部署。</p>
+<p>当前测试数据可丢失，但普通容器restart应保持数据；禁止默认启动时reset或drop。reset命令只允许明确测试环境+确认标志，拒绝production及不明连接。</p>
+<p>P0服务绑定127.0.0.1；本地邮件捕获器仅dev使用。Staging邀请测试者前必须HTTPS、鉴权、真实可用邮件、受控外网入口。域名、网络穿透、邮件提供商未指定，不自动购买或暴露数据库端口。</p>
+<p>Git只存.env.example、迁移、seed和基础设施定义；不存.env、数据库volume、附件、登录链接、用户位置。</p>
+<h2>9. 低成本与可观察性</h2>
+<p>首版≤5人，不把并发扩容方案提前实现成复杂系统。时间引擎有执行时间上限与指标；避免每秒对每个用户全图+全Provider刷新。</p>
+<p>日志保留requestId、规则ID、错误码、job/版本与脱敏原因。无完整审计平台不等于不留错误或安全操作痕迹；不日志输出邮箱token、附件正文、详细长期位置。</p>
+<p>Dev/Staging接受数据风险，本轮不自动异地备份或灾备演练。开始存真实数据前另设上线闸门：备份/恢复/监控/秘密管理/隐私与访问控制验收必须补齐。</p>
+<h2>10. 测试要求</h2>
+<p>单元测试、契约测试、真实PostgreSQL集成测试、API测试分层。时间fixture可控；外部网络不作为全部单元测试依赖。明确“已跑”“未跑”“失败”“环境阻塞”，不能修改预期、skip测试或削弱权限来获得绿灯。</p>
+<p>每次涉及权限、Adopt原子性、日期归属、幂等、撤销、worker恢复，必须增加回归测试。生成本包不代表这些测试已运行。</p>
+</article><article id="s9" class="panel"><div class="doc-meta">docs/07_模型与强度建议.md</div><h1>模型与推理强度建议｜每次开发要求必填</h1>
+<p><strong>核实日期：2026-09-17。以下是任务级工程建议，不是任何模型完成正确性的保证。</strong></p>
+<h2>1. 本次核实</h2>
+<p>OpenAI官方模型页列出了GPT-5.6 Luna、Sol；两者API reasoning effort均支持包括high、xhigh、max的档位。官方使用指导把Luna用于清楚、可重复任务，Sol用于复杂工作。[S01][S02][S03]</p>
+<p><strong>客户端差异必须保留：</strong> API支持max不代表每个Codex版本都可直接写<code>model_reasoning_effort=&quot;max&quot;</code>。本次配置参考页枚举仍列至xhigh，而模型使用页说明Max可在支持客户端中选择。因此本包不自动改用户全局Codex配置，也不把Max与xhigh认成同一个枚举。开工核对实际模型选择器/CLI版本。[S03][S11]</p>
+<h2>2. 本次首选</h2>
+<p><strong>首次P0：GPT-5.6 Sol + Extra High（xhigh）。</strong>
+原因：空白项目需要把多终端、鉴权、任务、时间来源、数据隔离与阶段边界一次整理清楚；这比“照现成规格写一个函数”更需要架构判断。</p>
+<p><strong>备选：GPT-5.6 Luna + Max（仅在客户端提供时使用）。</strong>
+可以用于明确的工程初始化、CRUD、测试补充；拆小任务，架构/安全/时间模型另做独立审查。不能把“可用”写成“必然足够”。</p>
+<h2>3. 阶段推荐</h2>
+<table>
+<thead>
+<tr>
+<th>任务</th>
+<th>推荐模型</th>
+<th>强度</th>
+<th>升级/复核条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P0 蓝图与空白项目初始化</td>
+<td>GPT-5.6 Sol</td>
+<td>Extra High / xhigh</td>
+<td>跨模块模型冲突未解时停止提问，不靠继续加大推理猜需求</td>
+</tr>
+<tr>
+<td>P1 认证、会话、隔离</td>
+<td>GPT-5.6 Sol</td>
+<td>Extra High / xhigh</td>
+<td>权限绕过/并发token消费必须独立安全审查</td>
+</tr>
+<tr>
+<td>明确CRUD、配置、文档、测试代码</td>
+<td>GPT-5.6 Luna</td>
+<td>Max（若可用）</td>
+<td>连续两轮同类失败或改动范围扩大，换Sol审查并缩小任务</td>
+</tr>
+<tr>
+<td>P2/P3 领域、双向排程</td>
+<td>GPT-5.6 Sol</td>
+<td>Extra High / xhigh</td>
+<td>时区/循环传播/约束冲突难题可单独Max</td>
+</tr>
+<tr>
+<td>P4 事务、幂等、Provider边界</td>
+<td>GPT-5.6 Sol</td>
+<td>Extra High / xhigh</td>
+<td>DB并发、过期预览、外部副作用重点复核</td>
+</tr>
+<tr>
+<td>P5 薄测试UI、补充测试</td>
+<td>GPT-5.6 Luna</td>
+<td>Max（若可用）</td>
+<td>涉及新产品选择回到产品确认，不放任模型自定</td>
+</tr>
+<tr>
+<td>合并前独立代码审查</td>
+<td>GPT-5.6 Sol</td>
+<td>Extra High / xhigh</td>
+<td>与实现任务分开上下文，仅基于PR与验收证据</td>
+</tr>
+</tbody>
+</table>
+<p>不默认开Ultra/多代理并发，不因模型更强就扩大阶段范围。当前已有模型能够承担分段工作，无需为了开工强制更换最高档产品；更换建议必须基于实际任务与测试表现。</p>
+<h2>4. 以后每次任务头部固定格式</h2>
+<pre><code class="language-text">推荐模型：&lt;实际可用模型名称&gt;
+推荐推理强度：&lt;界面名称；已确认时附参数名&gt;
+备选：&lt;成本/速度方案；需怎样复核&gt;
+选择理由：&lt;该任务的风险与复杂度&gt;
+升级条件：&lt;何时换更强模型或拆小&gt;
+本次阶段：&lt;仅一个阶段&gt;
+</code></pre>
+<p>发出任务前核实模型可用性；不能机械永久沿用今天名称。发给Codex的文字不会自动改变正在运行的模型；用户应在客户端选择。模型无法自证当前配置时汇报“未能确认”，不得声称已切换。</p>
+<p>官方来源仅支持模型与档位事实，具体P0～P5分配是本项目工程判断。验收以代码、测试、PR为准，不以模型名称为准。</p>
+</article><article id="s10" class="panel"><div class="doc-meta">docs/08_未决事项与阶段闸门.md</div><h1>未决事项与阶段闸门</h1>
+<p><strong>不再继续逐个问无关小问题；只在实现真的依赖某项时，提出一个聚焦问题。P0可以现在开始。</strong></p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>尚未完全定准的点</th>
+<th>不得擅自采用的做法</th>
+<th>阻塞阶段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>O-00</td>
+<td>新项目GitHub地址及main初始基线</td>
+<td>自动连旧travel-planner-v2、猜URL或直推main</td>
+<td>只阻塞发布/PR；初始化需确认目录</td>
+</tr>
+<tr>
+<td>O-01</td>
+<td>新增空白Day与头尾自动收缩的触发时机</td>
+<td>点“添加下一天”后立刻又把空Day删掉</td>
+<td>P2日期修改正式落地前</td>
+</tr>
+<tr>
+<td>O-02</td>
+<td>自然日唯一归属：中间空白/新建暂存Day的占用及释放</td>
+<td>清空中间Day但仍保留，另一Trip又占同日，造成双归属</td>
+<td>P2占用/合并实现前</td>
+</tr>
+<tr>
+<td>O-03</td>
+<td>跨国际日期线、跳过日期、夏令时重叠时Day投影；无地点时生命周期日期基准</td>
+<td>用服务器默认时区、简单本地日期比较代替真实时间</td>
+<td>P3高级跨时区/自动生命周期前；同区基础可先做</td>
+</tr>
+<tr>
+<td>O-04</td>
+<td>不解析备注/附件且待办完成不强制时，如何可靠确认购票/预约与截止条件</td>
+<td>上传图片或模糊文字就自动认定已预订</td>
+<td>自动受保护安排识别前；用户明确结构化确认/测试fixture可用</td>
+</tr>
+<tr>
+<td>O-05</td>
+<td>推荐中最低体验时长与成本/体验权重</td>
+<td>“吃饭少于60分钟一定不行”等全局硬编码</td>
+<td>高级RecommendationPolicy；基础比较展示可先做</td>
+</tr>
+<tr>
+<td>O-06</td>
+<td>外部预约修改的真实确认来源与可用性</td>
+<td>本地点击采用就宣称餐厅已改期成功</td>
+<td>外部预约联动；本轮不实际改预约</td>
+</tr>
+<tr>
+<td>O-07</td>
+<td>有部分实际记录但末尾未知，与整趟是否发生待确认的最终归档条件</td>
+<td>自动把未知当未去，或把所有未知当圆满完成</td>
+<td>完整Lifecycle自动收尾前</td>
+</tr>
+<tr>
+<td>O-08</td>
+<td>实时监控启动窗口、停止价值判断、新鲜度、风险“明显升级”的参数</td>
+<td>刷一次位置或一分钟延迟都弹新通知</td>
+<td>P5真实监控与通知；初轮使用显式测试配置</td>
+</tr>
+<tr>
+<td>O-09</td>
+<td>附件单文件/数量/总量上限、邮件服务、外网部署、会话时长</td>
+<td>不设任何限制、无认证公网开放、自动购买服务</td>
+<td>P1/P5部署阶段逐项落实工程配置</td>
+</tr>
+<tr>
+<td>O-10</td>
+<td>“无网全局失效”检测防抖与核心后端失效等价性</td>
+<td>外部航班接口挂了导致全App硬屏；有网图标就认定服务可靠</td>
+<td>P5客户端验证</td>
+</tr>
+<tr>
+<td>O-11</td>
+<td>已结束记录/分享的跨日展示与未知交通样式</td>
+<td>删除底层证据以让分享好看</td>
+<td>正式回顾/分享UI；本轮后置</td>
+</tr>
+</tbody>
+</table>
+<h2>关联影响检查</h2>
+<p>修改O-01/O-02必须一起检查：Trip日期、Day构建、空白日、复制、分享、合并、生命周期、用户内唯一归属与原子事务。</p>
+<p>修改O-03必须一起检查：本地日期、UTC、持续时长、Day投影、复制平移、日期冲突、提醒时刻、按日费用。</p>
+<p>修改O-04必须一起检查：待办极简、附件不解析、订单模块后置、用户确认、受保护安排风险。</p>
+<h2>闸门与范围</h2>
+<ul>
+<li><strong>G0/P0开始：</strong> 用户已经授权导出与首轮开发要求。Codex核对空白目录和目标仓库；无地址不得发布到旧库。</li>
+<li><strong>G1/P0验收后：</strong> 用户确认再做P1，核对真实依赖/部署可用性。P0文档不是全部未来阶段的自动执行授权。</li>
+<li><strong>G2/P2前：</strong> 只集中确认O-01/O-02一次，不重开所有需求；未确认可以做与其无关的Visit领域。</li>
+<li><strong>G3/P3前：</strong> 第一批fixture时间案例及条件来源一致；高级时区含义不明时用明确UNSUPPORTED返回。</li>
+<li><strong>G4/P4前：</strong> 完成Provider字段探针、版本和幂等设计；真实凭证缺失不伪装成功。</li>
+<li><strong>G5/≤5人测试前：</strong> 鉴权、会话撤销、数据隔离、HTTPS/邮件、持久任务、故障提示、测试数据标志均通过。</li>
+<li><strong>进入真实旅行使用前另开上线检查：</strong> 备份恢复、可靠性与原生通知/位置能力未做完，不能仅凭后端测试就宣称可保障旅途。</li>
+</ul>
+<h2>本轮明确后置而不是未决</h2>
+<p>协作、公开注册、原生客户端/Push、天气、预算、OCR、多人分摊、完整订单模块、完整审计/异地灾备、旅行拆分（取消而非后置）。</p>
+</article><article id="s11" class="panel"><div class="doc-meta">prompts/00_首次开发_空白项目初始化.md</div><h1>可直接发送给 Codex｜P0 空白项目初始化与架构基线</h1>
+<p><strong>推荐模型：GPT-5.6 Sol</strong>
+<strong>推荐推理强度：Extra High（xhigh）</strong>
+<strong>备选：GPT-5.6 Luna / Max（客户端提供时）；蓝图必须由Sol独立复核。</strong>
+理由：本阶段主要风险是跨模块边界而非代码量。遇到未决产品语义，先登记并问，不靠加大推理猜答案。不要自动切模型或修改用户全局配置。</p>
+<hr />
+<p>你是本项目的后端负责人。本任务只执行P0，不执行P1～P5。</p>
+<h2>项目背景</h2>
+<p>这是新建空白项目，不是重构旧仓库。产品是多终端旅行规划/执行/记录系统；最终支持网页、Windows、macOS、iOS、Android，当前仅后端基础。首版≤5人，单台x86机器Docker Compose；API与Worker独立；PostgreSQL；邀请制Magic Link；对象存储；用户数据隔离。完整规则在本包中。</p>
+<h2>开始前</h2>
+<ol>
+<li>读取根目录<code>AGENTS.md</code>及<code>docs/00_需求优先级与变更记录.md</code>、<code>02_首轮开发要求_v1.0.md</code>、<code>03_领域与API蓝图_v0.1.md</code>、<code>06_工程安全部署与GitHub规范.md</code>、<code>08_未决事项与阶段闸门.md</code>。</li>
+<li>检查工作目录、git status、origin、默认分支和已有文件。保留用户文件；不执行reset/clean/restore等覆盖操作。</li>
+<li>用户没有指定新远程地址。若origin不存在/不是已确认新项目，只问新仓库地址；不能自动用旧的travel-planner-v2。若远程没首提交，说明需要最小main基线，不直推main。</li>
+<li>检查Node、pnpm、Docker、Compose、GitHub认证。版本以实际可安装受支持组合为准，记录到<code>docs/adr/0001-stack.md</code>与lockfile。</li>
+<li>有已确认main基线时创建<code>feature/p0-foundation</code>。缺远程不等于可虚构push结果；可在已确认空目录做本地工作，但发布状态标BLOCKED。</li>
+</ol>
+<h2>这次要完成</h2>
+<h3>A. 蓝图落地</h3>
+<p>建立<code>docs/architecture/</code>：</p>
+<ul>
+<li>模块边界与依赖图；</li>
+<li>字段来源：用户目标、已采用方案、预计、实际；</li>
+<li>账号/Session、任务、Trip版本、Preview/Adopt的责任；</li>
+<li>P1～P5计划和未决项映射；</li>
+<li>新项目不沿用旧表或旧Scenario实现。</li>
+</ul>
+<h3>B. 工程骨架</h3>
+<p>建议TypeScript strict + Node24 LTS + pnpm workspace。创建本阶段实际需要的api、worker、domain、contracts、persistence边界，不建几十个空业务服务。</p>
+<p>API只实现liveness/readiness；Worker独立可启动/停止、健康心跳；DB readiness要真实连接测试PostgreSQL。此阶段不提供无鉴权旅行业务API。</p>
+<p>建立开发/测试基础脚本、测试框架、格式检查和CI。提供最小domain纯函数示例与测试，验证不依赖浏览器/DB；不要实现完整推荐器。</p>
+<h3>C. 容器与环境</h3>
+<ul>
+<li>Compose运行API、Worker、PostgreSQL，服务依赖和健康检查清楚。</li>
+<li>Dev和Staging的环境变量模板/数据库/卷/端口隔离；Production只记录边界，不部署。</li>
+<li>普通重启持久化；不自动drop/reset数据库。</li>
+<li>默认本机访问；不改路由器、不装内网穿透、不买域名、不调用付费Provider。</li>
+<li>没有密钥时使用显式占位模板，绝不写真实token进仓库。</li>
+</ul>
+<h3>D. 验收与交付</h3>
+<p>运行适用的install/lint/typecheck/unit/build/Compose smoke与DB连接检查，记录每条命令结果。没有Docker时不能谎报容器测试通过；写BLOCKED及可复现命令。</p>
+<p>更新<code>docs/status/P0.md</code>，内容按<code>templates/阶段完成报告.md</code>。commit分逻辑、push当前feature分支，创建PR但不合并。核对远程分支SHA与本地HEAD一致。</p>
+<h2>禁止范围</h2>
+<p>不做完整登录/邀请/用户业务实现（P1）；不做Trip完整CRUD/合并/分享；不做复杂时间传播/候选生成（P3/P4）；不接正式Provider；不做正式或原生UI；不照完整蓝图把所有未来表先建出来。</p>
+<h2>完成定义</h2>
+<p>P0文档与工程骨架可验证，风险/未决项明确，功能分支已经push且PR已创建。缺权限/环境就如实列部分完成和BLOCKED，不能把计划写成结果。</p>
+<p>最后中文简要汇报：完成什么、没有做什么、分支/SHA/PR、测试、阻塞。<strong>到此停止，等用户确认后再进入P1。</strong></p>
+</article><article id="s12" class="panel"><div class="doc-meta">docs/09_引用与来源.md</div><h1>来源与核实范围</h1>
+<p>核实日期：2026-09-17。产品规则以用户本次完整讨论及所附V0.5文件为依据；公开文档用于工程与模型事实，不作为替用户改变需求的授权。</p>
+<h2>用户提供资料</h2>
+<ul>
+<li>《旅途计划_产品流程与核心逻辑_v0.5_决策记录.md》：完整产品基线；已读全文。</li>
+<li>《旅途计划_多方向排程与冲突求解_v0.2_开发基线.md》：时间与候选规则；已读全文。</li>
+<li>《旅途计划_v0.5_待继续讨论与开发边界.md》：开发前开放项；已读全文。</li>
+<li>本次讨论补充：空白项目、多终端、多用户邀请制、无协作、Magic Link、可撤销会话、≤5人、x86单机、Worker、三环境、GitHub PR与阶段交付、每次模型/强度建议。</li>
+</ul>
+<p>旧文档在archive里原样保留，只能回查历史；本次包内当前文档优先。</p>
+<h2>官方/一手资料</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>资料</th>
+<th>本包引用目的</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S01</td>
+<td>OpenAI GPT-5.6 Luna模型页</td>
+<td>模型定位、API支持档位</td>
+<td>https://developers.openai.com/api/docs/models/gpt-5.6-luna</td>
+</tr>
+<tr>
+<td>S02</td>
+<td>OpenAI GPT-5.6 Sol模型页</td>
+<td>模型定位、API支持档位</td>
+<td>https://developers.openai.com/api/docs/models/gpt-5.6-sol</td>
+</tr>
+<tr>
+<td>S03</td>
+<td>OpenAI Models使用指导</td>
+<td>模型按任务选取；Max不保证客户端均可见</td>
+<td>https://learn.chatgpt.com/docs/models</td>
+</tr>
+<tr>
+<td>S04</td>
+<td>Node.js Releases</td>
+<td>当前受支持LTS选择</td>
+<td>https://nodejs.org/en/about/previous-releases</td>
+</tr>
+<tr>
+<td>S05</td>
+<td>Docker Compose应用模型</td>
+<td>同机独立service、network、volume</td>
+<td>https://docs.docker.com/compose/intro/compose-application-model/</td>
+</tr>
+<tr>
+<td>S06</td>
+<td>GitHub Pull requests</td>
+<td>PR作为变更审查与合并机制</td>
+<td>https://docs.github.com/en/pull-requests/reference/pull-requests</td>
+</tr>
+<tr>
+<td>S07</td>
+<td>OWASP Authorization Cheat Sheet</td>
+<td>最小权限、逐请求鉴权、资源隔离</td>
+<td>https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html</td>
+</tr>
+<tr>
+<td>S08</td>
+<td>OWASP Session Management Cheat Sheet</td>
+<td>会话cookie、过期与服务端失效</td>
+<td>https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html</td>
+</tr>
+<tr>
+<td>S09</td>
+<td>PostgreSQL SELECT文档</td>
+<td>行锁与SKIP LOCKED用于任务领取的可选基础</td>
+<td>https://www.postgresql.org/docs/current/sql-select.html</td>
+</tr>
+<tr>
+<td>S10</td>
+<td>OWASP File Upload Cheat Sheet</td>
+<td>文件安全校验与私有存储，不等于OCR业务解析</td>
+<td>https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html</td>
+</tr>
+<tr>
+<td>S11</td>
+<td>OpenAI Codex配置参考</td>
+<td>model_reasoning_effort字段与客户端枚举差异</td>
+<td>https://learn.chatgpt.com/docs/config-file/config-reference</td>
+</tr>
+</tbody>
+</table>
+<h2>没有被声称核实的事</h2>
+<p>未检查新仓库（地址尚未给）；未运行Codex；未检测用户电脑OS/Docker/网络；未完成真实航班铁路Provider集成；未验证全局交通缓冲数据；未测试模型在本项目的成功率。</p>
+<p>本包建议的Fastify、Prisma、pnpm、Vitest具体版本及兼容性由P0进一步查官方文档并锁定。不能因为列在技术提案里就声称已安装或验证过。</p>
+</article><article id="diagrams" class="panel"><h1>开发路线与领域边界</h1><p>以下为源图同内容的只读预览。可编辑主文件在diagrams目录。</p><h2>01｜新项目开发路线与阶段闸门</h2><div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" role="img" aria-label="01｜新项目开发路线与阶段闸门"><defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#70849a"/></marker></defs><rect width="1440" height="900" fill="#fff"/><path d="M430,192.5 H487.5 V192.5 H545" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M895,192.5 H952.5 V192.5 H1010" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M430,430.0 H487.5 V430.0 H545" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M895,430.0 H952.5 V430.0 H1010" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M1185.0,490 V545.0 H720.0 V600" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><text x="952.5" y="536.0" text-anchor="middle" font-size="13" fill="#52677e">后续阶段</text><path d="M895,662.5 H952.5 V662.5 H1010" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><rect x="60" y="38" width="1320" height="56" rx="12" fill="#183655" stroke="#183655"/><text x="720.0" y="72.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="24" fill="#ffffff">01｜新项目开发路线与阶段闸门</text><rect x="80" y="140" width="350" height="105" rx="12" fill="#f2f4f7" stroke="#a4afbb"/><text x="255.0" y="185.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">核对新目录 / 新仓库</text><text x="255.0" y="211.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">不克隆旧业务项目</text><rect x="545" y="140" width="350" height="105" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="720.0" y="185.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">P0 空白项目初始化</text><text x="720.0" y="211.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">蓝图 + 工程骨架 + smoke测试</text><rect x="1010" y="140" width="350" height="105" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="1185.0" y="185.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">测试 → commit → push → PR</text><text x="1185.0" y="211.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">用户检查后才合并main</text><rect x="80" y="370" width="350" height="120" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="255.0" y="423.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">P1 邀请 / 会话 / 权限</text><text x="255.0" y="449.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">持久任务 / 存储契约</text><rect x="545" y="370" width="350" height="120" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="720.0" y="423.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">P2 行程领域</text><text x="720.0" y="449.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">邻接 / 版本 / 时间来源</text><rect x="1010" y="370" width="350" height="120" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="1185.0" y="423.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">P3 多方向时间内核</text><text x="1185.0" y="449.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">约束 / 缓冲 / 冲突 / 解释</text><rect x="545" y="600" width="350" height="125" rx="12" fill="#fff5e5" stroke="#d6af70"/><text x="720.0" y="655.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#755016">P4 Provider / Preview / Adopt</text><text x="720.0" y="681.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#755016">幂等 / 原子性 / 受控推荐</text><rect x="1010" y="600" width="350" height="125" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="1185.0" y="655.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">P5 薄测试台 / 站内提醒</text><text x="1185.0" y="681.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">真实PG + Worker内测</text><rect x="80" y="600" width="350" height="125" rx="12" fill="#fff0ef" stroke="#d39b94"/><text x="255.0" y="655.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#873f36">每个阶段独立授权</text><text x="255.0" y="681.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#873f36">不是一次执行全部蓝图</text></svg></div><h2>02｜多终端共用领域核心</h2><div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" role="img" aria-label="02｜多终端共用领域核心"><defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#70849a"/></marker></defs><rect width="1440" height="900" fill="#fff"/><path d="M720.0,245 V292.5 H405.0 V340" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M405.0,450 V500.0 H720.0 V550" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M1035.0,450 V500.0 H720.0 V550" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M720.0,690 V725.0 H255.0 V760" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M720.0,690 V725.0 H720.0 V760" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M720.0,690 V725.0 H1185.0 V760" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><rect x="60" y="38" width="1320" height="56" rx="12" fill="#183655" stroke="#183655"/><text x="720.0" y="72.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="24" fill="#ffffff">02｜多终端共用领域核心</text><rect x="200" y="135" width="1040" height="110" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="720.0" y="183.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">桌面网页 / 手机网页 / Windows / macOS / iOS / Android</text><text x="720.0" y="209.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">UI与设备能力后续接入，不能各写一套旅行规则</text><rect x="170" y="340" width="470" height="110" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="405.0" y="388.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">Web / API</text><text x="405.0" y="414.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">身份验证 · 授权 · 契约 · 用例</text><rect x="800" y="340" width="470" height="110" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="1035.0" y="388.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">Worker（独立进程）</text><text x="1035.0" y="414.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">邮件 · 持久任务 · 通知事件</text><rect x="290" y="550" width="860" height="140" rx="12" fill="#183655" stroke="#183655"/><text x="720.0" y="600.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#ffffff">Domain / Application</text><text x="720.0" y="626.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#ffffff">时间与约束 · 冲突 · 解释 · 版本 · Preview / Adopt</text><text x="720.0" y="652.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#ffffff">Domain不依赖UI、网络或ORM</text><rect x="60" y="760" width="390" height="95" rx="12" fill="#f2f4f7" stroke="#a4afbb"/><text x="255.0" y="800.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">PostgreSQL</text><text x="255.0" y="826.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">业务 / 会话 / 任务 / 版本</text><rect x="525" y="760" width="390" height="95" rx="12" fill="#fff5e5" stroke="#d6af70"/><text x="720.0" y="800.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#755016">Provider适配</text><text x="720.0" y="826.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#755016">真实来源 / 新鲜度 / 可用性</text><rect x="990" y="760" width="390" height="95" rx="12" fill="#f2f4f7" stroke="#a4afbb"/><text x="1185.0" y="800.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">ObjectStorage</text><text x="1185.0" y="826.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">文件私有存储，不默认解析</text></svg></div><h2>03｜时间修改到采用：计算不等于写入</h2><div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" role="img" aria-label="03｜时间修改到采用：计算不等于写入"><defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#70849a"/></marker></defs><rect width="1440" height="900" fill="#fff"/><path d="M410,207.5 H480.0 V207.5 H550" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M890,207.5 H960.0 V207.5 H1030" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M1200.0,265 V320.0 H1200.0 V375" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M1030,432.5 H960.0 V432.5 H890" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M550,432.5 H480.0 V432.5 H410" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><path d="M240.0,490 V550.0 H355.0 V610" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><text x="297.5" y="541.0" text-anchor="middle" font-size="13" fill="#52677e">采用</text><path d="M240.0,490 V550.0 H1085.0 V610" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><text x="662.5" y="541.0" text-anchor="middle" font-size="13" fill="#52677e">不采用</text><rect x="60" y="38" width="1320" height="56" rx="12" fill="#183655" stroke="#183655"/><text x="720.0" y="72.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="24" fill="#ffffff">03｜时间修改到采用：计算不等于写入</text><rect x="70" y="150" width="340" height="115" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="240.0" y="200.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">用户改到达 / 停留 / 离开</text><text x="240.0" y="226.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">记录目标与输入来源</text><rect x="550" y="150" width="340" height="115" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="720.0" y="200.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">纯计算与锚点传播</text><text x="720.0" y="226.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">正推 / 反推 / 中间双向</text><rect x="1030" y="150" width="340" height="115" rx="12" fill="#fff5e5" stroke="#d6af70"/><text x="1200.0" y="200.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#755016">当前结果 + 冲突 + 查询条件</text><text x="1200.0" y="226.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#755016">不编交通、不覆盖Actual</text><rect x="1030" y="375" width="340" height="115" rx="12" fill="#f2f4f7" stroke="#a4afbb"/><text x="1200.0" y="425.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">按可靠Provider查询</text><text x="1200.0" y="451.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">失败≠无车；样本不当事实</text><rect x="550" y="375" width="340" height="115" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="720.0" y="425.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">生成候选 / 预览</text><text x="720.0" y="451.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">未采用不改正式Trip</text><rect x="70" y="375" width="340" height="115" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="240.0" y="425.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">用户选择</text><text x="240.0" y="451.5" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">采用 / 拒绝 / 自己改</text><rect x="70" y="610" width="570" height="130" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="355.0" y="668.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">Adopt事务</text><text x="355.0" y="694.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">权限 + 版本 + 有效期 + 幂等</text><rect x="800" y="610" width="570" height="130" rx="12" fill="#f2f4f7" stroke="#a4afbb"/><text x="1085.0" y="668.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">拒绝或关闭 → 安静辅助</text><text x="1085.0" y="694.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">只更新缺口；新重大风险再提醒</text></svg></div><h2>04｜首轮部署与不做范围</h2><div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" role="img" aria-label="04｜首轮部署与不做范围"><defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#70849a"/></marker></defs><rect width="1440" height="900" fill="#fff"/><path d="M720.0,255 V307.5 H375.0 V360" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><text x="547.5" y="298.5" text-anchor="middle" font-size="13" fill="#52677e">隔离</text><path d="M720.0,255 V307.5 H1065.0 V360" fill="none" stroke="#70849a" stroke-width="2.2" marker-end="url(#arrow)"/><text x="892.5" y="298.5" text-anchor="middle" font-size="13" fill="#52677e">隔离</text><rect x="60" y="38" width="1320" height="56" rx="12" fill="#183655" stroke="#183655"/><text x="720.0" y="72.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="24" fill="#ffffff">04｜首轮部署与不做范围</text><rect x="210" y="145" width="1020" height="110" rx="12" fill="#183655" stroke="#183655"/><text x="720.0" y="193.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#ffffff">现有x86主机：i7-12700 / 32GB</text><text x="720.0" y="219.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#ffffff">首版同时在线 ≤5人；先运行Dev与Staging</text><rect x="100" y="360" width="550" height="170" rx="12" fill="#eaf2fb" stroke="#8faac4"/><text x="375.0" y="425.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">Development</text><text x="375.0" y="451.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">API + Worker + PostgreSQL</text><text x="375.0" y="477.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#17324d">独立env / volume / 本地邮件</text><rect x="790" y="360" width="550" height="170" rx="12" fill="#edf6f2" stroke="#8ab7a3"/><text x="1065.0" y="425.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">Staging（受控测试）</text><text x="1065.0" y="451.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">API + Worker + PostgreSQL</text><text x="1065.0" y="477.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#1d4e3b">独立env / 数据 / 私有文件</text><rect x="100" y="665" width="550" height="140" rx="12" fill="#f2f4f7" stroke="#a4afbb"/><text x="375.0" y="715.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">本轮不部署Production</text><text x="375.0" y="741.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">不做异地灾备/完整审计</text><text x="375.0" y="767.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#374556">测试可丢数据 ≠ 可泄露数据</text><rect x="790" y="665" width="550" height="140" rx="12" fill="#fff0ef" stroke="#d39b94"/><text x="1065.0" y="715.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#873f36">本轮不做</text><text x="1065.0" y="741.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#873f36">原生App/Push · 正式UI · 协作</text><text x="1065.0" y="767.0" text-anchor="middle" font-family="Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="17" fill="#873f36">天气 · OCR · 预算 · 旅行拆分</text></svg></div></article></main></div><script>document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.panel,.nav-item').forEach(e=>e.classList.remove('active'));b.classList.add('active');document.getElementById(b.dataset.tab).classList.add('active');window.scrollTo({top:0,behavior:'instant'});}));</script></body></html>

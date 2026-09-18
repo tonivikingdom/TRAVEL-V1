@@ -1,0 +1,17 @@
+{
+  "name": "@travel/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@travel/contracts": "workspace:*",
+    "@travel/persistence": "workspace:*",
+    "fastify": "5.12.5"
+  }
+}

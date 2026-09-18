@@ -1,0 +1,7 @@
+archive/
+coverage/
+dist/
+node_modules/
+浏览器阅读版.html
+*.drawio
+.env.*.example

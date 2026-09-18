@@ -1,0 +1,15 @@
+.git
+.git/**
+.env
+.env.*
+!.env.*.example
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+infra/compose/data
+infra/compose/worker-heartbeat
+*.log

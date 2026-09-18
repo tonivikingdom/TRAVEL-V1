@@ -1,5 +1,6 @@
 import type {
   ConnectionView,
+  DayOccurrenceTargetInput,
   DayView,
   ItineraryNodeView,
   PlaceInput,
@@ -21,6 +22,7 @@ import type {
   ItineraryNodeRecord,
   PlaceRecord,
   RepositoryPlaceInput,
+  RepositoryDayOccurrenceTarget,
   RepositoryTemporalSubject,
   RepositoryTemporalValueInput,
   RepositoryTripCommand,
@@ -185,7 +187,7 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
     case 'ADD_PLACE_VISIT':
       return {
         type: command.type,
-        localDate: parseLocalDate(command.localDate),
+        targetDay: validateDayOccurrenceTarget(command.targetDay),
         position: nonnegativeInteger(command.position, 'position'),
         place: validatePlace(command.place),
         note: optionalText(command.note, 'note', 2_000),
@@ -193,15 +195,16 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
     case 'ADD_FREE_ACTION':
       return {
         type: command.type,
-        localDate: parseLocalDate(command.localDate),
+        targetDay: validateDayOccurrenceTarget(command.targetDay),
         position: nonnegativeInteger(command.position, 'position'),
         note: optionalText(command.note, 'note', 2_000),
       };
     case 'DELETE_NODE':
       requireUuid(command.nodeId, 'nodeId');
       return command;
-    case 'MOVE_NODE_WITHIN_DAY':
+    case 'MOVE_NODE':
       requireUuid(command.nodeId, 'nodeId');
+      requireUuid(command.dayOccurrenceId, 'dayOccurrenceId');
       return {
         ...command,
         position: nonnegativeInteger(command.position, 'position'),
@@ -239,6 +242,38 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
       requireUuid(command.transportEdgeId, 'transportEdgeId');
       return command;
   }
+}
+
+function validateDayOccurrenceTarget(
+  target: DayOccurrenceTargetInput,
+): RepositoryDayOccurrenceTarget {
+  if (typeof target !== 'object' || target === null) {
+    throw new ApplicationError(
+      'DAY_OCCURRENCE_REQUIRED',
+      '必须明确指定已有日期卡或新日期卡。',
+      400,
+    );
+  }
+  const candidate = target as Record<string, unknown>;
+  if (candidate.type === 'EXISTING') {
+    requireUuid(candidate.dayOccurrenceId as string, 'dayOccurrenceId');
+    return {
+      type: 'EXISTING',
+      dayOccurrenceId: candidate.dayOccurrenceId as string,
+    };
+  }
+  if (candidate.type === 'NEW') {
+    return {
+      type: 'NEW',
+      localDate: parseLocalDate(candidate.localDate as string),
+      sequence: nonnegativeInteger(candidate.sequence as number, 'sequence'),
+    };
+  }
+  throw new ApplicationError(
+    'DAY_OCCURRENCE_REQUIRED',
+    '必须明确指定已有日期卡或新日期卡。',
+    400,
+  );
 }
 
 function validatePlace(place: PlaceInput): RepositoryPlaceInput {
@@ -330,19 +365,11 @@ function projectDays(record: TripAggregateRecord): readonly DayView[] {
     if (
       record.effectiveStartDate !== record.effectiveEndDate ||
       record.ownedDates.length !== 0 ||
-      record.nodes.length !== 0
+      record.dayOccurrences.length !== 0
     ) {
       throw new Error('Trip effective range invariant is broken');
     }
     return [];
-  }
-
-  const nodesByDate = new Map<string, ItineraryNodeView[]>();
-  for (const node of record.nodes) {
-    const localDate = formatLocalDate(node.localDate);
-    const nodes = nodesByDate.get(localDate) ?? [];
-    nodes.push(toNodeView(node));
-    nodesByDate.set(localDate, nodes);
   }
 
   const expectedStart = formatLocalDate(record.effectiveStartDate);
@@ -351,21 +378,33 @@ function projectDays(record: TripAggregateRecord): readonly DayView[] {
   if (
     ownedDates[0] !== expectedStart ||
     ownedDates.at(-1) !== expectedEnd ||
-    !isContinuous(ownedDates)
+    !isContinuous(ownedDates) ||
+    !ownedDates.every((date) =>
+      record.dayOccurrences.some(
+        (occurrence) => formatLocalDate(occurrence.localDate) === date,
+      ),
+    )
   ) {
     throw new Error('DateOwnership does not match the effective Trip range');
   }
-  return ownedDates.map((localDate) => ({
-    localDate,
-    nodes: nodesByDate.get(localDate) ?? [],
-  }));
+  return record.dayOccurrences.map((occurrence, index) => {
+    if (occurrence.sequence !== index) {
+      throw new Error('DayOccurrence sequence is not contiguous');
+    }
+    return {
+      dayOccurrenceId: occurrence.id,
+      localDate: formatLocalDate(occurrence.localDate),
+      sequence: occurrence.sequence,
+      nodes: occurrence.nodes.map(toNodeView),
+    };
+  });
 }
 
 function toNodeView(record: ItineraryNodeRecord): ItineraryNodeView {
   return {
     id: record.id,
     kind: record.kind,
-    localDate: formatLocalDate(record.localDate),
+    dayOccurrenceId: record.dayOccurrenceId,
     position: record.position,
     place: record.place === null ? null : toPlaceView(record.place),
     note: record.note,
@@ -379,6 +418,7 @@ function toNodeView(record: ItineraryNodeRecord): ItineraryNodeView {
 function projectConnections(
   record: TripAggregateRecord,
 ): readonly ConnectionView[] {
+  const nodes = orderedNodes(record);
   const adjacencyKeys = new Set<string>();
   const edgesByAdjacency = new Map<string, TransportEdgeRecord>();
   for (const edge of record.transportEdges) {
@@ -390,9 +430,9 @@ function projectConnections(
   }
 
   const connections: ConnectionView[] = [];
-  for (let index = 0; index + 1 < record.nodes.length; index += 1) {
-    const from = record.nodes[index];
-    const to = record.nodes[index + 1];
+  for (let index = 0; index + 1 < nodes.length; index += 1) {
+    const from = nodes[index];
+    const to = nodes[index + 1];
     if (from === undefined || to === undefined) {
       throw new Error('Trip timeline projection is incomplete');
     }
@@ -424,6 +464,12 @@ function projectConnections(
     }
   }
   return connections;
+}
+
+function orderedNodes(
+  record: TripAggregateRecord,
+): readonly ItineraryNodeRecord[] {
+  return record.dayOccurrences.flatMap((occurrence) => occurrence.nodes);
 }
 
 function connectionState(

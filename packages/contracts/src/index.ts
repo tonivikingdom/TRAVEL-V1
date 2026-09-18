@@ -25,6 +25,7 @@ export type {
   ConnectionState,
   ConnectionView,
   CustomPlaceInput,
+  DayOccurrenceTargetInput,
   DayView,
   ExistingPlaceInput,
   ItineraryNodeKind,

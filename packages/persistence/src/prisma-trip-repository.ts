@@ -33,6 +33,10 @@ interface DateBoundsRow {
   readonly maximum: Date | null;
 }
 
+interface AdvisoryLockRow {
+  readonly locked: boolean;
+}
+
 export class PrismaTripRepository implements TripRepository {
   constructor(private readonly client: PrismaClient) {}
 
@@ -149,9 +153,13 @@ async function lockOwner(
   transaction: Transaction,
   ownerUserId: string,
 ): Promise<void> {
-  await transaction.$queryRaw(Prisma.sql`
-    SELECT pg_advisory_xact_lock(hashtextextended(${ownerUserId}, 2))
+  const rows = await transaction.$queryRaw<AdvisoryLockRow[]>(Prisma.sql`
+    SELECT TRUE AS locked
+    FROM pg_advisory_xact_lock(hashtextextended(${ownerUserId}, 2))
   `);
+  if (rows[0]?.locked !== true) {
+    throw new Error('Failed to acquire the owner date-ownership lock');
+  }
 }
 
 async function requireLockedTrip(

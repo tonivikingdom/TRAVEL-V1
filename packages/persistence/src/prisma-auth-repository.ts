@@ -4,7 +4,6 @@ import {
   type AuthenticatedSession,
   type ConsumeMagicLinkResult,
   type CreatedInvitation,
-  type PreparedMagicLink,
 } from '@travel/application';
 import type {
   AccountAdminUserView,
@@ -22,16 +21,15 @@ interface RateLimitRow {
 export class PrismaAuthRepository implements AuthRepository {
   constructor(private readonly client: PrismaClient) {}
 
-  async prepareMagicLink(input: {
+  async enqueueMagicLinkRequest(input: {
     readonly normalizedEmail: string;
     readonly email: string;
-    readonly tokenDigest: string;
-    readonly tokenExpiresAt: Date;
     readonly now: Date;
     readonly rateLimitWindowSeconds: number;
     readonly rateLimitMaxRequests: number;
-  }): Promise<PreparedMagicLink | null> {
-    return this.client.$transaction(
+    readonly jobMaxAttempts: number;
+  }): Promise<void> {
+    await this.client.$transaction(
       async (transaction) => {
         const keyDigest = sha256ForRateLimit(input.normalizedEmail);
         const cutoff = new Date(
@@ -67,51 +65,23 @@ export class PrismaAuthRepository implements AuthRepository {
           );
         }
 
-        const user = await transaction.user.findUnique({
-          where: { normalizedEmail: input.normalizedEmail },
-          select: { id: true, email: true, status: true },
-        });
-        if (user !== null) {
-          if (user.status !== 'ACTIVE') {
-            return null;
-          }
-          await transaction.magicLinkToken.create({
-            data: {
-              userId: user.id,
-              tokenDigest: input.tokenDigest,
-              expiresAt: input.tokenExpiresAt,
-            },
-          });
-          return { recipient: user.email };
-        }
-
-        const invitation = await transaction.invitation.findUnique({
-          where: { normalizedEmail: input.normalizedEmail },
-          select: {
-            id: true,
-            email: true,
-            status: true,
-            expiresAt: true,
-            revokedAt: true,
-          },
-        });
-        if (
-          invitation === null ||
-          invitation.status !== 'PENDING' ||
-          invitation.revokedAt !== null ||
-          invitation.expiresAt <= input.now
-        ) {
-          return null;
-        }
-
-        await transaction.magicLinkToken.create({
+        const delivery = await transaction.magicLinkDeliveryRequest.create({
           data: {
-            invitationId: invitation.id,
-            tokenDigest: input.tokenDigest,
-            expiresAt: input.tokenExpiresAt,
+            normalizedEmail: input.normalizedEmail,
+            requestedEmail: input.email,
+            requestedAt: input.now,
           },
         });
-        return { recipient: invitation.email };
+        await transaction.job.create({
+          data: {
+            type: 'MAGIC_LINK_EMAIL',
+            status: 'QUEUED',
+            runAt: input.now,
+            maxAttempts: input.jobMaxAttempts,
+            uniqueKey: `magic-link-email:${delivery.id}`,
+            payloadRef: delivery.id,
+          },
+        });
       },
       { isolationLevel: 'Serializable' },
     );

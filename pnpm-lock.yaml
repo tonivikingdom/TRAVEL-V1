@@ -56,6 +56,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@travel/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@travel/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

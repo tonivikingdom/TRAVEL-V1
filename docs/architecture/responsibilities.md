@@ -14,15 +14,24 @@
 
 P1A 已实现上述数据表、迁移和最小端点；不包含任何 Trip 私有资源实现。
 
-## Job 与 Worker（P1B，尚未授权）
+## Job 与 Worker（P1B1，已授权）
 
 - Job 持久化到 PostgreSQL，至少包含 runAt、status、attempts、leaseUntil、
   uniqueKey 和 payloadRef。
 - Worker 通过租约/行锁领取，任务幂等、有限重试、退避、超时、失败可见并支持撤销。
-- 业务写入与 outbox 同一事务；外部副作用不宣称 exactly-once。
+- Magic Link 的节流状态、DeliveryRequest 与 Job 在同一事务写入；外部邮件副作用为
+  at-least-once，不宣称 exactly-once。
 - Worker 调用 application 用例，不绕过资源归属、Trip 版本或监控开关。
+- `Job.payloadRef` 只引用类型化业务记录；不保存任意 JSON、原始登录 token 或完整链接。
+- Worker 从 DeliveryRequest ID、持久 tokenGeneration 和 Git 外 `MAGIC_LINK_TOKEN_KEY` 派生
+  可重试的原始 token，PostgreSQL 仍只保存 SHA-256 digest。TTL 内重试保持 generation；过期
+  重试在行锁事务内轮换 generation 与 digest，旧链接不会复活。
+- Staging/Production 要求至少 32-byte、由密码学安全随机源生成且以 canonical base64url 或
+  hex 编码的 key。程序只验证格式与解码长度，不宣称能证明随机熵。
 
-P0 Worker 只做数据库健康心跳，不执行或声称已经实现后台通知。
+P1B1 在 P0 健康心跳之上增加 JobRunner；WorkerRuntime 只负责进程生命周期，Runner 负责
+poll/claim/lease/timeout/retry，Handler 只处理 `MAGIC_LINK_EMAIL`。P1B2 的
+NotificationEvent / ObjectStorage 未授权、未实现。
 
 ## Trip 版本（P2 起）
 

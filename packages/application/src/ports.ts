@@ -7,10 +7,6 @@ import type {
 
 import type { Actor } from './authorization.js';
 
-export interface PreparedMagicLink {
-  readonly recipient: string;
-}
-
 export interface AuthenticatedSession {
   readonly actor: Actor;
   readonly user: UserView;
@@ -28,15 +24,14 @@ export interface CreatedInvitation {
 }
 
 export interface AuthRepository {
-  prepareMagicLink(input: {
+  enqueueMagicLinkRequest(input: {
     readonly normalizedEmail: string;
     readonly email: string;
-    readonly tokenDigest: string;
-    readonly tokenExpiresAt: Date;
     readonly now: Date;
     readonly rateLimitWindowSeconds: number;
     readonly rateLimitMaxRequests: number;
-  }): Promise<PreparedMagicLink | null>;
+    readonly jobMaxAttempts: number;
+  }): Promise<void>;
   consumeMagicLink(input: {
     readonly tokenDigest: string;
     readonly sessionDigest: string;
@@ -72,10 +67,66 @@ export interface AuthRepository {
   }): Promise<{ readonly created: boolean; readonly userId: string }>;
 }
 
+export type JobType = 'MAGIC_LINK_EMAIL';
+export type JobStatus =
+  'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+export interface ClaimedJob {
+  readonly id: string;
+  readonly type: JobType;
+  readonly payloadRef: string;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly leaseOwner: string;
+  readonly leaseUntil: Date;
+}
+
+export interface JobRepository {
+  claimNext(input: {
+    readonly workerId: string;
+    readonly now: Date;
+    readonly leaseDurationMs: number;
+  }): Promise<ClaimedJob | null>;
+  markSucceeded(jobId: string, workerId: string, now: Date): Promise<boolean>;
+  markFailed(input: {
+    readonly job: ClaimedJob;
+    readonly workerId: string;
+    readonly now: Date;
+    readonly errorCode: string;
+    readonly retryAt: Date;
+  }): Promise<'RETRY_SCHEDULED' | 'FAILED' | 'LEASE_LOST'>;
+  cancel(
+    jobId: string,
+    now: Date,
+  ): Promise<'CANCELLED' | 'REQUESTED' | 'TERMINAL' | 'NOT_FOUND'>;
+  isCancellationRequested(jobId: string, workerId: string): Promise<boolean>;
+  markCancelled(jobId: string, workerId: string, now: Date): Promise<boolean>;
+}
+
+export type PreparedMagicLinkDelivery =
+  | {
+      readonly status: 'SEND';
+      readonly recipient: string;
+      readonly expiresAt: Date;
+      readonly tokenGeneration: number;
+    }
+  | { readonly status: 'NOOP' | 'DELIVERED' };
+
+export interface MagicLinkDeliveryRepository {
+  prepareDelivery(input: {
+    readonly deliveryRequestId: string;
+    readonly deriveTokenDigest: (generation: number) => string;
+    readonly proposedExpiresAt: Date;
+    readonly now: Date;
+  }): Promise<PreparedMagicLinkDelivery>;
+  markDelivered(deliveryRequestId: string, now: Date): Promise<void>;
+}
+
 export interface MagicLinkMail {
   readonly recipient: string;
   readonly magicLink: string;
   readonly expiresAt: Date;
+  readonly signal?: AbortSignal;
 }
 
 export interface MailSender {

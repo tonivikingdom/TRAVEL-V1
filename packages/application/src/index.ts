@@ -7,6 +7,11 @@ export {
 } from './authorization.js';
 export { ApplicationError, isApplicationError } from './errors.js';
 export {
+  MagicLinkEmailHandler,
+  type MagicLinkEmailHandlerConfig,
+  type MagicLinkEmailHandlerOptions,
+} from './magic-link-email-handler.js';
+export {
   CapturedMailSender,
   UnconfiguredMailSender,
   type AuthRepository,
@@ -15,8 +20,17 @@ export {
   type CapturedMail,
   type ConsumeMagicLinkResult,
   type CreatedInvitation,
+  type ClaimedJob,
+  type JobRepository,
+  type JobStatus,
+  type JobType,
+  type MagicLinkDeliveryRepository,
   type MagicLinkMail,
   type MailSender,
-  type PreparedMagicLink,
+  type PreparedMagicLinkDelivery,
 } from './ports.js';
-export { createOpaqueToken, digestOpaqueToken } from './tokens.js';
+export {
+  createOpaqueToken,
+  deriveMagicLinkToken,
+  digestOpaqueToken,
+} from './tokens.js';

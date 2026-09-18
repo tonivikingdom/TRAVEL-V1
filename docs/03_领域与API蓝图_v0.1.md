@@ -51,7 +51,7 @@ Day 仍为 projection，不建立独立表。P2B 只增加当前相邻 Transport
 - Trip note、todo、普通备注、Attachment、Expense、NotificationEvent 或用户偏好单独存在时不撑开日期范围；未来若 Task/Expense 附着于有效行程实体，由该实体决定日期范围。跨午夜、跨日期线与跨时区 Day 投影继续受 O-03 约束。
 - 同一账号同一自然日最多属于一个 Trip。范围扩展遇到已占用日期时必须返回明确冲突，不重复占用、不静默覆盖、不自动合并；未来再由用户流程选择合并、调整或取消。
 
-## 2.2 O-03 timeline 与日期卡（部分确认，仅规格）
+## 2.2 O-03 timeline 与日期卡（产品规则已确认，仅规格）
 
 - 真实行程顺序由独立 timeline sequence 决定；已有明确 instant 时，真实时间先后按 instant 判断。
   `localDate` / `localTime` 只负责当地显示，不能作为整趟 Trip 的最终排序键。
@@ -64,6 +64,10 @@ Day 仍为 projection，不建立独立表。P2B 只增加当前相邻 Transport
   日期归属，另一 Trip 不能占用该自然日。
 - 当前 P2B 的 `localDate + position` 是基础阶段实现。在正式支持上述场景前必须升级为独立
   sequence 语义；本次只记录边界，不修改现有 schema 或代码。
+- DST 回拨日的重复当地时间若只有手工 local clock 输入，必须让用户选择前一个或后一个
+  occurrence，不得默认；DST 跳时导致不存在的当地时间必须明确拒绝，不得自动平移。
+- Provider/固定服务等可靠结构化数据已有明确 instant 或 UTC offset 时直接使用，不询问用户。
+  信息不足以唯一确定 instant 时保持歧义，不猜测。
 
 ## 3. 数据归属与权限
 所有私有资源必须通过owner和所属Trip检查权限。owner从服务端会话取得，不信任客户端传来的ownerId。管理员仅能开通/禁用/撤销账号会话，不继承读取他人Trip、附件、位置、费用的权限。[S07]
@@ -84,9 +88,10 @@ P2B 的 resolved `TimeValue` 权威字段为明确 `instant`、`timeZone`（IANA
 输出时派生，不持久化第二份时间真相；持续时长用真实时间点之差计算，不使用服务器默认时区。
 用户目标、约束、最低停留与 lock 属于后续 `UserTimeIntent / TimeConstraint`，不能塞入 TimeValue。
 
-没有 Trip 级统一时区；生命周期日期的调度基准不能暗用服务器 UTC，参见 O-03。跨日期线的
-timeline/日期卡显示规则已确认，但最终 sequence/DayOccurrence 实现仍待设计；对夏令时重复或
-不存在钟点、无明确 instant 的当地输入返回明确歧义，不自动纠正成看似有效的时间。
+没有 Trip 级统一时区；生命周期日期的调度基准不能暗用服务器 UTC，参见 O-03。跨日期线与
+DST 产品规则已确认，但最终 sequence/DayOccurrence、migration 和输入 command/UI 仍待实现。
+重复当地时间由用户明确选前/后 occurrence，不存在时间明确拒绝；可靠数据已有 instant/offset
+时直接使用，信息不足时返回明确歧义，不自动纠正成看似有效的时间。
 
 ## 5. 一个实体，按 sequence 投影到日期卡
 
@@ -109,16 +114,29 @@ Transport 与日期卡的显示关系依赖实际 timeline/sequence，不能只�
 不得为视觉递增篡改日期。
 
 ## 6. 行程状态与监控状态分开
-Trip生命周期提案：PLANNED、IN_PROGRESS、AWAITING_OUTCOME、FINISHED、NOT_TAKEN。FINISHED另带finishReason NORMAL/INCOMPLETE，不把不完整伪装成未去。
+用户可见 Trip 生命周期保持简单：PLANNED、IN_PROGRESS、FINISHED、NOT_TAKEN。
 
-- 到起始日期进入IN_PROGRESS是运行假设，不自动生成Actual事实。
-- NOT_TAKEN只能由用户确认；无数据不等于没旅行。
-- 无法确认整趟是否发生，计划周期后AWAITING_OUTCOME并停止任务。
-- 已有实际执行但尾段未知，可异常收尾；有争议按O-07不自动归类。
+- 到起始日期进入 IN_PROGRESS 是运行假设，不自动生成 Actual 事实。
+- 计划日期结束后自然进入 FINISHED；即使没有打开 App、没有定位、没有 Actual 或尾段未知，
+  也不要求用户证明旅行发生，不进入待确认或“记录不完整待处理”。
+- Actual、定位与 App 使用证据有多少保存多少，缺少部分保持 unknown；它们用于提醒、风险、调整
+  与历史回看，不是生命周期结束门槛。
+- NOT_TAKEN 只能由用户主动明确表示“没去”；无数据不等于没旅行，系统不得自动判断未执行。
+- 不弹“是否去过”、不要求补全实际记录。底层如需技术状态，不得变成用户必须处理的任务。
 
 监控用户开关与当前运行状态也分开：`userEnabled` + OFF/IDLE/RUNNING/LIMITED。用户关掉后不因第二天或重新打开界面自动恢复；系统自然停止不改变userEnabled。
 
 设备证据必须有deviceId、capturedAt、accuracy、source、receivedAt；晚到数据不能覆盖较新证据。位置输入只认用户授权客户端/主动填写，不通过服务器猜测。
+
+## 6.1 受保护安排（O-04 产品规则已确认）
+
+- 不解析备注、附件、待办或自然语言去猜预约/购票事实；“已经订了”等文字本身不建立保护。
+- 受保护来源只有可靠结构化事实（如已采用固定班次、结构化确认的预约/门票时间）或用户主动
+  明确标记“已预订 / 时间固定”。
+- V1 只需轻量结构化确认，不要求订单号、截图、付款凭证、OCR 或完整订单模块。
+- 普通计划相对可调整；保护安排发生冲突时优先尝试保住，但保护不等于绝对禁止修改。无法满足时
+  展示冲突并让用户决定，不能伪造“已解决”。
+- Provider/Booking 将来如何取得结构化确认属于 P4 或外部服务实现，不再是核心产品规则阻塞。
 
 ## 7. Query / Preview / Adopt的事务规则
 **Query**：传起終点、最早出发/最晚到达、日期时区、已有方案参考；返回候选与来源/有效期。不得写当前Trip。

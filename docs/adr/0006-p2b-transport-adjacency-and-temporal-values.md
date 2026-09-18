@@ -81,5 +81,7 @@ ADMIN 均没有跨 owner 例外；不存在与跨 owner ID 对外统一 `NOT_FOU
 application temporal 写入成功时每个 command 只增加一次 Trip version。
 
 P2B 不开放任意 TimeValue HTTP 写接口，也不实现传播、反推、UserTimeIntent、风险、生命周期、
-Provider、路线 Query、Preview/Adopt、跨日移动、Undo 或正式 UI。O-03 与 O-07 仍未解决；P3
-传播和 P4 Provider/Preview/Adopt 尚未实现。
+Provider、路线 Query、Preview/Adopt、跨日移动、Undo 或正式 UI。ADR 接受时 O-03 与 O-07 尚未
+解决；后续 Draft PR #8 已在产品规则层面确认 O-03（含 DST）、O-04 与 O-07，但没有改变本 ADR
+的 P2B 实现。P3 传播、DayOccurrence/sequence、生命周期、保护安排和 P4 Provider/Preview/Adopt
+仍未实现。

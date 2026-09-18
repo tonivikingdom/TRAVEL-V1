@@ -77,7 +77,7 @@
 
 ## 停止点
 
-O-03 已对跨时区 timeline、跨日交通、日期回拨、重复日期卡与当前当地时区依据作部分确认，
-但 DST 当地时间输入、最终 sequence/DayOccurrence 结构和迁移仍未解决；O-07 仍未解决。P2B
-不实现 Provider、路线查询、Preview/Adopt、时间传播/反推、UserTimeIntent、风险、自动生命周期、
-跨日移动、Trip merge/copy/share、Undo 或正式 UI；P3/P4 代码均未进入。
+O-03（含 DST）与 O-07 后续已在产品规则层面解决，O-04 的保护来源规则也已确认；但最终
+sequence/DayOccurrence 结构与 migration、跨日投影、DST command/UI、生命周期和保护安排均未
+在 P2B 实现。P2B 不实现 Provider、路线查询、Preview/Adopt、时间传播/反推、UserTimeIntent、
+风险、自动生命周期、跨日移动、Trip merge/copy/share、Undo 或正式 UI；P3/P4 代码均未进入。

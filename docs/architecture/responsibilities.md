@@ -62,7 +62,7 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 - Transport 归档时将相关时间值复制到强类型历史表；三层时间不会因 current edge 删除而丢失。
 - P2B 不公开任意时间写 HTTP API，不实现传播、反推、Provider、Preview/Adopt、风险或生命周期。
 
-## Timeline 与日期卡（O-03 已确认部分，仅规格）
+## Timeline、日期卡与 DST（O-03 产品规则已确认，仅规格）
 
 - Domain 的真实先后关系必须使用独立 timeline sequence；有明确 instant 时按 instant 判断时间先后。
   `localDate` / `localTime` 是当地显示信息，不能承担整趟 Trip 的排序职责。
@@ -76,8 +76,32 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   仅钟点回拨时仍在同一卡继续，由 Transport 显示时区切换。
 - 执行阶段的当前当地时区来源优先级为可靠设备定位、设备时区、行程地点时区上下文；服务端默认
   时区不得参与。位置/时区上下文不能生成 Visit 完成、具体地点到达或 ACTUAL 事实。
-- 当前 P2B schema/排序未在本次文档任务中修改。DST 重复/不存在当地时间、最终 DayOccurrence
-  结构、sequence 迁移和跨日 Transport 的存储/投影仍是实现前闸门。
+- 可靠结构化数据已有 instant/offset 时直接确定 DST occurrence；只有手工 local clock 且重复时，
+  application 必须要求用户选前/后 occurrence，不得默认。不存在的当地时间明确拒绝，不平移。
+- O-03 已在产品规则层面解决；当前 P2B schema/排序未修改。最终 DayOccurrence 结构、sequence
+  migration、跨日 Transport 投影和 DST command/UI 仍是尚未实施的工程工作。
+
+## 受保护安排（O-04 产品规则已确认，仅规格）
+
+- 保护来源只接受可靠结构化事实（例如已采用固定班次、结构化确认的预约/门票时间）或用户主动
+  明确标记“已预订 / 时间固定”。
+- application 不解析备注、附件、待办或自然语言猜预约状态；这些内容不能自行升级为保护事实。
+- 首版结构化确认保持轻量，不要求订单号、截图、付款凭证、OCR 或完整订单模型。
+- solver 将保护作为优先保留约束；无法同时满足时返回冲突和影响，由用户决定，不伪造可行结果，
+  也不把“保护”解释为永远禁止修改。
+- Provider/Booking 如何产生可靠结构化确认属于后续 adapter/use case，不再是产品规则未决项。
+
+## Trip 自然结束（O-07 产品规则已确认，仅规格）
+
+- 用户可见生命周期为计划中、进行中、已结束、未执行。计划日期结束后自然进入已结束，不依赖
+  Actual、定位、App 使用记录或用户确认。
+- Actual 与执行证据按实际取得量保存，缺失保持 unknown；它们服务于提醒、风险、调整与历史回看，
+  不承担“证明旅行发生”的职责。
+- application 不创建“是否去过”“等待结果”或“记录不完整待处理”的用户任务。底层技术状态如有
+  必要，不得成为用户必须处理的流程。
+- `NOT_TAKEN` 只能由用户主动明确表示没去；缺定位、未打开 App、无 Actual 或无执行数据都不能
+  自动触发。
+- 生命周期自动迁移尚未实现，本次不修改 P2A/P2B 业务代码。
 
 ## 站内通知（P1B2）
 

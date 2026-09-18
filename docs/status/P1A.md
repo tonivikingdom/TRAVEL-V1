@@ -1,6 +1,6 @@
 # P1A 身份、权限、Magic Link 与多设备 Session 交付记录
 
-- 当前状态：P1A 实现完成；Draft PR #2 的测试基础设施修正已提交，等待新 CI
+- 当前状态：P1A 实现完成；Draft PR #2 的测试基础设施修正及 CI 验证已通过
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 独立安全复核：GPT-5.6 Sol / Extra High
 - 备选施工：GPT-5.6 Luna / Max
@@ -21,6 +21,9 @@
   PostgreSQL integration 会在无 workspace `dist` 的干净 checkout 中验证 source alias。
 - 本机 `pnpm test:integration` 已进入 persistence Vitest 并正确解析 workspace source；因
   本机未配置 `TEST_DATABASE_URL` / 隔离 PostgreSQL，在数据库测试开始前停止，未宣称通过。
+- 修复提交：`1a0e45664744acd32e1558190692abcc790d4327`。
+- 对应 CI：[`Run 35300426429`](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35300426429)，
+  `verify` 与 `Compose verification` 均通过。
 
 ## 已实现
 

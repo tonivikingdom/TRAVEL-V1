@@ -1,9 +1,11 @@
 # P3/P5 前置：O-03～O-08、O-10、O-11 产品规则落档
 
-- 当前状态：在 `feature/p3-prep-o03-timeline-days` 仅做规格落档；交付为 Draft PR，未 Ready、
-  未合并，P3 代码未开始
+- 当前状态：PR #8 已 Squash Merge；规格已进入 main。P3A DayOccurrence/sequence foundation 已获
+  单独授权并在独立 feature 分支实施；该授权不包含完整 P3 solver
 - 基线 main：`50866c4aa4ec122e4522920dcf2e53b551de7dfb`
 - 基线 main CI：Run `35353581612`，`verify` 与 `Compose verification` 均为 success
+- 规格合并 main：`be573533e025acc3730f44ad3dc7d4499ed55d1b`
+- 规格合并 main CI：Run `35366718778`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 备选：GPT-5.6 Sol / Medium
 - 建议理由：本轮需要跨文档核对大量已确认规则与 O-03～O-07、P2A/P2B 边界的一致性，而非代码量
@@ -23,7 +25,8 @@
 - 被连续 Transport 完整覆盖的中间自然日必须有日期卡和 DateOwnership，且不能加入普通
   Place/FreeAction；“交通占用日”仅为规格概念，本轮不锁定 enum。
 - 跨国际日期线导致 localDate 回拨时，按真实 sequence 生成日期回拨卡。同一 localDate 可以出现
-  任意多张有独立身份的卡；`DayOccurrence` 是架构概念名，不是已确定数据库表名。
+  任意多张有独立身份的卡；PR #8 落档时 `DayOccurrence` 仍是架构概念名，后续 P3A 已正式采用
+  同名持久模型。
 - 新增/编辑内容和 Transport 投影必须定位具体日期卡身份，不能只按 localDate 匹配。
 - 重复日期卡不重复 DateOwnership；同一用户的自然日仍最多归属于一个 Trip。
 - 执行阶段当前当地时区依次来自可靠设备定位、设备时区、行程地点时区上下文；不使用服务器默认
@@ -33,10 +36,10 @@
 - 手工输入 DST 跳时中不存在的当地钟点时明确拒绝，不自动平移或静默接受。
 - 只有当地钟点且信息不足以唯一确定 instant 时保持歧义，不猜测。
 
-### O-03 尚未实现的工程工作
+### O-03 工程实施状态
 
-- DayOccurrence 的最终数据库结构。
-- 当前 `localDate + position` 到独立 sequence 的迁移方案。
+- DayOccurrence 的数据库结构与 `localDate + position` 无损迁移已在 P3A 获授权实施；实际交付状态
+  见 `docs/status/P3A.md`。
 - 跨日 Transport 与日期卡关系的最终存储/投影实现。
 - DST 重复/不存在时间的输入解析 command 与 UI。
 
@@ -131,7 +134,8 @@ O-03 至 O-08、O-10 与 O-11 解决的是产品判断，不等于 DayOccurrence
 
 O-03 至 O-08、O-10 与 O-11 均已确认，O-09 保持 Deferred。当前没有已知的 P3 核心产品逻辑
 阻塞；P5 仍需实现和验证监控/通知、故障态、图片备份、回顾/分享权限等能力，并在上线前解决 O-09。
-本次落档不自动授权任何代码、migration、Provider、客户端或 Production 工作。
+PR #8 的落档本身不自动授权任何代码、migration、Provider、客户端或 Production 工作；P3A 是其后
+获得的独立、有限实现授权。
 
 ## 验证
 

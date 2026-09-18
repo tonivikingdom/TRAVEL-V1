@@ -38,13 +38,14 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 - O-01/O-02 已确认；P2A 建立 Trip、DateOwnership、Place 与 ItineraryNode migration/API。
 - 有效日期范围由最早至最晚有效行程内容自然日决定；范围内所有自然日（含中间空白日）归属该 Trip。空 Trip 不占用自然日，创建时的 `start date` 只是规划/编辑锚点。
 - 首尾空白日仅可作为临时编辑态；没有有效内容就离开编辑时自动消失，首尾最后一个有效内容被移除后范围向内收缩。临时首尾日不创建 `DateOwnership`，V1 不提供保留开关。
-- 有效行程内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体；note、todo、普通备注、Attachment、Expense、NotificationEvent 与偏好单独存在时不撑开范围。跨午夜/跨时区投影遵守 O-03 已确认语义，但最终 sequence/DayOccurrence 实现仍待设计。
+- 有效行程内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体；note、todo、普通备注、Attachment、Expense、NotificationEvent 与偏好单独存在时不撑开范围。跨午夜/跨时区投影遵守 O-03；P3A 已落地 sequence/DayOccurrence foundation，跨日 Transport 投影仍待实现。
 - 同一账号同一自然日最多属于一个 Trip。冲突必须明确返回，不能重复归属、静默覆盖或自动合并；日期锚点、有效范围与 `DateOwnership` 必须是可区分的概念。
-- `DateOwnership(ownerUserId, localDate)` 是唯一日期事实；Day 是 effective range、ownership 与
-  nodes 的 API projection，不建 Day 表。
+- `DateOwnership(ownerUserId, localDate)` 是跨 Trip 唯一自然日归属事实；`DayOccurrence` 是 Trip
+  内可重复 localDate 的日期卡身份和排序事实，两者职责不同，不能互相替代。
 - 结构 mutation 先取得 owner-scoped advisory transaction lock，再锁定并校验 Trip version；
   节点写入、range/ownership reconciliation 与 version+1 原子完成。
-- P2A 只支持同日排序；Transport、时间传播、跨日移动与生命周期后置。
+- P2A 交付时只支持同日排序；P3A 已增加明确 occurrence 的跨卡移动 foundation。时间传播、跨日
+  Transport 投影与生命周期仍后置。
 
 ## 相邻 Transport 与 resolved 时间（P2B）
 
@@ -62,12 +63,15 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 - Transport 归档时将相关时间值复制到强类型历史表；三层时间不会因 current edge 删除而丢失。
 - P2B 不公开任意时间写 HTTP API，不实现传播、反推、Provider、Preview/Adopt、风险或生命周期。
 
-## Timeline、日期卡与 DST（O-03 产品规则已确认，仅规格）
+## Timeline 与 DayOccurrence（P3A foundation）
 
 - Domain 的真实先后关系必须使用独立 timeline sequence；有明确 instant 时按 instant 判断时间先后。
   `localDate` / `localTime` 是当地显示信息，不能承担整趟 Trip 的排序职责。
-- 日期卡投影必须保留 sequence 与独立卡身份。文档暂称 `DayOccurrence`；同一 `localDate` 可出现
-  任意多张卡，application command 将来必须引用具体 occurrence，而不是只传日期值。
+- `DayOccurrence(id, tripId, localDate, sequence)` 是持久日期卡身份；同一 Trip 的 sequence 唯一，
+  `localDate` 不唯一。节点通过 `(dayOccurrenceId, tripId)` 强 FK 归属日期卡，整趟正式顺序为
+  `DayOccurrence.sequence + ItineraryNode.position`。
+- Trip read model 为每张卡返回 `dayOccurrenceId/localDate/sequence/nodes`。新增内容使用明确的
+  EXISTING/NEW 日期卡目标，移动使用目标 dayOccurrenceId；不按重复 localDate 猜卡。
 - `DateOwnership` 继续负责用户自然日到 Trip 的唯一归属。同一 Trip 的重复日期卡共享一份自然日
   归属；另一 Trip 仍不能占用该日期。
 - 连续跨日 Transport 始终是单一实体，只在真实经过的 DayOccurrence 中重复投影。完全被 Transport
@@ -78,8 +82,9 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   时区不得参与。位置/时区上下文不能生成 Visit 完成、具体地点到达或 ACTUAL 事实。
 - 可靠结构化数据已有 instant/offset 时直接确定 DST occurrence；只有手工 local clock 且重复时，
   application 必须要求用户选前/后 occurrence，不得默认。不存在的当地时间明确拒绝，不平移。
-- O-03 已在产品规则层面解决；当前 P2B schema/排序未修改。最终 DayOccurrence 结构、sequence
-  migration、跨日 Transport 投影和 DST command/UI 仍是尚未实施的工程工作。
+- P3A 已将 current Transport adjacency 与失效判断切换到 occurrence sequence，并保持结构、历史、
+  ownership 与 Trip version 同事务。跨日 Transport 多卡投影、交通占用日、DST command/UI、solver
+  与时间传播仍未实现。
 
 ## 受保护安排（O-04 产品规则已确认，仅规格）
 

@@ -31,7 +31,30 @@ P1A 已实现上述数据表、迁移和最小端点；不包含任何 Trip 私�
 
 P1B1 在 P0 健康心跳之上增加 JobRunner；WorkerRuntime 只负责进程生命周期，Runner 负责
 poll/claim/lease/timeout/retry，Handler 只处理 `MAGIC_LINK_EMAIL`。P1B2 的
-NotificationEvent / ObjectStorage 未授权、未实现。
+NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实施。
+
+## 站内通知（P1B2）
+
+- `NotificationEvent` 是用户私有、不可由客户端任意创建的持久事件；可信 application / worker
+  用例以明确 owner 和 `(ownerUserId, dedupeKey)` 幂等边界创建。
+- `GET /notifications` 只列出当前 Session actor 的通知，按 `createdAt + id` 稳定倒序分页；
+  已 dismiss 的事件保留并返回 `dismissedAt`，不物理删除证据。
+- `POST /notifications/:id/dismiss` 只能操作 actor 自己的记录并保持幂等。ADMIN 身份不获得
+  其他用户通知的读取或修改权。
+- P1B2 不生成风险业务语义、不实现 Push、偏好或正式通知 UI。
+
+## 私有对象存储（P1B2）
+
+- `packages/storage` 定义流式 `put/open/delete/stat/exists` port；application 只依赖 port，
+  不接触文件系统路径或未来 S3 SDK。
+- `StoredObject` 只保存 owner、服务端随机 key、状态、展示元数据、真实 byte size 和 SHA-256；
+  PostgreSQL 不保存二进制内容，P2 前也不创建虚假 Trip 关联。
+- owner 来自已验证 actor；ADMIN 无跨用户通配权。只有 `READY` 可读，`DELETED` 不可恢复为
+  可读状态。
+- Development/Test 的本地适配器限定私有 root、UUID key、临时文件、实际大小/hash 校验与
+  atomic rename，并拒绝 traversal、绝对路径和 symlink。Staging/Production provider 未配置。
+- 单文件、用户总量和 MIME allowlist 均为环境配置；用户总量预留在 PostgreSQL 事务中按 owner
+  advisory lock 串行化，避免并发明显超卖。O-09 正式产品数值仍未决定。
 
 ## Trip 版本（P2 起）
 

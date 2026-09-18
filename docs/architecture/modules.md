@@ -11,6 +11,8 @@ flowchart LR
   Worker[apps/worker] --> Contracts
   Worker --> Persistence
   Persistence --> PostgreSQL[(PostgreSQL)]
+  Application --> Storage[packages/storage port]
+  Storage --> PrivateVolume[(Dev/Test private volume)]
   Domain[packages/domain]
   Application --> Contracts
   Application -. 后续领域用例 .-> Domain
@@ -18,8 +20,8 @@ flowchart LR
   Worker -. P1B 起调用同一用例 .-> Application
 ```
 
-P1A 因身份用例首次建立 application 和 Prisma ORM；provider、storage 与业务 Job 仍按
-阶段后置，避免“目录齐全”被误解为能力已完成。
+P1A 建立身份 application 和 Prisma ORM，P1B1 增加持久 Job，P1B2 增加通知与可替换的
+对象存储 port。Dev/Test 本地适配器不代表 Staging/Production provider 已选择。
 
 ## 依赖规则
 
@@ -27,13 +29,14 @@ P1A 因身份用例首次建立 application 和 Prisma ORM；provider、storage 
 | ---------------------- | ----------------------------------------------- | ----------------------------------------------- |
 | `packages/domain`      | 标准库、显式传入的时间/ID/策略                  | HTTP、浏览器、数据库、ORM、网络、移动 SDK       |
 | `packages/contracts`   | 无运行时业务依赖                                | ORM 实体、端特有 UI 模型                        |
-| `packages/application` | contracts、标准库、端口接口                     | Fastify、Cookie、Prisma、具体邮件供应商         |
+| `packages/application` | contracts、storage port、标准库、端口接口       | Fastify、Cookie、Prisma、具体邮件/存储供应商    |
 | `packages/persistence` | contracts、application 端口、PostgreSQL、Prisma | Fastify 路由、界面、Provider                    |
+| `packages/storage`     | Node 基础设施 API、平台无关存储契约             | Domain、Fastify、Prisma、Trip 业务规则          |
 | `apps/api`             | contracts、application、persistence             | 直接实现领域规则、绕过用例写库                  |
 | `apps/worker`          | contracts、persistence；P1B 起 application      | 绕过授权/版本/事务，使用内存 timer 保存关键任务 |
 
-`application` 负责身份用例编排、逐请求授权与端口；持久层负责数据库事务。Provider 与
-ObjectStorage 都是端口/适配器，不能直接修改 Trip。API 与 Worker 是独立进程，
+`application` 负责用例编排、逐请求授权与端口；持久层负责数据库事务。Provider 与
+ObjectStorage 都是端口/适配器，不能直接修改未来 Trip。API 与 Worker 是独立进程，
 但调用同一套用例。
 
 ## P0 健康边界（持续回归）
@@ -51,3 +54,10 @@ ObjectStorage 都是端口/适配器，不能直接修改 Trip。API 与 Worker 
 - Prisma 只存在于 persistence；Magic Link 单次消费、禁用撤销和 Session 建立由数据库
   事务保护。
 - 管理员仅能执行账号管理动作，不能借角色读取未来私人业务资源。
+
+## P1B2 私有基础设施边界
+
+- Notification HTTP 只暴露当前用户列表与 dismiss；创建入口保留在可信 application / worker。
+- Local Filesystem adapter 仅用于 Development/Test，并使用 Compose 独立命名卷；文件不放在
+  public web root，不暴露实际路径或永久公开 URL。
+- 正式 Attachment upload/download、Trip 关联、文件解析与真实云对象存储均后置。

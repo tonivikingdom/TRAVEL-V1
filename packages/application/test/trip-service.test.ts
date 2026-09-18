@@ -76,6 +76,9 @@ describe('TripService', () => {
   );
 
   it('projects every DateOwnership including a middle day with no nodes', async () => {
+    const firstOccurrenceId = randomUUID();
+    const middleOccurrenceId = randomUUID();
+    const lastOccurrenceId = randomUUID();
     vi.mocked(repository.findOwnedById).mockResolvedValue({
       ...emptyTrip({
         ownerUserId,
@@ -90,7 +93,15 @@ describe('TripService', () => {
         utcDate('2030-10-02'),
         utcDate('2030-10-03'),
       ],
-      nodes: [freeAction('2030-10-01', 0), freeAction('2030-10-03', 0)],
+      dayOccurrences: [
+        dayOccurrence('2030-10-01', 0, firstOccurrenceId, [
+          freeAction(firstOccurrenceId, 0),
+        ]),
+        dayOccurrence('2030-10-02', 1, middleOccurrenceId, []),
+        dayOccurrence('2030-10-03', 2, lastOccurrenceId, [
+          freeAction(lastOccurrenceId, 0),
+        ]),
+      ],
     });
     const result = await service.getTrip(actor, tripId);
     expect(result.days.map((day) => [day.localDate, day.nodes.length])).toEqual(
@@ -110,7 +121,11 @@ describe('TripService', () => {
     });
     const command: TripCommandInput = {
       type: 'ADD_FREE_ACTION',
-      localDate: '2030-10-01',
+      targetDay: {
+        type: 'NEW',
+        localDate: '2030-10-01',
+        sequence: 0,
+      },
       position: 0,
       note: '  SYNTHETIC free time  ',
     };
@@ -124,17 +139,26 @@ describe('TripService', () => {
   });
 
   it('projects ACTIVE, MISSING, NOT_APPLICABLE, and runtime-origin connections', async () => {
-    const first = placeVisit('2030-10-01', 0, 'A');
-    const second = placeVisit('2030-10-01', 1, 'B');
-    const free = freeAction('2030-10-01', 2);
-    const third = placeVisit('2030-10-01', 3, 'C');
-    const fourth = placeVisit('2030-10-01', 4, 'D');
+    const occurrenceId = randomUUID();
+    const first = placeVisit(occurrenceId, 0, 'A');
+    const second = placeVisit(occurrenceId, 1, 'B');
+    const free = freeAction(occurrenceId, 2);
+    const third = placeVisit(occurrenceId, 3, 'C');
+    const fourth = placeVisit(occurrenceId, 4, 'D');
     vi.mocked(repository.findOwnedById).mockResolvedValue({
       ...emptyTripForId(),
       effectiveStartDate: utcDate('2030-10-01'),
       effectiveEndDate: utcDate('2030-10-01'),
       ownedDates: [utcDate('2030-10-01')],
-      nodes: [first, second, free, third, fourth],
+      dayOccurrences: [
+        dayOccurrence('2030-10-01', 0, occurrenceId, [
+          first,
+          second,
+          free,
+          third,
+          fourth,
+        ]),
+      ],
       transportEdges: [manualTransport(first.id, second.id)],
     });
 
@@ -318,7 +342,11 @@ describe('TripService', () => {
     await expect(
       service.executeCommand(actor, tripId, 1, {
         type: 'ADD_PLACE_VISIT',
-        localDate: '2030-10-01',
+        targetDay: {
+          type: 'NEW',
+          localDate: '2030-10-01',
+          sequence: 0,
+        },
         position: 0,
         place: {
           type: 'CUSTOM',
@@ -343,7 +371,11 @@ describe('TripService', () => {
       await expect(
         service.executeCommand(actor, tripId, 1, {
           type: 'ADD_FREE_ACTION',
-          localDate: '2030-10-01',
+          targetDay: {
+            type: 'NEW',
+            localDate: '2030-10-01',
+            sequence: 0,
+          },
           position: 0,
         }),
       ).rejects.toMatchObject({ code });
@@ -374,7 +406,7 @@ function emptyTrip(input: {
     createdAt: timestamp,
     updatedAt: timestamp,
     ownedDates: [],
-    nodes: [],
+    dayOccurrences: [],
     transportEdges: [],
   };
 }
@@ -388,13 +420,31 @@ function emptyTripForId(): TripAggregateRecord {
   });
 }
 
-function freeAction(localDate: string, position: number) {
+function dayOccurrence(
+  localDate: string,
+  sequence: number,
+  id: string,
+  nodes: TripAggregateRecord['dayOccurrences'][number]['nodes'],
+) {
+  const timestamp = new Date('2030-01-01T00:00:00.000Z');
+  return {
+    id,
+    tripId,
+    localDate: utcDate(localDate),
+    sequence,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    nodes,
+  };
+}
+
+function freeAction(dayOccurrenceId: string, position: number) {
   const timestamp = new Date('2030-01-01T00:00:00.000Z');
   return {
     id: randomUUID(),
     tripId,
+    dayOccurrenceId,
     kind: 'FREE_ACTION' as const,
-    localDate: utcDate(localDate),
     position,
     place: null,
     note: null,
@@ -405,13 +455,13 @@ function freeAction(localDate: string, position: number) {
   };
 }
 
-function placeVisit(localDate: string, position: number, name: string) {
+function placeVisit(dayOccurrenceId: string, position: number, name: string) {
   const timestamp = new Date('2030-01-01T00:00:00.000Z');
   return {
     id: randomUUID(),
     tripId,
+    dayOccurrenceId,
     kind: 'PLACE_VISIT' as const,
-    localDate: utcDate(localDate),
     position,
     place: {
       id: randomUUID(),

@@ -112,6 +112,26 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     expect(await managed.client.transportEdge.count()).toBe(0);
   });
 
+  it('uses occurrence sequence for adjacency when local dates move backward', async () => {
+    let trip = await createTrip(userA);
+    trip = await addVisit(userA, trip, 'Tokyo', 0, '2030-01-10');
+    trip = await addVisit(userA, trip, 'Los Angeles', 0, '2030-01-09');
+    expect(trip.days.map((day) => day.localDate)).toEqual([
+      '2030-01-10',
+      '2030-01-09',
+    ]);
+
+    trip = await setTransport(userA, trip, 0, 1, {
+      mode: 'FLIGHT',
+      fixedService: true,
+    });
+    expect(trip.connections).toHaveLength(1);
+    expect(connectionLabel(trip, trip.connections[0]!)).toBe(
+      'Tokyo→Los Angeles',
+    );
+    expect(trip.connections[0]!.state).toBe('ACTIVE');
+  });
+
   it('moves D locally and invalidates only the three changed adjacencies', async () => {
     let trip = await tripWithPlaces(userA, ['A', 'B', 'C', 'D', 'E', 'F']);
     for (let index = 0; index < 5; index += 1) {
@@ -129,8 +149,9 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     const nodeD = nodeNamed(trip, 'D');
 
     trip = await executeCommand(userA, trip.id, trip.version, {
-      type: 'MOVE_NODE_WITHIN_DAY',
+      type: 'MOVE_NODE',
       nodeId: nodeD.id,
+      dayOccurrenceId: trip.days[0]!.dayOccurrenceId,
       position: 2,
     });
 
@@ -778,7 +799,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
   ): Promise<TripView> {
     return executeCommand(identity, trip.id, trip.version, {
       type: 'ADD_PLACE_VISIT',
-      localDate,
+      targetDay: targetDay(trip, localDate),
       position,
       place: customPlace(name),
       note: `SYNTHETIC ${name}`,
@@ -793,7 +814,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
   ): Promise<TripView> {
     return executeCommand(identity, trip.id, trip.version, {
       type: 'ADD_FREE_ACTION',
-      localDate,
+      targetDay: targetDay(trip, localDate),
       position,
       note: 'SYNTHETIC free action',
     });
@@ -951,6 +972,13 @@ function customPlace(name: string) {
   };
 }
 
+function targetDay(trip: TripView, localDate: string) {
+  const existing = trip.days.find((day) => day.localDate === localDate);
+  return existing === undefined
+    ? { type: 'NEW', localDate, sequence: trip.days.length }
+    : { type: 'EXISTING', dayOccurrenceId: existing.dayOccurrenceId };
+}
+
 function activeConnections(trip: TripView): readonly ConnectionView[] {
   return trip.connections.filter((connection) => connection.state === 'ACTIVE');
 }
@@ -1008,6 +1036,7 @@ async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
   await managed.client.temporalValue.deleteMany();
   await managed.client.transportEdge.deleteMany();
   await managed.client.itineraryNode.deleteMany();
+  await managed.client.dayOccurrence.deleteMany();
   await managed.client.dateOwnership.deleteMany();
   await managed.client.trip.deleteMany();
   await managed.client.place.deleteMany();

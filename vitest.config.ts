@@ -1,19 +1,9 @@
 import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
+import { workspaceSourceAliases } from './vitest.workspace-aliases.js';
 
 export default defineConfig({
   resolve: {
-    alias: {
-      '@travel/application': fileURLToPath(
-        new URL('./packages/application/src/index.ts', import.meta.url),
-      ),
-      '@travel/contracts': fileURLToPath(
-        new URL('./packages/contracts/src/index.ts', import.meta.url),
-      ),
-      '@travel/persistence': fileURLToPath(
-        new URL('./packages/persistence/src/index.ts', import.meta.url),
-      ),
-    },
+    alias: workspaceSourceAliases,
   },
   test: {
     coverage: {

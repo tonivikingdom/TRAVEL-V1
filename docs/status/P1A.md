@@ -1,6 +1,6 @@
 # P1A 身份、权限、Magic Link 与多设备 Session 交付记录
 
-- 当前状态：本地实现完成；等待真实 PostgreSQL CI、push 与 Draft PR
+- 当前状态：P1A 实现完成；Draft PR #2 的测试基础设施修正已提交，等待新 CI
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 独立安全复核：GPT-5.6 Sol / Extra High
 - 备选施工：GPT-5.6 Luna / Max
@@ -8,7 +8,19 @@
 - 仓库：`https://github.com/tonivikingdom/TRAVEL-V1.git`
 - 分支：`feature/p1a-auth`
 - base：`93741a4c8641a1225632eaee381b6f706678245b`
-- PR：待创建；必须保持 Draft，不合并、不自动合并
+- PR：[Draft #2](https://github.com/tonivikingdom/TRAVEL-V1/pull/2)；必须保持 Draft，不合并、不自动合并
+
+## 本轮测试基础设施修正
+
+- 根因：`packages/persistence/vitest.integration.config.ts` 未加载根 Vitest 的 workspace
+  source aliases；integration 在 build 前运行时，`@travel/application` 回退到 runtime
+  `dist/index.js`，导致干净 checkout 中找不到入口。
+- 修复：新增根级 `vitest.workspace-aliases.ts`，由根配置、persistence integration
+  配置和 API integration 配置共同引用；正式 package exports 仍保持 `dist` 语义。
+- 回归边界：CI 的 verify job 继续在 `pnpm build` 前运行 `pnpm test:integration`，因此
+  PostgreSQL integration 会在无 workspace `dist` 的干净 checkout 中验证 source alias。
+- 本机 `pnpm test:integration` 已进入 persistence Vitest 并正确解析 workspace source；因
+  本机未配置 `TEST_DATABASE_URL` / 隔离 PostgreSQL，在数据库测试开始前停止，未宣称通过。
 
 ## 已实现
 

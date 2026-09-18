@@ -10,6 +10,7 @@ import type {
   LivenessResponse,
   PlaceInput,
   ReadinessResponse,
+  TransportMode,
   TripCommandInput,
 } from '@travel/contracts';
 import type { ReadinessProbe } from '@travel/persistence';
@@ -372,6 +373,13 @@ function requiredNumber(body: Record<string, unknown>, key: string): number {
   return body[key];
 }
 
+function requiredBoolean(body: Record<string, unknown>, key: string): boolean {
+  if (typeof body[key] !== 'boolean') {
+    throw new ApplicationError('VALIDATION_ERROR', '请求格式无效。', 400);
+  }
+  return body[key];
+}
+
 function optionalNullableString(
   body: Record<string, unknown>,
   key: string,
@@ -420,8 +428,45 @@ function parseTripCommand(value: unknown): TripCommandInput {
         nodeId: requiredString(command, 'nodeId'),
         place: parsePlaceInput(command.place),
       };
+    case 'SET_MANUAL_TRANSPORT':
+      return {
+        type,
+        fromNodeId: requiredString(command, 'fromNodeId'),
+        toNodeId: requiredString(command, 'toNodeId'),
+        mode: parseTransportMode(requiredString(command, 'mode')),
+        fixedService: requiredBoolean(command, 'fixedService'),
+        ...(hasOwn(command, 'serviceLabel')
+          ? {
+              serviceLabel: optionalNullableString(command, 'serviceLabel'),
+            }
+          : {}),
+        ...(hasOwn(command, 'note')
+          ? { note: optionalNullableString(command, 'note') }
+          : {}),
+      };
+    case 'CLEAR_TRANSPORT':
+      return {
+        type,
+        transportEdgeId: requiredString(command, 'transportEdgeId'),
+      };
     default:
       throw new ApplicationError('VALIDATION_ERROR', '不支持的行程命令。', 400);
+  }
+}
+
+function parseTransportMode(value: string): TransportMode {
+  switch (value) {
+    case 'WALKING':
+    case 'DRIVING':
+    case 'TAXI':
+    case 'RAIL':
+    case 'BUS':
+    case 'FERRY':
+    case 'FLIGHT':
+    case 'OTHER':
+      return value;
+    default:
+      throw new ApplicationError('VALIDATION_ERROR', '交通方式无效。', 400);
   }
 }
 

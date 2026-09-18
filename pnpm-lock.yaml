@@ -71,6 +71,9 @@ importers:
       '@travel/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@travel/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@travel/storage':
         specifier: workspace:*
         version: link:../storage

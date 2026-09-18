@@ -46,6 +46,22 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   节点写入、range/ownership reconciliation 与 version+1 原子完成。
 - P2A 只支持同日排序；Transport、时间传播、跨日移动与生命周期后置。
 
+## 相邻 Transport 与 resolved 时间（P2B）
+
+- `TransportEdge` 只代表当前 timeline 中相邻 PLACE_VISIT 间已确认的手工交通；缺少交通由
+  connection projection 的 `MISSING` 表达，不创建空行、默认步行或其他假交通。
+- 结构命令完成后只归档不再属于当前 adjacency 的边。删除 Node、Replace Place、用户替换与
+  清除使用明确原因；新 adjacency 不继承旧交通。
+- FreeAction 没有固定位置，不允许 TransportEdge。Place→FreeAction / FreeAction→FreeAction
+  为 `NOT_APPLICABLE`；FreeAction→Place 为 `RUNTIME_ORIGIN_REQUIRED`。
+- 节点写入、Transport 历史快照、current edge 删除、DateOwnership reconciliation 与单次
+  Trip version 增量共享一个 owner-scoped transaction。
+- `TemporalValue` 是已经解析的绝对时间结果，按 Node/Transport、ARRIVAL/DEPARTURE 与
+  PLANNED/ESTIMATED/ACTUAL 分离；权威值为 `instant + IANA timeZone`，不保存 local datetime
+  副本，也不承载用户约束。
+- Transport 归档时将相关时间值复制到强类型历史表；三层时间不会因 current edge 删除而丢失。
+- P2B 不公开任意时间写 HTTP API，不实现传播、反推、Provider、Preview/Adopt、风险或生命周期。
+
 ## 站内通知（P1B2）
 
 - `NotificationEvent` 是用户私有、不可由客户端任意创建的持久事件；可信 application / worker

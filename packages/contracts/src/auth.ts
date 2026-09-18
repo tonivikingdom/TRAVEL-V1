@@ -45,6 +45,7 @@ export type ApiErrorCode =
   | 'ACCOUNT_DISABLED'
   | 'CONFLICT'
   | 'DATE_OWNED'
+  | 'FACT_PROTECTED'
   | 'FORBIDDEN'
   | 'INVALID_OR_EXPIRED_TOKEN'
   | 'NOT_FOUND'

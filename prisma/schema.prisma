@@ -58,15 +58,57 @@ enum ItineraryNodeSource {
   USER_PLANNED
 }
 
+enum TransportMode {
+  WALKING
+  DRIVING
+  TAXI
+  RAIL
+  BUS
+  FERRY
+  FLIGHT
+  OTHER
+}
+
+enum TransportSource {
+  MANUAL
+}
+
+enum TransportInvalidationReason {
+  ADJACENCY_CHANGED
+  ENDPOINT_REPLACED
+  NODE_DELETED
+  USER_REPLACED
+  USER_CLEARED
+}
+
+enum TemporalLayer {
+  PLANNED
+  ESTIMATED
+  ACTUAL
+}
+
+enum TemporalPointKind {
+  ARRIVAL
+  DEPARTURE
+}
+
+enum TemporalSourceKind {
+  USER_VALUE
+  ADOPTED_TRANSPORT_FACT
+  SYSTEM_SUGGESTION
+  DERIVED
+  PROVIDER_OBSERVATION
+}
+
 model User {
-  id              String           @id @default(uuid()) @db.Uuid
+  id              String              @id @default(uuid()) @db.Uuid
   email           String
-  normalizedEmail String           @unique
-  role            UserRole         @default(USER)
-  status          UserStatus       @default(ACTIVE)
-  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
-  invitationsSent Invitation[]     @relation("InvitationInviter")
+  normalizedEmail String              @unique
+  role            UserRole            @default(USER)
+  status          UserStatus          @default(ACTIVE)
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime            @updatedAt @db.Timestamptz(3)
+  invitationsSent Invitation[]        @relation("InvitationInviter")
   magicLinkTokens MagicLinkToken[]
   sessions        Session[]
   preference      UserPreference?
@@ -212,19 +254,21 @@ model Job {
 }
 
 model Trip {
-  id                 String            @id @default(uuid()) @db.Uuid
-  ownerUserId        String            @db.Uuid
-  name               String            @db.VarChar(200)
-  planningAnchorDate DateTime          @db.Date
+  id                 String                 @id @default(uuid()) @db.Uuid
+  ownerUserId        String                 @db.Uuid
+  name               String                 @db.VarChar(200)
+  planningAnchorDate DateTime               @db.Date
   defaultPeopleCount Int
-  version            Int               @default(1)
-  effectiveStartDate DateTime?         @db.Date
-  effectiveEndDate   DateTime?         @db.Date
-  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
-  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
-  owner              User              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  version            Int                    @default(1)
+  effectiveStartDate DateTime?              @db.Date
+  effectiveEndDate   DateTime?              @db.Date
+  createdAt          DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime               @updatedAt @db.Timestamptz(3)
+  owner              User                   @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
   dateOwnerships     DateOwnership[]
   nodes              ItineraryNode[]
+  transportEdges     TransportEdge[]
+  transportHistory   TransportEdgeHistory[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -258,20 +302,104 @@ model Place {
 }
 
 model ItineraryNode {
-  id        String              @id @default(uuid()) @db.Uuid
-  tripId    String              @db.Uuid
-  kind      ItineraryNodeKind
-  localDate DateTime            @db.Date
-  position  Int
-  placeId   String?             @db.Uuid
-  note      String?             @db.VarChar(2000)
-  source    ItineraryNodeSource @default(USER_PLANNED)
-  createdAt DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime            @updatedAt @db.Timestamptz(3)
-  trip      Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  place     Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
+  id             String              @id @default(uuid()) @db.Uuid
+  tripId         String              @db.Uuid
+  kind           ItineraryNodeKind
+  localDate      DateTime            @db.Date
+  position       Int
+  placeId        String?             @db.Uuid
+  note           String?             @db.VarChar(2000)
+  source         ItineraryNodeSource @default(USER_PLANNED)
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
+  trip           Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  place          Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
+  temporalValues TemporalValue[]
 
   @@unique([tripId, localDate, position])
+  @@unique([id, tripId])
   @@index([tripId, localDate, position])
   @@index([placeId])
+}
+
+model TransportEdge {
+  id             String          @id @default(uuid()) @db.Uuid
+  tripId         String          @db.Uuid
+  fromNodeId     String          @db.Uuid
+  toNodeId       String          @db.Uuid
+  mode           TransportMode
+  fixedService   Boolean
+  serviceLabel   String?         @db.VarChar(200)
+  note           String?         @db.VarChar(2000)
+  source         TransportSource @default(MANUAL)
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @db.Timestamptz(3)
+  trip           Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  temporalValues TemporalValue[]
+
+  @@unique([tripId, fromNodeId, toNodeId])
+  @@unique([tripId, fromNodeId])
+  @@unique([tripId, toNodeId])
+  @@index([tripId, createdAt, id])
+}
+
+model TransportEdgeHistory {
+  id                      String                          @id @default(uuid()) @db.Uuid
+  originalTransportEdgeId String                          @unique @db.Uuid
+  tripId                  String                          @db.Uuid
+  originalFromNodeId      String                          @db.Uuid
+  originalToNodeId        String                          @db.Uuid
+  mode                    TransportMode
+  fixedService            Boolean
+  serviceLabel            String?                         @db.VarChar(200)
+  note                    String?                         @db.VarChar(2000)
+  source                  TransportSource
+  originalCreatedAt       DateTime                        @db.Timestamptz(3)
+  invalidatedAt           DateTime                        @default(now()) @db.Timestamptz(3)
+  invalidationReason      TransportInvalidationReason
+  trip                    Trip                            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  temporalValues          TransportEdgeHistoryTimeValue[]
+
+  @@index([tripId, invalidatedAt(sort: Desc), id(sort: Desc)])
+  @@index([originalFromNodeId, originalToNodeId])
+}
+
+model TemporalValue {
+  id              String             @id @default(uuid()) @db.Uuid
+  nodeId          String?            @db.Uuid
+  transportEdgeId String?            @db.Uuid
+  layer           TemporalLayer
+  pointKind       TemporalPointKind
+  instant         DateTime           @db.Timestamptz(3)
+  timeZone        String             @db.VarChar(100)
+  sourceKind      TemporalSourceKind
+  sourceRef       String?            @db.VarChar(300)
+  observedAt      DateTime?          @db.Timestamptz(3)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  node            ItineraryNode?     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  transportEdge   TransportEdge?     @relation(fields: [transportEdgeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, pointKind, layer])
+  @@unique([transportEdgeId, pointKind, layer])
+  @@index([nodeId])
+  @@index([transportEdgeId])
+}
+
+model TransportEdgeHistoryTimeValue {
+  id                     String               @id @default(uuid()) @db.Uuid
+  transportEdgeHistoryId String               @db.Uuid
+  layer                  TemporalLayer
+  pointKind              TemporalPointKind
+  instant                DateTime             @db.Timestamptz(3)
+  timeZone               String               @db.VarChar(100)
+  sourceKind             TemporalSourceKind
+  sourceRef              String?              @db.VarChar(300)
+  observedAt             DateTime?            @db.Timestamptz(3)
+  originalCreatedAt      DateTime             @db.Timestamptz(3)
+  originalUpdatedAt      DateTime             @db.Timestamptz(3)
+  history                TransportEdgeHistory @relation(fields: [transportEdgeHistoryId], references: [id], onDelete: Cascade)
+
+  @@unique([transportEdgeHistoryId, pointKind, layer])
+  @@index([transportEdgeHistoryId])
 }

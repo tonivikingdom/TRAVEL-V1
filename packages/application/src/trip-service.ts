@@ -1,11 +1,19 @@
 import type {
+  ConnectionView,
   DayView,
   ItineraryNodeView,
   PlaceInput,
   PlaceView,
+  ResolvedTemporalValueInput,
+  TemporalSubjectInput,
+  TemporalValueView,
+  TransportEdgeView,
+  TransportHistoryView,
+  TransportMode,
   TripCommandInput,
   TripView,
 } from '@travel/contracts';
+import { AbsoluteInstantError, parseAbsoluteIsoInstant } from '@travel/domain';
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
@@ -13,7 +21,12 @@ import type {
   ItineraryNodeRecord,
   PlaceRecord,
   RepositoryPlaceInput,
+  RepositoryTemporalSubject,
+  RepositoryTemporalValueInput,
   RepositoryTripCommand,
+  TemporalValueRecord,
+  TransportEdgeRecord,
+  TransportHistoryRecord,
   TripAggregateRecord,
   TripMutationResult,
   TripRepository,
@@ -129,6 +142,42 @@ export class TripService {
       }),
     );
   }
+
+  async setResolvedTemporalValue(
+    actor: Actor,
+    tripId: string,
+    baseTripVersion: number,
+    subject: TemporalSubjectInput,
+    value: ResolvedTemporalValueInput,
+  ): Promise<TripView> {
+    requireUuid(tripId, 'tripId');
+    authorizeSelf(actor, 'WRITE_PRIVATE_RESOURCE');
+    return mutationResultToView(
+      await this.repository.setTemporalValue({
+        ownerUserId: actor.userId,
+        tripId,
+        baseTripVersion: positiveInteger(baseTripVersion, 'baseTripVersion'),
+        subject: validateTemporalSubject(subject),
+        value: validateTemporalValue(value),
+      }),
+    );
+  }
+
+  async listTransportHistory(
+    actor: Actor,
+    tripId: string,
+  ): Promise<readonly TransportHistoryView[]> {
+    requireUuid(tripId, 'tripId');
+    authorizeSelf(actor, 'READ_PRIVATE_RESOURCE');
+    const records = await this.repository.listTransportHistoryOwned({
+      ownerUserId: actor.userId,
+      tripId,
+    });
+    if (records === null) {
+      throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
+    }
+    return records.map(toTransportHistoryView);
+  }
 }
 
 function validateCommand(command: TripCommandInput): RepositoryTripCommand {
@@ -163,6 +212,32 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
         ...command,
         place: validatePlace(command.place),
       };
+    case 'SET_MANUAL_TRANSPORT':
+      requireUuid(command.fromNodeId, 'fromNodeId');
+      requireUuid(command.toNodeId, 'toNodeId');
+      if (command.fromNodeId === command.toNodeId) {
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '交通起点和终点不能相同。',
+          400,
+        );
+      }
+      if (typeof command.fixedService !== 'boolean') {
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          'fixedService 无效。',
+          400,
+        );
+      }
+      return {
+        ...command,
+        mode: validateTransportMode(command.mode),
+        serviceLabel: optionalText(command.serviceLabel, 'serviceLabel', 200),
+        note: optionalText(command.note, 'note', 2_000),
+      };
+    case 'CLEAR_TRANSPORT':
+      requireUuid(command.transportEdgeId, 'transportEdgeId');
+      return command;
   }
 }
 
@@ -194,6 +269,12 @@ function mutationResultToView(result: TripMutationResult): TripView {
       );
     case 'DATE_OWNED':
       throw new ApplicationError('DATE_OWNED', '该日期已属于另一趟行程。', 409);
+    case 'FACT_PROTECTED':
+      throw new ApplicationError(
+        'FACT_PROTECTED',
+        '已有实际时间事实，必须通过未来的显式纠错流程修改。',
+        409,
+      );
     case 'INVALID_POSITION':
       throw new ApplicationError(
         'VALIDATION_ERROR',
@@ -204,6 +285,18 @@ function mutationResultToView(result: TripMutationResult): TripView {
       throw new ApplicationError(
         'VALIDATION_ERROR',
         '该命令不适用于目标节点。',
+        400,
+      );
+    case 'NOT_ADJACENT':
+      throw new ApplicationError(
+        'VALIDATION_ERROR',
+        '交通只能连接当前相邻节点。',
+        400,
+      );
+    case 'TRANSPORT_NOT_APPLICABLE':
+      throw new ApplicationError(
+        'VALIDATION_ERROR',
+        '自由行动节点不能绑定手工交通。',
         400,
       );
   }
@@ -228,6 +321,7 @@ function toTripView(record: TripAggregateRecord): TripView {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     days,
+    connections: projectConnections(record),
   };
 }
 
@@ -278,7 +372,126 @@ function toNodeView(record: ItineraryNodeRecord): ItineraryNodeView {
     source: record.source,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
+    timeValues: record.timeValues.map(toTemporalValueView),
   };
+}
+
+function projectConnections(
+  record: TripAggregateRecord,
+): readonly ConnectionView[] {
+  const adjacencyKeys = new Set<string>();
+  const edgesByAdjacency = new Map<string, TransportEdgeRecord>();
+  for (const edge of record.transportEdges) {
+    const key = adjacencyKey(edge.fromNodeId, edge.toNodeId);
+    if (edgesByAdjacency.has(key)) {
+      throw new Error('Trip has duplicate current transport adjacency');
+    }
+    edgesByAdjacency.set(key, edge);
+  }
+
+  const connections: ConnectionView[] = [];
+  for (let index = 0; index + 1 < record.nodes.length; index += 1) {
+    const from = record.nodes[index];
+    const to = record.nodes[index + 1];
+    if (from === undefined || to === undefined) {
+      throw new Error('Trip timeline projection is incomplete');
+    }
+    const key = adjacencyKey(from.id, to.id);
+    adjacencyKeys.add(key);
+    const transport = edgesByAdjacency.get(key);
+    if (transport !== undefined) {
+      if (from.kind !== 'PLACE_VISIT' || to.kind !== 'PLACE_VISIT') {
+        throw new Error('Current transport cannot connect a FreeAction');
+      }
+      connections.push({
+        fromNodeId: from.id,
+        toNodeId: to.id,
+        state: 'ACTIVE',
+        transport: toTransportEdgeView(transport),
+      });
+      continue;
+    }
+    connections.push({
+      fromNodeId: from.id,
+      toNodeId: to.id,
+      state: connectionState(from.kind, to.kind),
+      transport: null,
+    });
+  }
+  for (const key of edgesByAdjacency.keys()) {
+    if (!adjacencyKeys.has(key)) {
+      throw new Error('Current transport does not match Trip adjacency');
+    }
+  }
+  return connections;
+}
+
+function connectionState(
+  fromKind: ItineraryNodeRecord['kind'],
+  toKind: ItineraryNodeRecord['kind'],
+): Exclude<ConnectionView['state'], 'ACTIVE'> {
+  if (fromKind === 'FREE_ACTION' && toKind === 'PLACE_VISIT') {
+    return 'RUNTIME_ORIGIN_REQUIRED';
+  }
+  if (fromKind === 'FREE_ACTION' || toKind === 'FREE_ACTION') {
+    return 'NOT_APPLICABLE';
+  }
+  return 'MISSING';
+}
+
+function toTransportEdgeView(record: TransportEdgeRecord): TransportEdgeView {
+  return {
+    id: record.id,
+    fromNodeId: record.fromNodeId,
+    toNodeId: record.toNodeId,
+    mode: record.mode,
+    fixedService: record.fixedService,
+    serviceLabel: record.serviceLabel,
+    note: record.note,
+    source: record.source,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    timeValues: record.timeValues.map(toTemporalValueView),
+  };
+}
+
+function toTransportHistoryView(
+  record: TransportHistoryRecord,
+): TransportHistoryView {
+  return {
+    id: record.id,
+    originalTransportEdgeId: record.originalTransportEdgeId,
+    originalFromNodeId: record.originalFromNodeId,
+    originalToNodeId: record.originalToNodeId,
+    mode: record.mode,
+    fixedService: record.fixedService,
+    serviceLabel: record.serviceLabel,
+    note: record.note,
+    source: record.source,
+    originalCreatedAt: record.originalCreatedAt.toISOString(),
+    invalidatedAt: record.invalidatedAt.toISOString(),
+    invalidationReason: record.invalidationReason,
+    timeValues: record.timeValues.map(toTemporalValueView),
+  };
+}
+
+function toTemporalValueView(record: TemporalValueRecord): TemporalValueView {
+  return {
+    id: record.id,
+    layer: record.layer,
+    pointKind: record.pointKind,
+    instant: record.instant.toISOString(),
+    timeZone: record.timeZone,
+    sourceKind: record.sourceKind,
+    sourceRef: record.sourceRef,
+    observedAt: record.observedAt?.toISOString() ?? null,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
+function adjacencyKey(fromNodeId: string, toNodeId: string): string {
+  return `${fromNodeId}:${toNodeId}`;
 }
 
 function toPlaceView(record: PlaceRecord): PlaceView {
@@ -351,6 +564,114 @@ function addUtcDays(value: Date, days: number): Date {
   const result = new Date(value.getTime());
   result.setUTCDate(result.getUTCDate() + days);
   return result;
+}
+
+function validateTemporalSubject(
+  subject: TemporalSubjectInput,
+): RepositoryTemporalSubject {
+  if (subject.type === 'NODE') {
+    requireUuid(subject.nodeId, 'nodeId');
+    return subject;
+  }
+  requireUuid(subject.transportEdgeId, 'transportEdgeId');
+  return subject;
+}
+
+function validateTemporalValue(
+  value: ResolvedTemporalValueInput,
+): RepositoryTemporalValueInput {
+  if (!['PLANNED', 'ESTIMATED', 'ACTUAL'].includes(value.layer)) {
+    throw new ApplicationError('VALIDATION_ERROR', '时间层无效。', 400);
+  }
+  if (!['ARRIVAL', 'DEPARTURE'].includes(value.pointKind)) {
+    throw new ApplicationError('VALIDATION_ERROR', '时间点类型无效。', 400);
+  }
+  if (
+    ![
+      'USER_VALUE',
+      'ADOPTED_TRANSPORT_FACT',
+      'SYSTEM_SUGGESTION',
+      'DERIVED',
+      'PROVIDER_OBSERVATION',
+    ].includes(value.sourceKind)
+  ) {
+    throw new ApplicationError('VALIDATION_ERROR', '时间来源无效。', 400);
+  }
+  if (
+    value.layer === 'ACTUAL' &&
+    (value.sourceKind === 'DERIVED' || value.sourceKind === 'SYSTEM_SUGGESTION')
+  ) {
+    throw new ApplicationError(
+      'VALIDATION_ERROR',
+      'ACTUAL 不能来自推导或系统建议。',
+      400,
+    );
+  }
+  return {
+    layer: value.layer,
+    pointKind: value.pointKind,
+    instant: parseAbsoluteInstant(value.instant, 'instant'),
+    timeZone: validateIanaTimeZone(value.timeZone),
+    sourceKind: value.sourceKind,
+    sourceRef: optionalText(value.sourceRef, 'sourceRef', 300),
+    observedAt:
+      value.observedAt === undefined || value.observedAt === null
+        ? null
+        : parseAbsoluteInstant(value.observedAt, 'observedAt'),
+  };
+}
+
+function parseAbsoluteInstant(value: string, field: string): Date {
+  if (typeof value !== 'string') {
+    throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
+  }
+  try {
+    return parseAbsoluteIsoInstant(value, field);
+  } catch (error) {
+    if (error instanceof AbsoluteInstantError && error.reason === 'FORMAT') {
+      throw new ApplicationError(
+        'UNSUPPORTED_SCENARIO',
+        `${field} 必须是带 Z 或明确 UTC offset 的绝对时刻。`,
+        400,
+      );
+    }
+    if (error instanceof AbsoluteInstantError) {
+      throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
+    }
+    throw error;
+  }
+}
+
+function validateIanaTimeZone(value: string): string {
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 100 ||
+    (value !== 'UTC' && !SUPPORTED_IANA_TIME_ZONES.has(value))
+  ) {
+    throw new ApplicationError('VALIDATION_ERROR', 'timeZone 无效。', 400);
+  }
+  return value;
+}
+
+const SUPPORTED_IANA_TIME_ZONES = new Set(Intl.supportedValuesOf('timeZone'));
+
+function validateTransportMode(value: TransportMode): TransportMode {
+  if (
+    ![
+      'WALKING',
+      'DRIVING',
+      'TAXI',
+      'RAIL',
+      'BUS',
+      'FERRY',
+      'FLIGHT',
+      'OTHER',
+    ].includes(value)
+  ) {
+    throw new ApplicationError('VALIDATION_ERROR', '交通方式无效。', 400);
+  }
+  return value;
 }
 
 function boundedText(

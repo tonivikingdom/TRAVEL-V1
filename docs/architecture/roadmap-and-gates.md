@@ -6,8 +6,8 @@
 | P1A  | 邀请、Magic Link、可撤销多设备 Session、集中授权   | 已 Squash Merge；main CI Run `35309420185` 通过                                                         | 已完成；真实邮件 provider 仍未配置                    |
 | P1B1 | 持久 Job、Worker 执行框架、Magic Link 异步邮件     | 已 Squash Merge；main CI Run `35322043421` 通过                                                         | 已完成；真实邮件 provider 仍未配置                    |
 | P1B2 | NotificationEvent、ObjectStorage 边界              | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过 | 只含站内通知基础与私有本地测试存储，不进入 P2         |
-| P2A  | Trip/DateOwnership/Place/Visit/FreeAction、版本    | 已授权；`feature/p2a-trip-core` 实施完成，等待 Draft PR 与 CI                                           | O-01/O-02 已确认；O-03/O-07 不阻塞当前基础自然日能力  |
-| P2B  | Transport、时间/邻接与后续 Trip 能力               | 未授权、未实现                                                                                          | 不得由 P2A 顺带实施；继续受 O-03/O-07 约束            |
+| P2A  | Trip/DateOwnership/Place/Visit/FreeAction、版本    | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过 | 已完成；O-03/O-07 不阻塞当前基础自然日能力            |
+| P2B  | Transport、失效历史、resolved 三层时间基础         | 已授权；`feature/p2b-transport-temporal` 实施中                                                         | 只做当前相邻边与时间存储边界；继续受 O-03/O-07 约束   |
 | P3   | 双向传播、来源解释、约束与冲突                     | 未授权、未实现                                                                                          | fixture 语义一致；O-03 高级时区不明时返回 UNSUPPORTED |
 | P4   | Provider 探针、候选、Preview/Adopt、事务/幂等/撤销 | 未授权、未实现                                                                                          | Provider 字段验证；O-04/O-05/O-06 限制自动判断        |
 | P5   | 薄测试台、站内通知、已确认流程 E2E                 | 未授权、未实现                                                                                          | 鉴权/隔离/HTTPS/邮件闸门；O-08/O-10 需测试配置        |
@@ -39,6 +39,11 @@ O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、�
   `4759846ed1fd2d1511e4a9cbc2529119b48640f1`，main CI Run `35335051632` 的
   `verify` 与 `Compose verification` 均为 success；远程 `feature/p2-prep-day-ownership`
   已删除。P2A 已获单独授权并在 `feature/p2a-trip-core` 实施。
+- PR #6 已 Squash Merge；P2A 正式 main commit 为
+  `59e82dae31c49457fafb53351b5fe0d48e8330c8`，main CI Run `35342774635` 的
+  `verify` 与 `Compose verification` 均为 success；远程 `feature/p2a-trip-core` 已删除。
+  P2B 已获单独授权，只在 `feature/p2b-transport-temporal` 实施相邻交通、历史与 resolved
+  三层时间基础，不解除 O-03/O-07，也不授权 P3/P4。
 
 ## P1A → P1B 邮件安全闸门
 

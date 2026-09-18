@@ -5,7 +5,7 @@
 | P0   | 蓝图、workspace、API/Worker 健康、Compose、CI      | 已合并 main；main CI Run `35294938746` 通过     | 已完成                                                |
 | P1A  | 邀请、Magic Link、可撤销多设备 Session、集中授权   | 已 Squash Merge；main CI Run `35309420185` 通过 | 已完成；真实邮件 provider 仍未配置                    |
 | P1B1 | 持久 Job、Worker 执行框架、Magic Link 异步邮件     | 已 Squash Merge；main CI Run `35322043421` 通过 | 已完成；真实邮件 provider 仍未配置                    |
-| P1B2 | NotificationEvent、ObjectStorage 边界              | 已授权；在功能分支实施与验证                    | 只含站内通知基础与私有本地测试存储，不进入 P2         |
+| P1B2 | NotificationEvent、ObjectStorage 边界              | 实现完成；Draft PR #4 等待最终验收/合并         | 只含站内通知基础与私有本地测试存储，不进入 P2         |
 | P2   | Trip/Day/Visit/Transport、版本、基础生命周期       | 未授权、未实现                                  | 集中确认 O-01 与 O-02；O-07 阻塞自动收尾              |
 | P3   | 双向传播、来源解释、约束与冲突                     | 未授权、未实现                                  | fixture 语义一致；O-03 高级时区不明时返回 UNSUPPORTED |
 | P4   | Provider 探针、候选、Preview/Adopt、事务/幂等/撤销 | 未授权、未实现                                  | Provider 字段验证；O-04/O-05/O-06 限制自动判断        |
@@ -48,4 +48,7 @@ O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、�
 - Development/Test 允许明确的 SYNTHETIC 工程默认值；这些数值不是永久产品承诺。
 - Staging/Production 必须显式配置限额与 allowlist，且在真实 ObjectStorage provider 获得
   授权并实现前，上传能力保持 `OBJECT_STORAGE_PROVIDER_UNCONFIGURED`。
+- 正式 Attachment/upload API 或 Staging/Production ObjectStorage 启用前，必须实现 stale
+  PENDING reservation 的 expiry/reconciliation，并处理 provider 侧 orphan temporary/object；
+  否则进程崩溃后的预留可能永久占用 quota。该项是上线硬闸门。
 - O-09 的正式产品数值仍待上线阶段确认，不解除 P2 或 Production 闸门。

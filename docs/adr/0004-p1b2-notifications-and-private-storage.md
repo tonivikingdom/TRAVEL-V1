@@ -23,6 +23,11 @@ P1B2 需要在没有 Trip/P2、正式 Attachment API、Push 或云对象存储�
 6. O-09 限额通过环境配置。Development/Test 可用明确 SYNTHETIC 默认值；Staging/Production
    必须显式配置，但真实 provider 未经授权前保持 `OBJECT_STORAGE_PROVIDER_UNCONFIGURED`。
 7. Compose 用独立命名卷验证写入、API 容器重建后持久性和删除，不暴露调试下载端点。
+8. `StoredObject` 查询以 `(ownerUserId, objectId)` 为边界；不存在与属于其他 owner 的 ID
+   对外统一为 `NOT_FOUND`。ADMIN 没有跨 owner 探测或读取例外。
+9. 正式 Attachment/upload API 或 Staging/Production ObjectStorage 启用前，必须实现 stale
+   PENDING reservation 的 expiry/reconciliation，并清理 provider 侧 orphan temporary/object。
+   在该机制完成前，崩溃后遗留的 PENDING 可能持续占用 quota，因此这是上线硬闸门。
 
 ## 后果
 
@@ -31,4 +36,6 @@ P1B2 需要在没有 Trip/P2、正式 Attachment API、Push 或云对象存储�
 - 通知记录保留 dismissed 证据，客户端未来可依据 `dismissedAt` 显示或过滤。
 - 数据库元数据与文件系统写入不是单一跨资源事务；失败路径将元数据标为 FAILED 并尽力清理
   文件，只有完整写入且元数据转换为 READY 后才能读取。
+- 当前 P1B2 没有公开上传入口；PENDING reconciliation 不在本轮扩展实现，但不得在缺少该机制时
+  开放正式 Attachment/upload 或 Staging/Production 存储。
 - 本 ADR 不授权 P2、正式 Attachment API、文件解析、Push、真实云 provider 或 Production。

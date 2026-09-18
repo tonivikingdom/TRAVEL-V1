@@ -3,9 +3,10 @@ FROM node:24.19.0-bookworm-slim AS build
 WORKDIR /workspace
 RUN npm install --global pnpm@11.19.0
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json prisma.config.ts ./
 COPY apps ./apps
 COPY packages ./packages
+COPY prisma ./prisma
 COPY scripts ./scripts
 
 RUN pnpm install --frozen-lockfile
@@ -24,3 +25,6 @@ CMD ["node", "apps/api/dist/main.js"]
 
 FROM runtime AS worker
 CMD ["node", "apps/worker/dist/main.js"]
+
+FROM runtime AS migrate
+CMD ["pnpm", "db:migrate:deploy"]

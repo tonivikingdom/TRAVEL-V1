@@ -1,5 +1,5 @@
 {
-  "name": "@travel/persistence",
+  "name": "@travel/application",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,17 +11,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "7.10.0",
-    "@prisma/client": "7.10.0",
-    "@travel/application": "workspace:*",
-    "@travel/contracts": "workspace:*",
-    "pg": "8.23.0"
+    "@travel/contracts": "workspace:*"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@types/node": "24.13.5"
   }
 }

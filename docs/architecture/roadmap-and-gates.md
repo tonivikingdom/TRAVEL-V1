@@ -23,3 +23,12 @@ O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、�
 - main CI Run `35294938746` 的 `verify` 与 `Compose verification` 均已通过；远程
   `feature/p0-foundation` 已删除。
 - O-00 已解决。P1A 已获单独授权；P1B 与 P2 之后仍受阶段闸门约束。
+
+## P1A → P1B 邮件安全闸门
+
+- P1A 的 Magic Link 邮件只建立客户端 landing URL 契约：token 放在 URL fragment，
+  consume API 只接受 POST body；没有用 GET 直接创建 Session。
+- 当前 `requestMagicLink` 仅对合法账号调用 `MailSender`，未知账号不调用；若未来接入
+  真实同步邮件 provider，公开 request endpoint 可能暴露响应时间差。
+- P1A 不使用固定 sleep 或随机延迟伪装修复。进入 P1B 前，必须引入持久 Job / outbox，
+  将真实邮件发送异步化，并完成真实邮件服务配置与独立安全验证；此前不得宣称公网正式可用。

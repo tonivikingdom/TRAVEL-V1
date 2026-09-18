@@ -69,6 +69,7 @@ jobs:
           POSTGRES_USER=travel_ci_compose
           POSTGRES_PASSWORD=SYNTHETIC_CI_ONLY
           POSTGRES_HOST_PORT=35432
+          AUTH_MAGIC_LINK_LANDING_URL=http://127.0.0.1:39000/login/magic
           WORKER_HEARTBEAT_INTERVAL_MS=1000
           WORKER_HEARTBEAT_MAX_AGE_MS=3000
           EOF

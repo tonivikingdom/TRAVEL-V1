@@ -64,14 +64,7 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
   });
 
   app.post('/auth/magic-link/consume', async (request, reply) => {
-    const body = isRecord(request.body) ? request.body : {};
-    const query = request.query as { token?: unknown };
-    const token =
-      typeof body.token === 'string'
-        ? body.token
-        : typeof query.token === 'string'
-          ? query.token
-          : '';
+    const token = requiredBodyString(request.body, 'token');
     const response =
       await requireAuthService(dependencies).consumeMagicLink(token);
     return reply.code(200).send(response);

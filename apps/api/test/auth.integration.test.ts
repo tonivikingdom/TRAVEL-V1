@@ -39,7 +39,7 @@ describe('P1A auth API with PostgreSQL', () => {
       repository,
       mail,
       {
-        publicBaseUrl: 'https://synthetic.example.test',
+        magicLinkLandingUrl: 'https://synthetic.example.test/login/magic',
         magicLinkTtlSeconds: 600,
         sessionTtlSeconds: 86_400,
         invitationTtlSeconds: 86_400,
@@ -78,6 +78,31 @@ describe('P1A auth API with PostgreSQL', () => {
     expect(known.statusCode).toBe(202);
     expect(unknown.statusCode).toBe(202);
     expect(unknown.json()).toEqual(known.json());
+  });
+
+  it('puts the captured token in the configured landing URL fragment', async () => {
+    await requestMagicLink(ADMIN_EMAIL);
+    const message = latestMail(ADMIN_EMAIL);
+    const url = new URL(message.magicLink);
+
+    expect(url.origin + url.pathname).toBe(
+      'https://synthetic.example.test/login/magic',
+    );
+    expect(url.searchParams.has('token')).toBe(false);
+    expect(url.hash).toMatch(/^#token=[A-Za-z0-9_-]{40,100}$/u);
+  });
+
+  it('accepts the consume token only from the POST body', async () => {
+    await requestMagicLink(ADMIN_EMAIL);
+    const token = latestToken(ADMIN_EMAIL);
+    const queryOnly = await app.inject({
+      method: 'POST',
+      url: `/auth/magic-link/consume?token=${encodeURIComponent(token)}`,
+    });
+    expect(queryOnly.statusCode).toBe(400);
+    expect(queryOnly.json().error.code).toBe('VALIDATION_ERROR');
+
+    expect((await consume(token)).statusCode).toBe(200);
   });
 
   it('does not create a session for an uninvited email', async () => {
@@ -281,7 +306,7 @@ describe('P1A auth API with PostgreSQL', () => {
   it('persists rate limits in PostgreSQL', async () => {
     const limitedMail = new CapturedMailSender();
     const limitedService = new AuthService(repository, limitedMail, {
-      publicBaseUrl: 'https://synthetic.example.test',
+      magicLinkLandingUrl: 'https://synthetic.example.test/login/magic',
       magicLinkTtlSeconds: 600,
       sessionTtlSeconds: 86_400,
       invitationTtlSeconds: 86_400,
@@ -388,6 +413,16 @@ describe('P1A auth API with PostgreSQL', () => {
   }
 
   function latestToken(email: string): string {
+    const match = new URL(latestMail(email).magicLink).hash.match(
+      /^#token=([A-Za-z0-9_-]{40,100})$/u,
+    );
+    if (match?.[1] === undefined) {
+      throw new Error('Captured SYNTHETIC magic link has no token');
+    }
+    return decodeURIComponent(match[1]);
+  }
+
+  function latestMail(email: string) {
     const message = [...mail.messages]
       .reverse()
       .find(
@@ -397,11 +432,7 @@ describe('P1A auth API with PostgreSQL', () => {
     if (message === undefined) {
       throw new Error(`No SYNTHETIC captured mail for ${email}`);
     }
-    const token = new URL(message.magicLink).searchParams.get('token');
-    if (token === null) {
-      throw new Error('Captured SYNTHETIC magic link has no token');
-    }
-    return token;
+    return message;
   }
 });
 

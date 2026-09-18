@@ -17,7 +17,7 @@ const GENERIC_MAGIC_LINK_RESPONSE: MagicLinkRequestResponse = {
 };
 
 export interface AuthServiceConfig {
-  readonly publicBaseUrl: string;
+  readonly magicLinkLandingUrl: string;
   readonly magicLinkTtlSeconds: number;
   readonly sessionTtlSeconds: number;
   readonly invitationTtlSeconds: number;
@@ -76,11 +76,8 @@ export class AuthService {
     }
 
     if (prepared !== null) {
-      const url = new URL(
-        '/auth/magic-link/consume',
-        this.config.publicBaseUrl,
-      );
-      url.searchParams.set('token', token.raw);
+      const url = new URL(this.config.magicLinkLandingUrl);
+      url.hash = `token=${encodeURIComponent(token.raw)}`;
       try {
         await this.mailSender.sendMagicLink({
           recipient: prepared.recipient,

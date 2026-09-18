@@ -27,8 +27,10 @@ export function readAuthRuntimeConfig(
     appEnvironment,
     mailProvider,
     service: {
-      publicBaseUrl:
-        environment.AUTH_PUBLIC_BASE_URL ?? 'http://127.0.0.1:3000',
+      magicLinkLandingUrl: readMagicLinkLandingUrl(
+        environment.AUTH_MAGIC_LINK_LANDING_URL,
+        appEnvironment,
+      ),
       magicLinkTtlSeconds: positiveInteger(
         environment.MAGIC_LINK_TTL_SECONDS,
         900,
@@ -53,6 +55,55 @@ export function readAuthRuntimeConfig(
       defaultUiLanguage: environment.DEFAULT_UI_LANGUAGE ?? 'zh-CN',
     },
   };
+}
+
+function readMagicLinkLandingUrl(
+  value: string | undefined,
+  appEnvironment: AuthRuntimeConfig['appEnvironment'],
+): string {
+  const rawValue =
+    value ??
+    (appEnvironment === 'development' || appEnvironment === 'test'
+      ? 'http://127.0.0.1:3000/login/magic'
+      : undefined);
+  if (rawValue === undefined || rawValue.trim() === '') {
+    throw new Error(
+      'AUTH_MAGIC_LINK_LANDING_URL is required in staging and production',
+    );
+  }
+
+  let url: URL;
+  try {
+    url = new URL(rawValue);
+  } catch {
+    throw new Error('AUTH_MAGIC_LINK_LANDING_URL must be an absolute URL');
+  }
+
+  if (url.username !== '' || url.password !== '') {
+    throw new Error('AUTH_MAGIC_LINK_LANDING_URL must not contain credentials');
+  }
+
+  if (url.protocol === 'https:') {
+    return url.toString();
+  }
+
+  if (
+    url.protocol === 'http:' &&
+    (appEnvironment === 'development' || appEnvironment === 'test') &&
+    isLoopbackHost(url.hostname)
+  ) {
+    return url.toString();
+  }
+
+  throw new Error(
+    'AUTH_MAGIC_LINK_LANDING_URL must use HTTPS outside localhost development/test',
+  );
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  );
 }
 
 export function createMailSender(config: AuthRuntimeConfig): MailSender {

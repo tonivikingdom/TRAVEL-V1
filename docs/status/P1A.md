@@ -25,6 +25,25 @@
 - 对应 CI：[`Run 35300426429`](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35300426429)，
   `verify` 与 `Compose verification` 均通过。
 
+## 本轮 Magic Link 契约修正
+
+- 邮件链接现在使用独立配置 `AUTH_MAGIC_LINK_LANDING_URL`，指向客户端登录落地页；
+  当前没有新增正式 UI。
+- 原始登录 token 只放在落地页 URL fragment，例如
+  `https://example.test/login/magic#token=...`；邮件 URL 的 query 不包含 token。
+- `POST /auth/magic-link/consume` 只接受 JSON body 的 `{ "token": "..." }`，不接受
+  query token，也没有新增会直接创建 Session 的 GET consume 路由。
+- development/test 可使用 localhost HTTP；staging/production 必须配置明确的 HTTPS
+  landing URL。真实邮件 provider 仍未配置，不能宣称生产登录已可用。
+
+## P1B 安全闸门：邮件发送时序差异
+
+- 当前 `requestMagicLink` 对合法账号会调用 `MailSender`，未知账号不会调用；未来接入
+  真实同步邮件 provider 后，公开 request endpoint 可能产生响应时间差。
+- 不在 P1A 用固定 sleep 或随机延迟伪装修复。P1B 引入持久 Job / outbox 后，必须将真实
+  邮件发送异步化，使公开 request endpoint 不等待真实邮件网络调用。
+- 在该问题解决且真实邮件服务配置完成前，不得宣称 Magic Link 登录适合公网正式部署。
+
 ## 已实现
 
 - 固定 Prisma ORM / Client / PostgreSQL adapter `7.10.0`，提交正式 migration；不用

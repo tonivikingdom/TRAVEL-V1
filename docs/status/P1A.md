@@ -1,6 +1,6 @@
 # P1A 身份、权限、Magic Link 与多设备 Session 交付记录
 
-- 当前状态：P1A 实现完成；最终 CI 已通过；Draft PR #2 等待最终验收/合并
+- 当前状态：P1A 已通过验收并 Squash Merge 到 main
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 独立安全复核：GPT-5.6 Sol / Extra High
 - 备选施工：GPT-5.6 Luna / Max
@@ -8,7 +8,15 @@
 - 仓库：`https://github.com/tonivikingdom/TRAVEL-V1.git`
 - 分支：`feature/p1a-auth`
 - base：`93741a4c8641a1225632eaee381b6f706678245b`
-- PR：[Draft #2](https://github.com/tonivikingdom/TRAVEL-V1/pull/2)；必须保持 Draft，不合并、不自动合并
+- PR：[#2](https://github.com/tonivikingdom/TRAVEL-V1/pull/2)，状态为 merged
+
+## 当前合并事实
+
+- P1A main commit：`17591cfc2bf8eb4bdd753c321a7572fd10bf8322`。
+- main CI：[`Run 35309420185`](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35309420185)，
+  `verify` 与 `Compose verification` 均为 success。
+- P1B1 持久 Job、Worker 执行框架与 Magic Link 异步邮件已获单独授权。
+- P1B2 NotificationEvent / ObjectStorage 仍未授权、未实现。
 
 ## 本轮测试基础设施修正
 
@@ -95,5 +103,5 @@
 - 未配置真实 Staging 邮件服务和凭证；本阶段不能宣称真实邮件已发送。
 - Production 初始化与部署未完成，也未授权。
 - 本机无 Docker/PostgreSQL，因此本机真实数据库和容器未验证；须与 CI 结果分开报告。
-- P1B Job、NotificationEvent、ObjectStorage，以及 P2～P5 均未实现、未授权。
-- Draft PR 创建并通过 CI 后停止，等待用户检查。
+- 本文记录 P1A 的历史交付范围；P1B1 的当前实施状态另见 `docs/status/P1B1.md`。
+- P1B2 NotificationEvent / ObjectStorage 与 P2～P5 仍未实现、未授权。

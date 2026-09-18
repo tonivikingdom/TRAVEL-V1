@@ -48,9 +48,10 @@ Application 只处理 opaque credential，不依赖 Cookie 或浏览器 API。P1
 
 ## 邮件边界
 
-`MailSender` 是 Application port。Development/Test 使用仅内存的 `CapturedMailSender`，
-并明确标记 `SYNTHETIC_MAGIC_LINK`；Staging/Production 默认为 `unconfigured`。本阶段没有
-绑定商业邮件供应商，也不记录原始 token。未配置真实 provider 时不得宣称邮件可发送。
+`MailSender` 是 Application port。P1A 的同步调用边界已由 P1B1 ADR 0003 替代：API 只做
+持久入队，Worker 调用 MailSender。Development/Test 使用 SYNTHETIC capture；
+Staging/Production 默认为 `unconfigured`。没有绑定商业邮件供应商，也不记录原始 token。
+未配置真实 provider 时不得宣称邮件可发送。
 
 ## 基本滥用防护
 

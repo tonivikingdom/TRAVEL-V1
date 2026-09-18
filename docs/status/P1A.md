@@ -1,6 +1,6 @@
 # P1A 身份、权限、Magic Link 与多设备 Session 交付记录
 
-- 当前状态：P1A 实现完成；Draft PR #2 的测试基础设施修正及 CI 验证已通过
+- 当前状态：P1A 实现完成；最终 CI 已通过；Draft PR #2 等待最终验收/合并
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 独立安全复核：GPT-5.6 Sol / Extra High
 - 备选施工：GPT-5.6 Luna / Max
@@ -44,6 +44,13 @@
   邮件发送异步化，使公开 request endpoint 不等待真实邮件网络调用。
 - 在该问题解决且真实邮件服务配置完成前，不得宣称 Magic Link 登录适合公网正式部署。
 
+## 最终 CI 验证
+
+- 最终提交：`9adb8991f003f039a68d0bafd17f42248330aa3f`。
+- 最终 CI：[`Run 35303783128`](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35303783128)。
+- `verify`：success；`Compose verification`：success。
+- 以上为最终验证补充；此前的 CI 记录（包括 Run `35300426429`）保留不变。
+
 ## 已实现
 
 - 固定 Prisma ORM / Client / PostgreSQL adapter `7.10.0`，提交正式 migration；不用
@@ -70,7 +77,7 @@
 | Prisma schema validate / client generate | 通过                                                                                                            |
 | TypeScript typecheck                     | 通过（6 个 workspace）                                                                                          |
 | ESLint                                   | 通过                                                                                                            |
-| 单元测试                                 | 通过：6 files / 21 tests（含 P0 回归）                                                                          |
+| 单元测试                                 | 通过：7 files / 26 tests（含 P0 回归与 Magic Link 契约回归）                                                    |
 | PostgreSQL integration                   | 本机未运行：本机没有隔离 PostgreSQL / Docker；已编写 22 项 P1A integration cases，交由 CI 的 PostgreSQL 17 执行 |
 | Compose                                  | 本机未运行：本机没有 Docker；CI 将执行现有 P0 Compose 回归，并先运行正式 migration                              |
 | `pnpm build` / `pnpm format:check`       | 通过                                                                                                            |

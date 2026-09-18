@@ -61,6 +61,7 @@ export class LocalFilesystemObjectStorage implements ObjectStorage {
       return { byteSize, sha256: hash.digest('hex') };
     } catch (error) {
       output.destroy();
+      await waitForClose(output);
       await rm(temporary, { force: true });
       if (error instanceof StorageError) {
         throw error;
@@ -153,6 +154,17 @@ export class LocalFilesystemObjectStorage implements ObjectStorage {
     }
     return target;
   }
+}
+
+async function waitForClose(
+  output: NodeJS.WritableStream & { closed: boolean },
+) {
+  if (output.closed) {
+    return;
+  }
+  await new Promise<void>((resolveClose) => {
+    output.once('close', resolveClose);
+  });
 }
 
 function validateWriteRequest(input: ObjectWriteRequest): void {

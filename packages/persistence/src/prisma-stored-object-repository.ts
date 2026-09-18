@@ -10,6 +10,10 @@ interface QuotaTotalRow {
   readonly total: bigint;
 }
 
+interface AdvisoryLockRow {
+  readonly locked: boolean;
+}
+
 export class PrismaStoredObjectRepository implements StoredObjectRepository {
   constructor(private readonly client: PrismaClient) {}
 
@@ -24,9 +28,15 @@ export class PrismaStoredObjectRepository implements StoredObjectRepository {
     readonly now: Date;
   }): Promise<StoredObjectRecord> {
     const result = await this.client.$transaction(async (transaction) => {
-      await transaction.$queryRaw<readonly unknown[]>(Prisma.sql`
-          SELECT pg_advisory_xact_lock(hashtextextended(${input.ownerUserId}, 0))
+      const lockRows = await transaction.$queryRaw<
+        AdvisoryLockRow[]
+      >(Prisma.sql`
+          SELECT TRUE AS locked
+          FROM pg_advisory_xact_lock(hashtextextended(${input.ownerUserId}, 0))
         `);
+      if (lockRows[0]?.locked !== true) {
+        throw new Error('Failed to acquire the owner storage quota lock');
+      }
       const totals = await transaction.$queryRaw<QuotaTotalRow[]>(Prisma.sql`
           SELECT COALESCE(
             SUM(COALESCE("byteSize", "declaredByteSize")), 0

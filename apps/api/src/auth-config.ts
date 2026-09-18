@@ -1,8 +1,4 @@
-import type { AuthServiceConfig, MailSender } from '@travel/application';
-import {
-  CapturedMailSender,
-  UnconfiguredMailSender,
-} from '@travel/application';
+import type { AuthServiceConfig } from '@travel/application';
 
 export interface AuthRuntimeConfig {
   readonly service: AuthServiceConfig;
@@ -53,6 +49,7 @@ export function readAuthRuntimeConfig(
       ),
       defaultBaseCurrency: environment.DEFAULT_BASE_CURRENCY ?? 'CNY',
       defaultUiLanguage: environment.DEFAULT_UI_LANGUAGE ?? 'zh-CN',
+      jobMaxAttempts: positiveInteger(environment.JOB_MAX_ATTEMPTS, 5),
     },
   };
 }
@@ -104,12 +101,6 @@ function isLoopbackHost(hostname: string): boolean {
   return (
     hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
   );
-}
-
-export function createMailSender(config: AuthRuntimeConfig): MailSender {
-  return config.mailProvider === 'capture'
-    ? new CapturedMailSender()
-    : new UnconfiguredMailSender();
 }
 
 function parseEnvironment(

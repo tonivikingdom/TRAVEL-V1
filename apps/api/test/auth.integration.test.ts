@@ -1,8 +1,16 @@
-import { AuthService, CapturedMailSender } from '@travel/application';
+import {
+  AuthService,
+  CapturedMailSender,
+  MagicLinkEmailHandler,
+  type MagicLinkMail,
+  type MailSender,
+} from '@travel/application';
 import type { SessionResponse, UserView } from '@travel/contracts';
 import {
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaJobRepository,
+  PrismaMagicLinkDeliveryRepository,
   type ManagedPrismaClient,
 } from '@travel/persistence';
 import type { FastifyInstance } from 'fastify';
@@ -23,12 +31,15 @@ describe('P1A auth API with PostgreSQL', () => {
   let managed: ManagedPrismaClient;
   let repository: PrismaAuthRepository;
   let mail: CapturedMailSender;
+  let jobRepository: PrismaJobRepository;
+  let magicLinkHandler: MagicLinkEmailHandler;
   let app: FastifyInstance;
   let now: Date;
 
   beforeAll(() => {
     managed = createPrismaClient(databaseUrl);
     repository = new PrismaAuthRepository(managed.client);
+    jobRepository = new PrismaJobRepository(managed.client);
   });
 
   beforeEach(async () => {
@@ -37,7 +48,6 @@ describe('P1A auth API with PostgreSQL', () => {
     mail = new CapturedMailSender();
     const authService = new AuthService(
       repository,
-      mail,
       {
         magicLinkLandingUrl: 'https://synthetic.example.test/login/magic',
         magicLinkTtlSeconds: 600,
@@ -47,6 +57,17 @@ describe('P1A auth API with PostgreSQL', () => {
         rateLimitMaxRequests: 50,
         defaultBaseCurrency: 'CNY',
         defaultUiLanguage: 'zh-CN',
+        jobMaxAttempts: 5,
+      },
+      { now: () => now },
+    );
+    magicLinkHandler = new MagicLinkEmailHandler(
+      new PrismaMagicLinkDeliveryRepository(managed.client),
+      mail,
+      {
+        landingUrl: 'https://synthetic.example.test/login/magic',
+        tokenKey: 'SYNTHETIC_TEST_MAGIC_LINK_TOKEN_KEY_0123456789abcdef',
+        tokenTtlSeconds: 600,
       },
       { now: () => now },
     );
@@ -78,10 +99,14 @@ describe('P1A auth API with PostgreSQL', () => {
     expect(known.statusCode).toBe(202);
     expect(unknown.statusCode).toBe(202);
     expect(unknown.json()).toEqual(known.json());
+    expect(mail.messages).toHaveLength(0);
+    expect(await managed.client.job.count()).toBe(2);
+    expect(await managed.client.magicLinkDeliveryRequest.count()).toBe(2);
   });
 
   it('puts the captured token in the configured landing URL fragment', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const message = latestMail(ADMIN_EMAIL);
     const url = new URL(message.magicLink);
 
@@ -94,6 +119,7 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('accepts the consume token only from the POST body', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const token = latestToken(ADMIN_EMAIL);
     const queryOnly = await app.inject({
       method: 'POST',
@@ -107,10 +133,72 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('does not create a session for an uninvited email', async () => {
     await requestMagicLink('synthetic-uninvited@synthetic.example.test');
+    await executeNextJob();
     expect(mail.messages).toHaveLength(0);
     const response = await consume('A'.repeat(43));
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('INVALID_OR_EXPIRED_TOKEN');
+  });
+
+  it('keeps raw credentials out of the Job and DeliveryRequest records', async () => {
+    await requestMagicLink(ADMIN_EMAIL);
+    const job = await managed.client.job.findFirstOrThrow();
+    const delivery =
+      await managed.client.magicLinkDeliveryRequest.findFirstOrThrow();
+    expect(job.payloadRef).toBe(delivery.id);
+    expect(JSON.stringify(job)).not.toContain('token');
+    expect(JSON.stringify(delivery)).not.toContain('#token=');
+    expect(await managed.client.magicLinkToken.count()).toBe(0);
+  });
+
+  it('retries mail with the same derived token and only one digest record', async () => {
+    await requestMagicLink(ADMIN_EMAIL);
+    const job = await jobRepository.claimNext({
+      workerId: 'synthetic-retry-worker',
+      now,
+      leaseDurationMs: 30_000,
+    });
+    const flaky = new FailAfterCaptureMailSender();
+    const handler = new MagicLinkEmailHandler(
+      new PrismaMagicLinkDeliveryRepository(managed.client),
+      flaky,
+      {
+        landingUrl: 'https://synthetic.example.test/login/magic',
+        tokenKey: 'SYNTHETIC_TEST_MAGIC_LINK_TOKEN_KEY_0123456789abcdef',
+        tokenTtlSeconds: 600,
+      },
+      { now: () => now },
+    );
+
+    await expect(handler.execute(job!.payloadRef)).rejects.toThrow(
+      /SYNTHETIC_MAIL_FAILURE/u,
+    );
+    await handler.execute(job!.payloadRef);
+    expect(flaky.messages).toHaveLength(2);
+    expect(flaky.messages[0]?.magicLink).toBe(flaky.messages[1]?.magicLink);
+    expect(await managed.client.magicLinkToken.count()).toBe(1);
+  });
+
+  it('treats revoked and expired invitations as safe background no-ops', async () => {
+    const admin = await login(ADMIN_EMAIL);
+    const revoked = await invite(admin.credential, USER_A_EMAIL);
+    await managed.client.invitation.update({
+      where: { id: revoked.id },
+      data: { status: 'REVOKED', revokedAt: now },
+    });
+    await requestMagicLink(USER_A_EMAIL);
+    await executeNextJob();
+
+    const expired = await invite(admin.credential, USER_B_EMAIL);
+    await managed.client.invitation.update({
+      where: { id: expired.id },
+      data: { expiresAt: new Date(now.getTime() - 1_000) },
+    });
+    await requestMagicLink(USER_B_EMAIL);
+    await executeNextJob();
+    expect(
+      mail.messages.filter((message) => message.recipient !== ADMIN_EMAIL),
+    ).toHaveLength(0);
   });
 
   it('turns a valid invitation and magic link into a session', async () => {
@@ -128,6 +216,7 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('stores only the magic-link digest', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const raw = latestToken(ADMIN_EMAIL);
     const record = await managed.client.magicLinkToken.findFirstOrThrow({
       orderBy: { createdAt: 'desc' },
@@ -138,6 +227,7 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('allows a magic link to be consumed only once', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const token = latestToken(ADMIN_EMAIL);
     expect((await consume(token)).statusCode).toBe(200);
     expect((await consume(token)).statusCode).toBe(401);
@@ -145,6 +235,7 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('allows at most one concurrent consume of the same token', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const token = latestToken(ADMIN_EMAIL);
     const responses = await Promise.all([consume(token), consume(token)]);
     expect(responses.map((response) => response.statusCode).sort()).toEqual([
@@ -154,6 +245,7 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('rejects an expired magic link', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const token = latestToken(ADMIN_EMAIL);
     now = new Date(now.getTime() + 601_000);
     expect((await consume(token)).statusCode).toBe(401);
@@ -161,6 +253,7 @@ describe('P1A auth API with PostgreSQL', () => {
 
   it('rejects an already consumed magic link', async () => {
     await requestMagicLink(ADMIN_EMAIL);
+    await executeNextJob();
     const token = latestToken(ADMIN_EMAIL);
     await consume(token);
     const response = await consume(token);
@@ -170,11 +263,13 @@ describe('P1A auth API with PostgreSQL', () => {
   it('prevents a disabled user from logging in', async () => {
     const { admin, user } = await createUserA();
     await requestMagicLink(USER_A_EMAIL);
+    await executeNextJob();
     const pendingToken = latestToken(USER_A_EMAIL);
     await adminPost(admin.credential, `/admin/users/${user.user.id}/disable`);
     expect((await consume(pendingToken)).statusCode).toBe(401);
     const messagesBefore = mail.messages.length;
     expect((await requestMagicLink(USER_A_EMAIL)).statusCode).toBe(202);
+    await executeNextJob();
     expect(mail.messages).toHaveLength(messagesBefore);
   });
 
@@ -304,8 +399,7 @@ describe('P1A auth API with PostgreSQL', () => {
   });
 
   it('persists rate limits in PostgreSQL', async () => {
-    const limitedMail = new CapturedMailSender();
-    const limitedService = new AuthService(repository, limitedMail, {
+    const limitedService = new AuthService(repository, {
       magicLinkLandingUrl: 'https://synthetic.example.test/login/magic',
       magicLinkTtlSeconds: 600,
       sessionTtlSeconds: 86_400,
@@ -314,6 +408,7 @@ describe('P1A auth API with PostgreSQL', () => {
       rateLimitMaxRequests: 1,
       defaultBaseCurrency: 'CNY',
       defaultUiLanguage: 'zh-CN',
+      jobMaxAttempts: 5,
     });
     const limitedApp = buildApi({
       readinessProbe: {
@@ -373,6 +468,7 @@ describe('P1A auth API with PostgreSQL', () => {
   async function login(email: string): Promise<SessionResponse> {
     const requested = await requestMagicLink(email);
     expect(requested.statusCode).toBe(202);
+    await executeNextJob();
     const response = await consume(latestToken(email));
     expect(response.statusCode).toBe(200);
     return response.json() as SessionResponse;
@@ -422,6 +518,23 @@ describe('P1A auth API with PostgreSQL', () => {
     return decodeURIComponent(match[1]);
   }
 
+  async function executeNextJob(): Promise<void> {
+    const job = await jobRepository.claimNext({
+      workerId: 'synthetic-api-integration-worker',
+      now,
+      leaseDurationMs: 30_000,
+    });
+    expect(job).not.toBeNull();
+    await magicLinkHandler.execute(job!.payloadRef);
+    expect(
+      await jobRepository.markSucceeded(
+        job!.id,
+        'synthetic-api-integration-worker',
+        now,
+      ),
+    ).toBe(true);
+  }
+
   function latestMail(email: string) {
     const message = [...mail.messages]
       .reverse()
@@ -440,10 +553,25 @@ function bearer(credential: string): { readonly authorization: string } {
   return { authorization: `Bearer ${credential}` };
 }
 
+class FailAfterCaptureMailSender implements MailSender {
+  readonly messages: MagicLinkMail[] = [];
+  private shouldFail = true;
+
+  async sendMagicLink(mail: MagicLinkMail): Promise<void> {
+    this.messages.push(mail);
+    if (this.shouldFail) {
+      this.shouldFail = false;
+      throw new Error('SYNTHETIC_MAIL_FAILURE');
+    }
+  }
+}
+
 async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
   await managed.client.magicLinkRequestBucket.deleteMany();
+  await managed.client.job.deleteMany();
   await managed.client.session.deleteMany();
   await managed.client.magicLinkToken.deleteMany();
+  await managed.client.magicLinkDeliveryRequest.deleteMany();
   await managed.client.userPreference.deleteMany();
   await managed.client.invitation.deleteMany();
   await managed.client.user.deleteMany();

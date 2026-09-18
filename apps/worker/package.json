@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@travel/application": "workspace:*",
     "@travel/contracts": "workspace:*",
     "@travel/persistence": "workspace:*"
   }

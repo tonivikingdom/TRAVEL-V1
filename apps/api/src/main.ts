@@ -7,7 +7,7 @@ import {
 } from '@travel/persistence';
 
 import { buildApi } from './app.js';
-import { createMailSender, readAuthRuntimeConfig } from './auth-config.js';
+import { readAuthRuntimeConfig } from './auth-config.js';
 
 const host = process.env.API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.API_PORT ?? '3000', 10);
@@ -21,15 +21,7 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   managedPrisma = createPrismaClient(databaseUrl);
   authService = new AuthService(
     new PrismaAuthRepository(managedPrisma.client),
-    createMailSender(authConfig),
     authConfig.service,
-    {
-      onMailDeliveryError(errorName) {
-        process.stderr.write(
-          `${JSON.stringify({ service: 'api', event: 'mail_delivery_failed', error: errorName })}\n`,
-        );
-      },
-    },
   );
 }
 

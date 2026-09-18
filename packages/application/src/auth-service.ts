@@ -8,7 +8,7 @@ import type {
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
-import type { AuthRepository, MailSender } from './ports.js';
+import type { AuthRepository } from './ports.js';
 import { createOpaqueToken, digestOpaqueToken } from './tokens.js';
 
 const GENERIC_MAGIC_LINK_RESPONSE: MagicLinkRequestResponse = {
@@ -25,11 +25,11 @@ export interface AuthServiceConfig {
   readonly rateLimitMaxRequests: number;
   readonly defaultBaseCurrency: string;
   readonly defaultUiLanguage: string;
+  readonly jobMaxAttempts: number;
 }
 
 export interface AuthServiceOptions {
   readonly now?: () => Date;
-  readonly onMailDeliveryError?: (errorName: string) => void;
 }
 
 export class AuthService {
@@ -37,9 +37,8 @@ export class AuthService {
 
   constructor(
     private readonly repository: AuthRepository,
-    private readonly mailSender: MailSender,
     private readonly config: AuthServiceConfig,
-    private readonly options: AuthServiceOptions = {},
+    options: AuthServiceOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
   }
@@ -49,19 +48,15 @@ export class AuthService {
   ): Promise<MagicLinkRequestResponse> {
     const email = validateAndNormalizeEmail(emailInput);
     const now = this.now();
-    const token = createOpaqueToken();
-    const expiresAt = addSeconds(now, this.config.magicLinkTtlSeconds);
-    let prepared;
 
     try {
-      prepared = await this.repository.prepareMagicLink({
+      await this.repository.enqueueMagicLinkRequest({
         email: email.original,
         normalizedEmail: email.normalized,
-        tokenDigest: token.digest,
-        tokenExpiresAt: expiresAt,
         now,
         rateLimitWindowSeconds: this.config.rateLimitWindowSeconds,
         rateLimitMaxRequests: this.config.rateLimitMaxRequests,
+        jobMaxAttempts: this.config.jobMaxAttempts,
       });
     } catch (error) {
       if (error instanceof ApplicationError && error.code === 'RATE_LIMITED') {
@@ -73,22 +68,6 @@ export class AuthService {
         503,
         true,
       );
-    }
-
-    if (prepared !== null) {
-      const url = new URL(this.config.magicLinkLandingUrl);
-      url.hash = `token=${encodeURIComponent(token.raw)}`;
-      try {
-        await this.mailSender.sendMagicLink({
-          recipient: prepared.recipient,
-          magicLink: url.toString(),
-          expiresAt,
-        });
-      } catch (error) {
-        this.options.onMailDeliveryError?.(
-          error instanceof Error ? error.name : 'UnknownError',
-        );
-      }
     }
 
     return GENERIC_MAGIC_LINK_RESPONSE;

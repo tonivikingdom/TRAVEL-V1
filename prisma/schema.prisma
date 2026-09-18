@@ -23,6 +23,25 @@ enum InvitationStatus {
   REVOKED
 }
 
+enum JobType {
+  MAGIC_LINK_EMAIL
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum MagicLinkDeliveryStatus {
+  PENDING
+  TOKEN_READY
+  DELIVERED
+  NOOP
+}
+
 model User {
   id              String           @id @default(uuid()) @db.Uuid
   email           String
@@ -56,15 +75,17 @@ model Invitation {
 }
 
 model MagicLinkToken {
-  id           String      @id @default(uuid()) @db.Uuid
-  userId       String?     @db.Uuid
-  invitationId String?     @db.Uuid
-  tokenDigest  String      @unique @db.VarChar(64)
-  expiresAt    DateTime    @db.Timestamptz(3)
-  consumedAt   DateTime?   @db.Timestamptz(3)
-  createdAt    DateTime    @default(now()) @db.Timestamptz(3)
-  user         User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  invitation   Invitation? @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  id                String                    @id @default(uuid()) @db.Uuid
+  userId            String?                   @db.Uuid
+  invitationId      String?                   @db.Uuid
+  deliveryRequestId String?                   @unique @db.Uuid
+  tokenDigest       String                    @unique @db.VarChar(64)
+  expiresAt         DateTime                  @db.Timestamptz(3)
+  consumedAt        DateTime?                 @db.Timestamptz(3)
+  createdAt         DateTime                  @default(now()) @db.Timestamptz(3)
+  user              User?                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitation        Invitation?               @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  deliveryRequest   MagicLinkDeliveryRequest? @relation(fields: [deliveryRequestId], references: [id], onDelete: Restrict)
 
   @@index([expiresAt])
 }
@@ -96,4 +117,39 @@ model MagicLinkRequestBucket {
   windowStartedAt DateTime @db.Timestamptz(3)
   requestCount    Int
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+}
+
+model MagicLinkDeliveryRequest {
+  id              String                  @id @default(uuid()) @db.Uuid
+  normalizedEmail String
+  requestedEmail  String
+  requestedAt     DateTime                @db.Timestamptz(3)
+  status          MagicLinkDeliveryStatus @default(PENDING)
+  tokenExpiresAt  DateTime?               @db.Timestamptz(3)
+  processedAt     DateTime?               @db.Timestamptz(3)
+  magicLinkToken  MagicLinkToken?
+
+  @@index([status, requestedAt])
+}
+
+model Job {
+  id              String    @id @default(uuid()) @db.Uuid
+  type            JobType
+  status          JobStatus @default(QUEUED)
+  runAt           DateTime  @db.Timestamptz(3)
+  attempts        Int       @default(0)
+  maxAttempts     Int
+  leaseOwner      String?   @db.VarChar(128)
+  leaseUntil      DateTime? @db.Timestamptz(3)
+  uniqueKey       String    @unique @db.VarChar(200)
+  payloadRef      String    @db.Uuid
+  cancelRequested Boolean   @default(false)
+  lastErrorCode   String?   @db.VarChar(64)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+  completedAt     DateTime? @db.Timestamptz(3)
+  cancelledAt     DateTime? @db.Timestamptz(3)
+
+  @@index([status, runAt, leaseUntil])
+  @@index([payloadRef])
 }

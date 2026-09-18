@@ -29,10 +29,14 @@ export class MagicLinkEmailHandler {
   ): Promise<void> {
     signal?.throwIfAborted();
     const now = this.now();
-    const token = deriveMagicLinkToken(this.config.tokenKey, deliveryRequestId);
     const prepared = await this.repository.prepareDelivery({
       deliveryRequestId,
-      tokenDigest: token.digest,
+      deriveTokenDigest: (generation) =>
+        deriveMagicLinkToken(
+          this.config.tokenKey,
+          deliveryRequestId,
+          generation,
+        ).digest,
       proposedExpiresAt: new Date(
         now.getTime() + this.config.tokenTtlSeconds * 1_000,
       ),
@@ -43,6 +47,11 @@ export class MagicLinkEmailHandler {
     }
 
     signal?.throwIfAborted();
+    const token = deriveMagicLinkToken(
+      this.config.tokenKey,
+      deliveryRequestId,
+      prepared.tokenGeneration,
+    );
     const url = new URL(this.config.landingUrl);
     url.hash = `token=${encodeURIComponent(token.raw)}`;
     await this.mailSender.sendMagicLink({

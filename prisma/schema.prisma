@@ -125,6 +125,7 @@ model MagicLinkDeliveryRequest {
   requestedEmail  String
   requestedAt     DateTime                @db.Timestamptz(3)
   status          MagicLinkDeliveryStatus @default(PENDING)
+  tokenGeneration Int                     @default(0)
   tokenExpiresAt  DateTime?               @db.Timestamptz(3)
   processedAt     DateTime?               @db.Timestamptz(3)
   magicLinkToken  MagicLinkToken?

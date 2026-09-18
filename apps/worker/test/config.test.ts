@@ -33,13 +33,34 @@ describe('worker security configuration', () => {
     ).toThrow(/must not be synthetic/u);
   });
 
-  it('accepts an explicit high-entropy-looking production key without exposing it', () => {
+  it('rejects an arbitrary long production string without a canonical key encoding', () => {
+    expect(() =>
+      readWorkerConfig({
+        APP_ENV: 'production',
+        DATABASE_URL,
+        AUTH_MAGIC_LINK_LANDING_URL: 'https://example.test/login/magic',
+        MAGIC_LINK_TOKEN_KEY: 'prod_9YjJ3nLq5h7R2uP8vX4mC6sF1kD0aBzEwTgN',
+      }),
+    ).toThrow(/base64url or hex/u);
+  });
+
+  it('accepts canonical 32-byte base64url and hex production keys', () => {
     const config = readWorkerConfig({
       APP_ENV: 'production',
       DATABASE_URL,
       AUTH_MAGIC_LINK_LANDING_URL: 'https://example.test/login/magic',
-      MAGIC_LINK_TOKEN_KEY: 'prod_9YjJ3nLq5h7R2uP8vX4mC6sF1kD0aBzEwTgN',
+      MAGIC_LINK_TOKEN_KEY: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE',
     });
     expect(config.mailProvider).toBe('unconfigured');
+
+    expect(
+      readWorkerConfig({
+        APP_ENV: 'staging',
+        DATABASE_URL,
+        AUTH_MAGIC_LINK_LANDING_URL: 'https://staging.example.test/login/magic',
+        MAGIC_LINK_TOKEN_KEY:
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      }).magicLinkTokenKey,
+    ).toHaveLength(64);
   });
 });

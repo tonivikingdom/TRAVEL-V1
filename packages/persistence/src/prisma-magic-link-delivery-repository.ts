@@ -10,7 +10,7 @@ export class PrismaMagicLinkDeliveryRepository implements MagicLinkDeliveryRepos
 
   async prepareDelivery(input: {
     readonly deliveryRequestId: string;
-    readonly tokenDigest: string;
+    readonly deriveTokenDigest: (generation: number) => string;
     readonly proposedExpiresAt: Date;
     readonly now: Date;
   }): Promise<PreparedMagicLinkDelivery> {
@@ -89,12 +89,14 @@ export class PrismaMagicLinkDeliveryRepository implements MagicLinkDeliveryRepos
         }
 
         let expiresAt: Date;
+        let tokenGeneration: number;
         if (delivery.magicLinkToken === null) {
+          tokenGeneration = delivery.tokenGeneration + 1;
           expiresAt = input.proposedExpiresAt;
           await transaction.magicLinkToken.create({
             data: {
               deliveryRequestId: delivery.id,
-              tokenDigest: input.tokenDigest,
+              tokenDigest: input.deriveTokenDigest(tokenGeneration),
               expiresAt,
               ...(activeUser
                 ? { userId: user.id }
@@ -102,27 +104,37 @@ export class PrismaMagicLinkDeliveryRepository implements MagicLinkDeliveryRepos
             },
           });
         } else {
+          tokenGeneration = delivery.tokenGeneration;
           expiresAt = delivery.magicLinkToken.expiresAt;
           if (expiresAt <= input.now) {
+            tokenGeneration += 1;
             expiresAt = input.proposedExpiresAt;
             await transaction.magicLinkToken.update({
               where: { id: delivery.magicLinkToken.id },
-              data: { expiresAt },
+              data: {
+                tokenDigest: input.deriveTokenDigest(tokenGeneration),
+                expiresAt,
+              },
             });
           }
         }
 
         await transaction.magicLinkDeliveryRequest.update({
           where: { id: delivery.id },
-          data: { status: 'TOKEN_READY', tokenExpiresAt: expiresAt },
+          data: {
+            status: 'TOKEN_READY',
+            tokenGeneration,
+            tokenExpiresAt: expiresAt,
+          },
         });
         return {
           status: 'SEND',
           recipient: activeUser ? user.email : invitation!.email,
           expiresAt,
+          tokenGeneration,
         };
       },
-      { isolationLevel: 'Serializable' },
+      { isolationLevel: 'ReadCommitted' },
     );
   }
 

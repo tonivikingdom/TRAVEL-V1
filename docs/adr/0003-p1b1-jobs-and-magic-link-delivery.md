@@ -36,12 +36,16 @@ lease 和 attempts+1。多个 Worker 正常竞争时同一行只会由一个 Wor
 不查询账号资格，也不调用 `MailSender`。Worker 执行前重新检查 ACTIVE User 或仍有效的
 PENDING Invitation；未知、禁用、撤销或过期对象安全 NO-OP。
 
-原始 token 由 HMAC-SHA-256 派生：key 为 Git/数据库/日志之外的高熵
-`MAGIC_LINK_TOKEN_KEY`，消息使用固定 domain separation
-`travel-v1/magic-link/v1/<deliveryRequestId>`。数据库只存 SHA-256 digest，并以
-DeliveryRequest 唯一关联 MagicLinkToken。重试可重新得到相同 token，不依赖进程内存，也不
-创建多个不同有效 token。Development/Test 使用明确 SYNTHETIC key；Staging/Production
-缺 key 或使用 SYNTHETIC key时启动失败。
+原始 token 由 HMAC-SHA-256 派生：key 位于 Git/数据库/日志之外，消息使用固定 domain
+separation `travel-v1/magic-link/v1/<deliveryRequestId>:<tokenGeneration>`。DeliveryRequest
+持久保存 generation：首次为 1；token 未过期的投递重试复用同一 generation；token 过期后在
+DeliveryRequest 行锁保护的事务内 generation+1，并原子替换唯一 MagicLinkToken 的 digest 与
+expiry。旧 digest 被替换后不会因为重试而重新有效，数据库始终只有一个当前 token 记录。
+
+Development/Test 使用明确 SYNTHETIC key。Staging/Production 要求 Git 外提供至少 32-byte、
+由密码学安全随机源生成的 secret，并使用 canonical base64url 或 hex 编码；程序严格校验编码与
+解码后的最小长度，但不声称能数学证明 secret 的生成熵。缺 key、使用 SYNTHETIC key 或格式不符
+时启动失败。
 
 数据库事务在邮件网络 I/O 前提交。如果邮件已经发送但成功标记前进程崩溃，可能重复发送
 同一仍有效链接。因此 email delivery 明确为 **at-least-once**，不宣称 exactly-once。

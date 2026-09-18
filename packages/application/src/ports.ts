@@ -108,13 +108,14 @@ export type PreparedMagicLinkDelivery =
       readonly status: 'SEND';
       readonly recipient: string;
       readonly expiresAt: Date;
+      readonly tokenGeneration: number;
     }
   | { readonly status: 'NOOP' | 'DELIVERED' };
 
 export interface MagicLinkDeliveryRepository {
   prepareDelivery(input: {
     readonly deliveryRequestId: string;
-    readonly tokenDigest: string;
+    readonly deriveTokenDigest: (generation: number) => string;
     readonly proposedExpiresAt: Date;
     readonly now: Date;
   }): Promise<PreparedMagicLinkDelivery>;

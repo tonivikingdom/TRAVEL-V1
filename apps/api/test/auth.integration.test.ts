@@ -1,6 +1,7 @@
 import {
   AuthService,
   CapturedMailSender,
+  deriveMagicLinkToken,
   MagicLinkEmailHandler,
   type MagicLinkMail,
   type MailSender,
@@ -26,6 +27,7 @@ if (databaseUrl === undefined || databaseUrl.trim() === '') {
 const ADMIN_EMAIL = 'synthetic-admin@synthetic.example.test';
 const USER_A_EMAIL = 'synthetic-user-a@synthetic.example.test';
 const USER_B_EMAIL = 'synthetic-user-b@synthetic.example.test';
+const TOKEN_KEY = 'SYNTHETIC_TEST_MAGIC_LINK_TOKEN_KEY_0123456789abcdef';
 
 describe('P1A auth API with PostgreSQL', () => {
   let managed: ManagedPrismaClient;
@@ -66,7 +68,7 @@ describe('P1A auth API with PostgreSQL', () => {
       mail,
       {
         landingUrl: 'https://synthetic.example.test/login/magic',
-        tokenKey: 'SYNTHETIC_TEST_MAGIC_LINK_TOKEN_KEY_0123456789abcdef',
+        tokenKey: TOKEN_KEY,
         tokenTtlSeconds: 600,
       },
       { now: () => now },
@@ -164,7 +166,7 @@ describe('P1A auth API with PostgreSQL', () => {
       flaky,
       {
         landingUrl: 'https://synthetic.example.test/login/magic',
-        tokenKey: 'SYNTHETIC_TEST_MAGIC_LINK_TOKEN_KEY_0123456789abcdef',
+        tokenKey: TOKEN_KEY,
         tokenTtlSeconds: 600,
       },
       { now: () => now },
@@ -176,6 +178,86 @@ describe('P1A auth API with PostgreSQL', () => {
     await handler.execute(job!.payloadRef);
     expect(flaky.messages).toHaveLength(2);
     expect(flaky.messages[0]?.magicLink).toBe(flaky.messages[1]?.magicLink);
+    expect(await managed.client.magicLinkToken.count()).toBe(1);
+  });
+
+  it('rotates an expired delivery token without reviving the old link', async () => {
+    await requestMagicLink(ADMIN_EMAIL);
+    const delivery =
+      await managed.client.magicLinkDeliveryRequest.findFirstOrThrow();
+    const flaky = new FailAfterCaptureMailSender(2);
+    const handler = new MagicLinkEmailHandler(
+      new PrismaMagicLinkDeliveryRepository(managed.client),
+      flaky,
+      {
+        landingUrl: 'https://synthetic.example.test/login/magic',
+        tokenKey: TOKEN_KEY,
+        tokenTtlSeconds: 600,
+      },
+      { now: () => now },
+    );
+
+    await expect(handler.execute(delivery.id)).rejects.toThrow(
+      /SYNTHETIC_MAIL_FAILURE/u,
+    );
+    const tokenA = tokenFromMail(flaky.messages[0]!);
+
+    now = new Date(now.getTime() + 300_000);
+    await expect(handler.execute(delivery.id)).rejects.toThrow(
+      /SYNTHETIC_MAIL_FAILURE/u,
+    );
+    expect(tokenFromMail(flaky.messages[1]!)).toBe(tokenA);
+
+    now = new Date(now.getTime() + 301_000);
+    await handler.execute(delivery.id);
+    const tokenB = tokenFromMail(flaky.messages[2]!);
+    expect(tokenB).not.toBe(tokenA);
+    expect((await consume(tokenA)).statusCode).toBe(401);
+    expect((await consume(tokenB)).statusCode).toBe(200);
+
+    const updated =
+      await managed.client.magicLinkDeliveryRequest.findUniqueOrThrow({
+        where: { id: delivery.id },
+      });
+    expect(updated.tokenGeneration).toBe(2);
+    expect(await managed.client.magicLinkToken.count()).toBe(1);
+  });
+
+  it('serializes concurrent token rotation to one current generation', async () => {
+    await requestMagicLink(ADMIN_EMAIL);
+    const delivery =
+      await managed.client.magicLinkDeliveryRequest.findFirstOrThrow();
+    const deliveryRepository = new PrismaMagicLinkDeliveryRepository(
+      managed.client,
+    );
+    const prepare = (at: Date) =>
+      deliveryRepository.prepareDelivery({
+        deliveryRequestId: delivery.id,
+        deriveTokenDigest: (generation) =>
+          deriveMagicLinkToken(TOKEN_KEY, delivery.id, generation).digest,
+        proposedExpiresAt: new Date(at.getTime() + 600_000),
+        now: at,
+      });
+
+    const first = await prepare(now);
+    expect(first).toMatchObject({ status: 'SEND', tokenGeneration: 1 });
+    const oldDigest = deriveMagicLinkToken(TOKEN_KEY, delivery.id, 1).digest;
+
+    const afterExpiry = new Date(now.getTime() + 601_000);
+    const concurrent = await Promise.all([
+      prepare(afterExpiry),
+      prepare(afterExpiry),
+    ]);
+    expect(concurrent).toEqual([
+      expect.objectContaining({ status: 'SEND', tokenGeneration: 2 }),
+      expect.objectContaining({ status: 'SEND', tokenGeneration: 2 }),
+    ]);
+
+    const currentToken = await managed.client.magicLinkToken.findFirstOrThrow();
+    expect(currentToken.tokenDigest).toBe(
+      deriveMagicLinkToken(TOKEN_KEY, delivery.id, 2).digest,
+    );
+    expect(currentToken.tokenDigest).not.toBe(oldDigest);
     expect(await managed.client.magicLinkToken.count()).toBe(1);
   });
 
@@ -509,7 +591,11 @@ describe('P1A auth API with PostgreSQL', () => {
   }
 
   function latestToken(email: string): string {
-    const match = new URL(latestMail(email).magicLink).hash.match(
+    return tokenFromMail(latestMail(email));
+  }
+
+  function tokenFromMail(mail: MagicLinkMail): string {
+    const match = new URL(mail.magicLink).hash.match(
       /^#token=([A-Za-z0-9_-]{40,100})$/u,
     );
     if (match?.[1] === undefined) {
@@ -555,12 +641,13 @@ function bearer(credential: string): { readonly authorization: string } {
 
 class FailAfterCaptureMailSender implements MailSender {
   readonly messages: MagicLinkMail[] = [];
-  private shouldFail = true;
+
+  constructor(private remainingFailures = 1) {}
 
   async sendMagicLink(mail: MagicLinkMail): Promise<void> {
     this.messages.push(mail);
-    if (this.shouldFail) {
-      this.shouldFail = false;
+    if (this.remainingFailures > 0) {
+      this.remainingFailures -= 1;
       throw new Error('SYNTHETIC_MAIL_FAILURE');
     }
   }

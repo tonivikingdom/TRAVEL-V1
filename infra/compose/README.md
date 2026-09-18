@@ -33,4 +33,6 @@ Staging/Production。API 只持久入队，Worker 才检查资格、派生 token
 
 Production 文件只描述配置形状。P1B1 不部署 Production，也不配置域名、HTTPS、邮件、
 内网穿透或外部 Provider。Staging 的真实邮件 provider 仍为 `unconfigured`，并且必须在
-Git 外提供高熵 `MAGIC_LINK_TOKEN_KEY`；提供真实 provider 与凭证前不能宣称邮件可发送。
+Git 外提供至少 32-byte、由密码学安全随机源生成并以 canonical base64url 或 hex 编码的
+`MAGIC_LINK_TOKEN_KEY`。程序校验编码与解码长度，不证明生成熵；提供真实 provider 与凭证前
+不能宣称邮件可发送。

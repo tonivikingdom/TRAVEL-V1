@@ -123,18 +123,44 @@ function readTokenKey(
     return SYNTHETIC_TOKEN_KEY;
   }
   const key = required(value, 'MAGIC_LINK_TOKEN_KEY');
-  if (key.length < 32) {
-    throw new Error('MAGIC_LINK_TOKEN_KEY must contain at least 32 characters');
+  if (!['staging', 'production'].includes(appEnvironment)) {
+    if (key.length < 32) {
+      throw new Error(
+        'MAGIC_LINK_TOKEN_KEY must contain at least 32 characters',
+      );
+    }
+    return key;
   }
-  if (
-    ['staging', 'production'].includes(appEnvironment) &&
-    key.toUpperCase().includes('SYNTHETIC')
-  ) {
+  if (key.toUpperCase().includes('SYNTHETIC')) {
     throw new Error(
       'Staging/production MAGIC_LINK_TOKEN_KEY must not be synthetic',
     );
   }
+  if (!isEncodedCryptographicKey(key)) {
+    throw new Error(
+      'Staging/production MAGIC_LINK_TOKEN_KEY must be canonical base64url or hex encoding of at least 32 bytes',
+    );
+  }
   return key;
+}
+
+function isEncodedCryptographicKey(value: string): boolean {
+  if (
+    value.length >= 64 &&
+    value.length % 2 === 0 &&
+    /^[0-9a-f]+$/iu.test(value)
+  ) {
+    return true;
+  }
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) {
+    return false;
+  }
+  try {
+    const decoded = Buffer.from(value, 'base64url');
+    return decoded.length >= 32 && decoded.toString('base64url') === value;
+  } catch {
+    return false;
+  }
 }
 
 function readLandingUrl(

@@ -21,3 +21,16 @@ export type {
   NotificationListResponse,
   NotificationView,
 } from './notifications.js';
+export type {
+  CustomPlaceInput,
+  DayView,
+  ExistingPlaceInput,
+  ItineraryNodeKind,
+  ItineraryNodeSource,
+  ItineraryNodeView,
+  PlaceInput,
+  PlaceView,
+  TripCommandInput,
+  TripListResponse,
+  TripView,
+} from './trips.js';

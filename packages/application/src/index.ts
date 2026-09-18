@@ -49,3 +49,15 @@ export {
   deriveMagicLinkToken,
   digestOpaqueToken,
 } from './tokens.js';
+export { TripService } from './trip-service.js';
+export type {
+  ItineraryNodeRecord,
+  PlaceRecord,
+  RepositoryPlaceInput,
+  RepositoryTripCommand,
+  TripAggregateRecord,
+  TripMutationResult,
+  TripNodeKind,
+  TripNodeSource,
+  TripRepository,
+} from './trip-ports.js';

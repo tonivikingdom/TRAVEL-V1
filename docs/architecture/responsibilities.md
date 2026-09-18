@@ -33,13 +33,18 @@ P1B1 在 P0 健康心跳之上增加 JobRunner；WorkerRuntime 只负责进程�
 poll/claim/lease/timeout/retry，Handler 只处理 `MAGIC_LINK_EMAIL`。P1B2 的
 NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实施。
 
-## Trip 日期范围与 DateOwnership（P2 前置规则）
+## Trip 日期范围与 DateOwnership（P2A）
 
-- O-01/O-02 已确认，但本阶段只记录规则，不创建 Trip/Day 数据表或迁移。
+- O-01/O-02 已确认；P2A 建立 Trip、DateOwnership、Place 与 ItineraryNode migration/API。
 - 有效日期范围由最早至最晚有效行程内容自然日决定；范围内所有自然日（含中间空白日）归属该 Trip。空 Trip 不占用自然日，创建时的 `start date` 只是规划/编辑锚点。
 - 首尾空白日仅可作为临时编辑态；没有有效内容就离开编辑时自动消失，首尾最后一个有效内容被移除后范围向内收缩。临时首尾日不创建 `DateOwnership`，V1 不提供保留开关。
 - 有效行程内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体；note、todo、普通备注、Attachment、Expense、NotificationEvent 与偏好单独存在时不撑开范围。跨午夜/跨时区投影仍受 O-03 约束。
 - 同一账号同一自然日最多属于一个 Trip。冲突必须明确返回，不能重复归属、静默覆盖或自动合并；日期锚点、有效范围与 `DateOwnership` 必须是可区分的概念。
+- `DateOwnership(ownerUserId, localDate)` 是唯一日期事实；Day 是 effective range、ownership 与
+  nodes 的 API projection，不建 Day 表。
+- 结构 mutation 先取得 owner-scoped advisory transaction lock，再锁定并校验 Trip version；
+  节点写入、range/ownership reconciliation 与 version+1 原子完成。
+- P2A 只支持同日排序；Transport、时间传播、跨日移动与生命周期后置。
 
 ## 站内通知（P1B2）
 
@@ -66,7 +71,7 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 
 ## Trip 版本（P2 起）
 
-- 每次正式写入递增服务端版本。
+- P2A 已实现每次正式 Trip 写入递增一次服务端版本。
 - 多设备写操作携带 baseTripVersion；旧版本返回 VERSION_CONFLICT。
 - Query 与 Preview 不递增正式 Trip 版本。
 - 已执行事实和后来的可靠证据不会被排程重算或 Undo 覆盖。

@@ -15,13 +15,14 @@ flowchart LR
   Storage --> PrivateVolume[(Dev/Test private volume)]
   Domain[packages/domain]
   Application --> Contracts
-  Application -. 后续领域用例 .-> Domain
+  Application -->|P2A Trip 用例与端口| Domain
   Persistence -->|实现端口| Application
   Worker -. P1B 起调用同一用例 .-> Application
 ```
 
 P1A 建立身份 application 和 Prisma ORM，P1B1 增加持久 Job，P1B2 增加通知与可替换的
-对象存储 port。Dev/Test 本地适配器不代表 Staging/Production provider 已选择。
+对象存储 port。P2A 增加 Trip application 用例与 PostgreSQL repository；Day 只在契约层投影，
+不建第二套表。Dev/Test 本地适配器不代表 Staging/Production provider 已选择。
 
 ## 依赖规则
 
@@ -61,3 +62,11 @@ ObjectStorage 都是端口/适配器，不能直接修改未来 Trip。API 与 W
 - Local Filesystem adapter 仅用于 Development/Test，并使用 Compose 独立命名卷；文件不放在
   public web root，不暴露实际路径或永久公开 URL。
 - 正式 Attachment upload/download、Trip 关联、文件解析与真实云对象存储均后置。
+
+## P2A Trip Core 边界
+
+- API 只接收类型化 Trip command，owner 由已验证 Session actor 提供。
+- Application 校验自然日、命令与权限并投影 Day；Persistence 在单一事务中负责 Trip 行锁、
+  owner advisory lock、版本校验、节点写入、有效范围与 DateOwnership reconciliation。
+- DateOwnership 是唯一日期事实；中间空白日保留 ownership，首尾空白编辑态不写数据库。
+- P2A 不引入 Transport、Provider、时间传播、生命周期自动推进或跨日移动。

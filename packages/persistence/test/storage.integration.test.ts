@@ -39,6 +39,10 @@ describe('StoredObject metadata and local storage integration', () => {
   });
 
   beforeEach(async () => {
+    await managed.client.itineraryNode.deleteMany();
+    await managed.client.dateOwnership.deleteMany();
+    await managed.client.trip.deleteMany();
+    await managed.client.place.deleteMany();
     await managed.client.storedObject.deleteMany();
     await managed.client.notificationEvent.deleteMany();
     await managed.client.session.deleteMany();

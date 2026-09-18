@@ -1,4 +1,4 @@
-# P3 前置：O-03 / O-04 / O-07 产品规则落档
+# P3 前置：O-03 / O-04 / O-05 / O-06 / O-07 产品规则落档
 
 - 当前状态：在 `feature/p3-prep-o03-timeline-days` 仅做规格落档；交付为 Draft PR，未 Ready、
   未合并，P3 代码未开始
@@ -6,8 +6,8 @@
 - 基线 main CI：Run `35353581612`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 备选：GPT-5.6 Luna / Max，仅用于范围明确的小修
-- 升级条件：若需改变业务代码、新增 migration、实现 DayOccurrence/sequence、生命周期、预约保护
-  或 DST command/UI，停止扩大范围并交由更强模型独立复核
+- 升级条件：若需改变业务代码、新增 migration、实现 DayOccurrence/sequence、生命周期、预约保护、
+  RecommendationPolicy、Provider 或 DST command/UI，停止扩大范围并交由更强模型独立复核
 - 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
 
 ## O-03：产品规则 RESOLVED
@@ -50,6 +50,22 @@
   不伪造已解决。
 - Provider/Booking 如何产生结构化确认属于后续实现和外部服务问题；保护安排代码尚未实现。
 
+## O-05：产品规则 RESOLVED
+
+- 没有全局体验最低时长；只有用户为具体活动明确设置的最低时长才是硬约束。
+- 推荐先过滤违反事实、受保护安排和用户硬约束的方案，再优先保护固定内容、采用最小改动，并比较
+  成本、剩余体验、时间收益、风险和影响范围。
+- 不设置永久最便宜/最快优先级或全局固定权重。偏好只影响可行候选之间的排序，不覆盖事实与约束。
+- 每个推荐必须解释取舍；默认 1 个主推荐和最多 2 个可靠备选，不凑数，无可靠解时明确说明。
+- RecommendationPolicy 与 UI 尚未实现。
+
+## O-06：产品规则 RESOLVED
+
+- 系统发现冲突并建议外部预约调整，用户自行联系；点击“已调整”即可作为继续规划的用户确认。
+- V1 不要求 API 回执、订单号、截图、付款证明或 OCR，不建立复杂外部预约状态机。
+- 用户确认只能称为用户确认，不能表述为商家官方确认、有位或 Provider 已核验。
+- 调整失败后用户可再次修改或选择其他方案；真实外部 Provider 是尚未实现的增强能力。
+
 ## O-07：产品规则 RESOLVED
 
 - 计划日期结束后，Trip 自然进入“已结束”，不要求用户证明旅行发生。
@@ -59,8 +75,9 @@
 - 只有用户主动明确表示没去，才标记 `NOT_TAKEN`；系统不得从无数据推断未执行。
 - 用户可见状态保持计划中、进行中、已结束、未执行。自动生命周期代码尚未实现。
 
-O-03/O-04/O-07 解决的是产品判断，不等于 DayOccurrence、solver、生命周期、保护安排或 Provider
-功能已经实现。P3 solver、P4 Provider、业务代码、migration 和 Production 均不在本任务范围。
+O-03 至 O-07 解决的是产品判断，不等于 DayOccurrence、solver、生命周期、保护安排、
+RecommendationPolicy、预约集成或 Provider 功能已经实现。P3 solver、P4 Provider、业务代码、
+migration 和 Production 均不在本任务范围。
 
 ## 与 O-01/O-02 的关系
 
@@ -71,9 +88,9 @@ O-03/O-04/O-07 解决的是产品判断，不等于 DayOccurrence、solver、生
 
 ## P3 前置产品逻辑状态
 
-O-03/O-04/O-07 已确认后，当前没有已知的 P3 核心产品逻辑阻塞。仍需单独授权和完成数据结构、
-migration、command/UI 与 solver 实施；O-05/O-06 等继续约束后续 Recommendation/Provider，
-不因本次文档落档而自动解决或授权。
+O-03 至 O-07 均已确认，当前没有已知的 P3 核心产品逻辑阻塞。仍需单独授权和完成数据结构、
+migration、command/UI、solver、RecommendationPolicy 与外部 adapter 实施；本次落档不自动授权
+任何代码或 Provider 工作。
 
 ## 验证
 
@@ -84,4 +101,4 @@ migration、command/UI 与 solver 实施；O-05/O-06 等继续约束后续 Recom
 - 对本次变更且属于项目 Prettier 清单的 `docs/architecture/*.md`、`docs/status/*.md` 做了聚焦
   检查，全部通过。最终以 Draft PR 的 clean-checkout GitHub CI 为准。
 - 文档变动未触发业务代码 lint/typecheck 的本地修改需求；GitHub CI 仍按仓库流程执行完整检查。
-- 验收清单扩展到 119 个规格场景；新增场景仍只是规格，不代表已经实现或测试通过。
+- 验收清单扩展到 130 个规格场景；新增场景仍只是规格，不代表已经实现或测试通过。

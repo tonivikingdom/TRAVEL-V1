@@ -10,10 +10,10 @@
 | P2B  | Transport、失效历史、resolved 三层时间基础         | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过 | 已完成；O-03/O-07 不阻塞已交付的基础边界                                                                  |
 | P3   | 双向传播、来源解释、约束与冲突                     | 仅授权 O-03 至 O-07 产品规则文档落档；P3 代码未授权、未实现                                             | 五项产品规则已确认，无已知产品逻辑阻塞；DayOccurrence/sequence、DST command/UI、solver 与生命周期仍待实施 |
 | P4   | Provider 探针、候选、Preview/Adopt、事务/幂等/撤销 | 未授权、未实现                                                                                          | O-04/O-05/O-06 已确认；Provider 字段验证、版本与幂等仍是工程进入条件                                      |
-| P5   | 薄测试台、站内通知、已确认流程 E2E                 | 未授权、未实现                                                                                          | 鉴权/隔离/HTTPS/邮件闸门；O-08/O-10 需测试配置                                                            |
+| P5   | 薄测试台、站内通知、已确认流程 E2E                 | 未授权、未实现                                                                                          | O-08/O-10/O-11 产品规则已确认；监控/通知、故障态、备份、回顾/分享实现与 O-09 上线配置仍待授权             |
 
-O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、原生客户端/Push、天气、
-预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。
+O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
+原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。
 
 ## O-00 当前事实
 
@@ -48,10 +48,10 @@ O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、�
   `50866c4aa4ec122e4522920dcf2e53b551de7dfb`，main CI Run `35353581612` 的
   `verify` 与 `Compose verification` 均为 success；远程 `feature/p2b-transport-temporal`
   已删除。P2B 本身没有实现 O-03/O-07 高级能力。
-- Draft PR #8 在 `feature/p3-prep-o03-timeline-days` 仅落档产品规则：O-03（含 DST）至 O-07
-  均在产品规则层面 RESOLVED；无业务代码、migration、P3 solver、RecommendationPolicy 或
-  P4 Provider 实现。DayOccurrence/sequence migration、跨日投影、DST 输入、生命周期、保护安排、
-  推荐策略与外部预约集成仍需后续工程授权。
+- Draft PR #8 在 `feature/p3-prep-o03-timeline-days` 仅落档产品规则：O-03（含 DST）至 O-08、
+  O-10 与 O-11 均在产品规则层面 RESOLVED；O-09 保持 Deferred。无业务代码、migration、P3
+  solver、RecommendationPolicy、P4 Provider、实时监控、故障客户端、图片备份或回顾/分享实现。
+  上述工程能力仍需后续单独授权。
 
 ## P1A → P1B 邮件安全闸门
 
@@ -62,7 +62,7 @@ O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、�
 - 真实邮件 provider 仍未配置，Production 仍未授权；即使异步架构验证通过，也不得宣称
   公网正式邮件登录已完成。
 
-## O-09 对象存储限额
+## O-09 上线配置（Deferred）
 
 - P1B2 使用 `OBJECT_MAX_FILE_BYTES`、`OBJECT_MAX_USER_TOTAL_BYTES` 和
   `OBJECT_ALLOWED_MEDIA_TYPES` 作为服务端边界。
@@ -72,4 +72,5 @@ O-11 只影响正式回顾/分享 UI，本轮后置。协作、公众注册、�
 - 正式 Attachment/upload API 或 Staging/Production ObjectStorage 启用前，必须实现 stale
   PENDING reservation 的 expiry/reconciliation，并处理 provider 侧 orphan temporary/object；
   否则进程崩溃后的预留可能永久占用 quota。该项是上线硬闸门。
-- O-09 的正式产品数值仍待上线阶段确认，不解除 P2 或 Production 闸门。
+- O-09 的附件最终大小/数量/总存储额、邮件 Provider、外部部署参数与 Session 最终时长继续后置；
+  不在 PR #8 决定。正式值仍待对应上线阶段确认，不解除 Production 闸门。

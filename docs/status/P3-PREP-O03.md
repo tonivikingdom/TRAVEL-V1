@@ -1,13 +1,15 @@
-# P3 前置：O-03 / O-04 / O-05 / O-06 / O-07 产品规则落档
+# P3/P5 前置：O-03～O-08、O-10、O-11 产品规则落档
 
 - 当前状态：在 `feature/p3-prep-o03-timeline-days` 仅做规格落档；交付为 Draft PR，未 Ready、
   未合并，P3 代码未开始
 - 基线 main：`50866c4aa4ec122e4522920dcf2e53b551de7dfb`
 - 基线 main CI：Run `35353581612`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / High
-- 备选：GPT-5.6 Luna / Max，仅用于范围明确的小修
+- 备选：GPT-5.6 Sol / Medium
+- 建议理由：本轮需要跨文档核对大量已确认规则与 O-03～O-07、P2A/P2B 边界的一致性，而非代码量
 - 升级条件：若需改变业务代码、新增 migration、实现 DayOccurrence/sequence、生命周期、预约保护、
-  RecommendationPolicy、Provider 或 DST command/UI，停止扩大范围并交由更强模型独立复核
+  RecommendationPolicy、Provider、实时监控、回顾/分享或 DST command/UI，停止扩大范围并先整理
+  冲突和建议
 - 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
 
 ## O-03：产品规则 RESOLVED
@@ -75,9 +77,48 @@
 - 只有用户主动明确表示没去，才标记 `NOT_TAKEN`；系统不得从无数据推断未执行。
 - 用户可见状态保持计划中、进行中、已结束、未执行。自动生命周期代码尚未实现。
 
-O-03 至 O-07 解决的是产品判断，不等于 DayOccurrence、solver、生命周期、保护安排、
-RecommendationPolicy、预约集成或 Provider 功能已经实现。P3 solver、P4 Provider、业务代码、
-migration 和 Production 均不在本任务范围。
+## O-08：产品规则 RESOLVED
+
+- 同一稳定风险事件默认主动提醒一次；只有严重等级升级、新重要事实或 snooze 到期且风险仍在时
+  才再次提醒。分钟级 ETA 小幅变化不构成新事件，也没有全局“减少 X 分钟”阈值。
+- 用户接受的是当前风险等级；同等级静默，升级后仍可提醒。实时计算可提前静默运行，只在行动
+  窗口打扰。
+- 固定提醒和实时监控独立。关闭实时监控停止位置、动态 ETA、动态最晚出发、风险与延误联动，
+  但保留固定提醒。
+- 定位权限丢失进入 LIMITED，`userEnabled` 保持 true；恢复时重新同步，旧位置和中断过程不冒充
+  当前事实。过期固定提醒不补发。
+- 相同目的的固定/动态提醒去重；并发提醒优先明确时窗和严重后果，正文使用关键行动加待办数量
+  摘要。投递 capability 不代表 100% 到达。
+
+## O-09：Deferred
+
+- 附件最终大小、数量与总额，邮件 Provider、外部部署参数和 Session 最终时长仍未决定。
+- 既有 SYNTHETIC 工程配置不是正式产品承诺；本轮不解除 Production 上线闸门。
+
+## O-10：产品规则 RESOLVED
+
+- 外部 Provider 独立降级，对应能力 unavailable/unknown，其他行程功能继续且不伪造实时事实。
+- 故障时提供航空公司/机场/运营商官网或 Google Maps/Apple Maps 等人工查询出口；外部网页结果
+  不会自动成为系统事实。
+- 核心后端不可用时明确显示不可用，不展示旧缓存为可靠当前行程；V1 不做完整离线模式。
+- 静态行程图片是带生成时间的应急备份，不可编辑且不会随 Trip 更新。旅行前一天或首次进入
+  “即将开始”时提醒一次，不重复骚扰。
+
+## O-11：产品规则 RESOLVED
+
+- 回顾默认相信用户最终保留的历史行程，不要求定位、Actual、App 记录或证明；只有明确排除事实
+  才不展示。
+- 地点、FreeAction/特别体验与真实最终顺序是主线；普通交通不展示，体验型交通不作为底层 edge
+  日志呈现。
+- 历史行程可编辑并重新生成回顾；回顾不是第二套事实数据库，旧静态快照不自动变化。
+- 分享默认最小披露，匿名可看、登录后复制；链接默认长期有效，由用户主动停止，新旧版本独立。
+- 复制创建新的计划中 Trip，日期/人数/名称由接收者选择，地点/顺序和当地时间作参考；原 Actual、
+  私人数据与历史执行事实不复制。
+- 跨日期线回顾按 sequence / DayOccurrence 显示，允许日期回拨，不重排或强插航班卡。
+
+O-03 至 O-08、O-10 与 O-11 解决的是产品判断，不等于 DayOccurrence、solver、生命周期、保护
+安排、RecommendationPolicy、预约集成、Provider、实时监控、Push、故障客户端、图片备份、回顾、
+分享或复制功能已经实现。业务代码、migration 和 Production 均不在本任务范围。
 
 ## 与 O-01/O-02 的关系
 
@@ -88,9 +129,9 @@ migration 和 Production 均不在本任务范围。
 
 ## P3 前置产品逻辑状态
 
-O-03 至 O-07 均已确认，当前没有已知的 P3 核心产品逻辑阻塞。仍需单独授权和完成数据结构、
-migration、command/UI、solver、RecommendationPolicy 与外部 adapter 实施；本次落档不自动授权
-任何代码或 Provider 工作。
+O-03 至 O-08、O-10 与 O-11 均已确认，O-09 保持 Deferred。当前没有已知的 P3 核心产品逻辑
+阻塞；P5 仍需实现和验证监控/通知、故障态、图片备份、回顾/分享权限等能力，并在上线前解决 O-09。
+本次落档不自动授权任何代码、migration、Provider、客户端或 Production 工作。
 
 ## 验证
 
@@ -101,4 +142,5 @@ migration、command/UI、solver、RecommendationPolicy 与外部 adapter 实施�
 - 对本次变更且属于项目 Prettier 清单的 `docs/architecture/*.md`、`docs/status/*.md` 做了聚焦
   检查，全部通过。最终以 Draft PR 的 clean-checkout GitHub CI 为准。
 - 文档变动未触发业务代码 lint/typecheck 的本地修改需求；GitHub CI 仍按仓库流程执行完整检查。
-- 验收清单扩展到 130 个规格场景；新增场景仍只是规格，不代表已经实现或测试通过。
+- 验收清单新增 33 个 O-08/O-10/O-11 场景，扩展到 163 个规格场景；新增场景仍只是规格，
+  不代表已经实现或测试通过。

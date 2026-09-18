@@ -123,6 +123,40 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   自动触发。
 - 生命周期自动迁移尚未实现，本次不修改 P2A/P2B 业务代码。
 
+## 实时监控与提醒（O-08 产品规则已确认，仅规格）
+
+- application 将用户开关与 OFF/IDLE/RUNNING/LIMITED 分开；定位权限丢失进入 LIMITED，不改
+  `userEnabled`。恢复时重新同步，旧位置和中断过程不能伪造成当前事实。
+- 风险事件以 stable key、severity、basisVersion 和用户接受/snooze 状态去重。同一等级默认只主动
+  提醒一次；严重等级升级、新重要事实或 snooze 到期且风险仍在才允许再次提醒。
+- 固定提醒与动态监控是独立 capability。关闭实时监控不删除固定提醒；当前进度 unknown 不阻止
+  固定提醒，但动态推断保持 unknown。过期固定提醒不补发旧指令。
+- presentation/notification adapter 负责相同目的去重、关键事项优先及“关键提醒 + N 个待办”摘要；
+  低优先级待办仍保留。任何投递 adapter 都不能承诺 100% 到达。
+- O-08 尚未实现；P1B2 `NotificationEvent` 基础不等于实时监控、客户端通知或 Push 已完成。
+
+## Provider 与核心故障边界（O-10 产品规则已确认，仅规格）
+
+- Provider adapter 各自独立降级；单一铁路、航班或地图故障只让对应实时/路线结果 unavailable 或
+  unknown，不阻塞 Trip 核心读取，也不生成未经确认的实时事实。
+- presentation 可提供官网/Google Maps/Apple Maps 等人工查询链接，但外部页面内容不会绕过
+  Provider contract 自动写为系统事实。
+- 核心 API 不可用时客户端进入明确不可用态，不把缓存当当前可靠行程；V1 不承担完整离线编辑。
+- 静态行程图片备份属于导出/应急参考边界：带生成时间、不自动同步、不可离线编辑，旅行前只提醒
+  一次。相关客户端与导出能力尚未实现。
+
+## 历史回顾、分享与复制（O-11 产品规则已确认，仅规格）
+
+- 历史 Trip 是源数据，回顾是 projection，不建立第二套事实数据库。没有 Actual 不自动排除最终
+  保留内容；只有明确跳过/取消/删除/修正或可靠未执行事实才排除。
+- 回顾按 timeline sequence / DayOccurrence 投影地点、FreeAction/特别体验；普通 TransportEdge
+  不进入主线，体验型交通以体验内容呈现。跨日期线不按 localDate 重排。
+- 静态图片/分享快照不随历史编辑变化；每次生成是独立版本。匿名可读分享默认长期有效，由 owner
+  主动停止。默认不暴露交通细节、待办、风险、订单、费用、私人备注或附件。
+- copy use case 才要求登录，并创建新的计划中 Trip；日期、人数、名称由接收者确认，地点/顺序和
+  当地时间仅作规划参考，原 Actual、私有数据和历史执行事实不复制。
+- O-11 规则不代表回顾 UI、匿名分享权限、快照存储或复制事务已经实现。
+
 ## 站内通知（P1B2）
 
 - `NotificationEvent` 是用户私有、不可由客户端任意创建的持久事件；可信 application / worker

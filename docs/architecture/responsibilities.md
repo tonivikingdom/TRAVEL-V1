@@ -1,16 +1,20 @@
 # 关键责任与事务边界
 
-## 账号与 Session（P1）
+## 账号与 Session（P1A）
 
-- Invitation 控制可注册邮箱；Magic Link 短期、单次、保存摘要。
-- Session 由服务端过期和撤销；账号禁用使现有会话失效。
+- Invitation 控制可注册邮箱；Magic Link 短期、单次、只保存摘要，并在事务中条件消费。
+- Session 由服务端过期和撤销；多设备各有独立 Session，账号禁用使现有会话全部失效。
 - actor/owner 来自已验证 Session，不接受客户端传入 ownerId。
 - 管理员只能做账号管理；不因此获得读取他人 Trip、附件、位置或费用的权限。
-- 原生客户端认证只保留 adapter 边界，P1 不把浏览器 cookie 硬套给所有平台。
+- `authorize(actor, action, resource)` 是集中授权入口；管理员没有私人资源通配规则。
+- Session 验证与 credential 的 HTTP 携带方式分离。P1A 测试 API 使用 opaque bearer；
+  未来 Cookie / 原生安全存储属于 transport adapter。
+- Magic Link request 的节流状态保存在 PostgreSQL；已知和未知邮箱返回相同通用响应。
+- Development/Test 邮件只进入 SYNTHETIC 捕获器；真实 staging provider 尚未配置。
 
-P0 不实现上述数据表或端点，只冻结责任边界。
+P1A 已实现上述数据表、迁移和最小端点；不包含任何 Trip 私有资源实现。
 
-## Job 与 Worker（P1）
+## Job 与 Worker（P1B，尚未授权）
 
 - Job 持久化到 PostgreSQL，至少包含 runAt、status、attempts、leaseUntil、
   uniqueKey 和 payloadRef。

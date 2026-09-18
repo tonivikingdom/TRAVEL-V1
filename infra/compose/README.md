@@ -2,7 +2,8 @@
 
 Dev 与 Staging 使用同一份 Compose 定义，但必须使用各自环境文件与
 `COMPOSE_PROJECT_NAME`。这会隔离容器、网络和命名卷。所有宿主机端口只绑定
-`127.0.0.1`；P0 不开放公网入口。
+`127.0.0.1`；P0/P1A 不开放公网入口。Compose 会先运行一次性 `migrate` 服务，
+成功应用仓库中的 Prisma migration 后才启动 API 与 Worker。
 
 ## Dev
 
@@ -27,4 +28,5 @@ docker compose --env-file .env.staging -f infra/compose/compose.yml up --build -
 `down --volumes` 作为日常操作；本项目没有自动 drop/reset 数据库的启动脚本。
 
 Production 文件只描述配置形状。P0 不部署 Production，也不配置域名、HTTPS、
-邮件、内网穿透或外部 Provider。
+邮件、内网穿透或外部 Provider。P1A 的 Dev 邮件只写入进程内 SYNTHETIC 捕获器；
+Staging 的真实邮件 provider 仍为 `unconfigured`，提供凭证前不能宣称邮件可发送。

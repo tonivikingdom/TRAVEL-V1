@@ -26,8 +26,8 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 |---|---|---|
 | User / Invitation / Session | 受控账号、角色、会话失效 | P1 |
 | UserPreference | 基准货币、语言分别保存 | P1必要字段 |
-| Trip | 所有者、名称、默认人数、日期范围、生命周期 | P2 |
-| Day / DateOwnership | 日期组织、用户内日期归属约束 | P2；O-01/O-02先过闸门 |
+| Trip | 所有者、名称、默认人数、有效日期范围、生命周期 | P2；O-01/O-02规则已确认 |
+| Day / DateOwnership | 日期组织、用户内日期归属约束 | P2；按已确认 O-01/O-02 实现 |
 | Place | 真实地图地点身份/坐标，不是每次访问 | P2 |
 | Visit | 某次出现；PLACE或FREE_ACTION；来源与执行状态 | P2 |
 | TransportEdge / AdoptedRoute | 相邻连接、已采用快照、历史失效 | P2/P4 |
@@ -38,6 +38,17 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 | Preview / OperationReceipt | 变更预览与采用回执、幂等与撤销依据 | P4 |
 | Job / NotificationEvent | 持久任务与站内通知 | P1骨架/P5业务 |
 | Expense / Task / Attachment / ShareClaim | 完整蓝图中保留的数据边界 | 分阶段另发，不在P0全建 |
+
+## 2.1 Trip 日期范围与 DateOwnership（O-01/O-02 已确认）
+
+本节冻结 P2 实现前的产品语义；**当前没有 Trip/Day 数据表、迁移或业务 API 实现**。
+
+- Trip 的有效日期范围只由有效行程内容决定：最早一个有效行程内容自然日至最晚一个有效行程内容自然日。有效内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体。
+- 编辑器通过“添加下一天/前一天”产生的首尾空白日只是临时编辑态，不属于正式范围、不建立 `DateOwnership`、不占用自然日。离开编辑且没有有效内容时自动消失；删除或移动首日/末日最后一个有效内容后，范围向内收缩，连续首尾空白日一并收缩。V1 不提供保留首尾空白日开关。
+- 有效范围内部的所有自然日都归属于该 Trip，即使中间没有行程内容；中间空白日不会释放给另一 Trip。一个 Trip 尚无有效内容时可以存在，但不占用任何自然日。
+- 新建 Trip 输入的 `start date` 在空 Trip 阶段只是规划/编辑锚点，不得直接创建 `DateOwnership`。实现必须分别表达日期锚点、有效日期范围与日期归属，不能把三者混成一个 `startDate`。
+- Trip note、todo、普通备注、Attachment、Expense、NotificationEvent 或用户偏好单独存在时不撑开日期范围；未来若 Task/Expense 附着于有效行程实体，由该实体决定日期范围。跨午夜、跨日期线与跨时区 Day 投影继续受 O-03 约束。
+- 同一账号同一自然日最多属于一个 Trip。范围扩展遇到已占用日期时必须返回明确冲突，不重复占用、不静默覆盖、不自动合并；未来再由用户流程选择合并、调整或取消。
 
 ## 3. 数据归属与权限
 所有私有资源必须通过owner和所属Trip检查权限。owner从服务端会话取得，不信任客户端传来的ownerId。管理员仅能开通/禁用/撤销账号会话，不继承读取他人Trip、附件、位置、费用的权限。[S07]

@@ -1,6 +1,7 @@
 # P2B TransportEdge / 邻接失效历史 / 三层时间基础
 
-- 当前状态：`feature/p2b-transport-temporal` 实现完成；Draft PR #7 等待审查，未 Ready、未合并
+- 当前状态：`feature/p2b-transport-temporal` 实现及合并前时间安全修正完成；Draft PR #7
+  等待复核，未 Ready、未合并
 - 基线 main：`59e82dae31c49457fafb53351b5fe0d48e8330c8`
 - 基线 main CI：Run `35342774635`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / Extra High
@@ -35,8 +36,22 @@
 
 - 权威数据为 explicit instant (`timestamptz`) + IANA `timeZone`，不持久化 localDateTime 副本。
 - `PLANNED`、`ESTIMATED`、`ACTUAL` 分层唯一且互不覆盖。
-- 只接受带 `Z` 或 UTC offset 的明确 instant；本阶段不猜 DST ambiguous/nonexistent local time。
+- 共享纯解析器严格检查日期、闰年、时钟和合法 UTC offset；只接受带 `Z` 或 offset 的明确
+  instant，拒绝无时区、仅日期、非法 offset 与 `-00:00`。
+- `timestamptz(3)` 契约只接受最多三位小数秒，超出毫秒精度明确拒绝，不静默截断。
+- `timeZone` 只接受锁定 Node/ICU 环境支持的 IANA 命名区或 `UTC`；`+08:00` 不能作为
+  timeZone。本阶段仍不猜 DST ambiguous/nonexistent local time。
 - TimeValue 不承载 UserTimeIntent、约束、lock、传播或反推。
+
+## ACTUAL 保护
+
+- Node 已有 ACTUAL 时，普通 DELETE/REPLACE 由事务内检查以 `FACT_PROTECTED` 拒绝；事实、节点、
+  地点、Transport/History、DateOwnership 与 Trip version 均保持不变。
+- Node 与 Transport 的既有 ACTUAL 均不能由通用 setter 用不同事实覆盖；PLANNED/ESTIMATED 仍可
+  正常更新。
+- `DERIVED` / `SYSTEM_SUGGESTION` 不得写成 ACTUAL。ACTUAL 写与结构 mutation 共享 Trip 行锁和
+  base version，并发不能绕过保护。
+- 未来实际记录更正需要单独的显式纠错、审计和授权流程；本次未实现该流程。
 
 ## 验证状态
 
@@ -49,6 +64,10 @@
   `35347348752` 已通过：`verify = success`，`Compose verification = success`。
 - 该 CI 的 PostgreSQL 17 integration：7 files / 94 tests，全部通过；CI 证据不等同于本机部署
   验证。
+- 合并前安全修正代码提交 `b66e4e58b374630a02301067bf03916a0a72a467` 的 GitHub CI Run
+  `35351060374` 已通过：`verify = success`，`Compose verification = success`。
+- 安全修正验证：unit 13 files / 90 tests；PostgreSQL 17 integration 7 files / 101 tests，全部
+  通过。
 - 本机没有 Docker、psql、`TEST_DATABASE_URL` 或 5432 PostgreSQL；PostgreSQL integration 与
   Compose 由 GitHub CI 的隔离 PostgreSQL 17 环境验证，不把 CI 与本机部署混为一谈。
 

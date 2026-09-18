@@ -45,10 +45,30 @@ Place 即使 Node ID 不变，也以 `ENDPOINT_REPLACED` 归档该节点两侧�
 - `pointKind`：`ARRIVAL | DEPARTURE`；
 - `sourceKind`、可选 `sourceRef` 与 `observedAt`。
 
-不持久化第二份 localDateTime 真相。写入边界只接受带 `Z` 或明确 UTC offset 的 instant；只有
-当地钟点但没有唯一 instant 的输入保持不支持。Node 或 TransportEdge 恰好一个 subject 非空，
-并分别以 `(subject, pointKind, layer)` 唯一；更新 ESTIMATED 不覆盖 PLANNED，ACTUAL 也不覆盖
-前两层。
+不持久化第二份 localDateTime 真相。写入边界只接受带 `Z` 或明确 UTC offset 的 instant；共享
+domain 纯解析器严格检查 Gregorian 年月日与闰年、时分秒及 offset，不依赖 `Date.parse` 的宽松
+纠正。offset 上限为 `±14:00`，`-00:00`、无时区与仅日期输入均拒绝。数据库为
+`timestamptz(3)`，因此只接受最多三位小数秒，超出毫秒精度时明确失败，不静默截断。
+
+`timeZone` 只接受项目锁定 Node/ICU 环境明确列出的 IANA 命名时区，另显式保留 `UTC`；`+08:00`
+等纯 offset 不能充当 `timeZone`。instant 本身仍可携带合法 offset。只有当地钟点但没有唯一
+instant 的输入保持不支持。Node 或 TransportEdge 恰好一个 subject 非空，并分别以
+`(subject, pointKind, layer)` 唯一；更新 ESTIMATED 不覆盖 PLANNED，ACTUAL 也不覆盖前两层。
+
+## ACTUAL 最小保护
+
+P2B 尚无实际记录纠错流程。Node 只要已有任一 ACTUAL，普通 `DELETE_NODE` 与 `REPLACE_PLACE`
+就在持有 Trip 行锁的 mutation 事务内以 `FACT_PROTECTED` 拒绝；不会级联丢失实际事实，也不会
+让旧地点事实附着到新地点。拒绝时 Node、Place、Transport、History、DateOwnership、
+TemporalValue 与 Trip version 全部回滚不变。
+
+可信通用时间 setter 可以继续更新 PLANNED/ESTIMATED，但同一 subject + pointKind 的 ACTUAL
+存在后，不得用不同 instant、timeZone、source 或 observedAt 覆盖。Node 与 current Transport
+采用相同规则；`DERIVED` 和 `SYSTEM_SUGGESTION` 不能作为 ACTUAL 来源。ACTUAL 写与结构命令共享
+同一个 Trip 行锁和 `baseTripVersion`，并发时只有一个基于该版本的 mutation 能提交。
+
+这只是没有纠错工作流时的保守保护，不代表实际事实永久不可更正。未来如需纠正，必须单独设计
+显式授权、来源、审计与版本语义；本 PR 不通过清空 ACTUAL、放松 FK 或删除历史来模拟纠错。
 
 Transport 归档时，其所有 TemporalValue 同事务复制到强类型
 `TransportEdgeHistoryTimeValue`，然后 current value 随 edge 删除；历史时间不会因 current edge

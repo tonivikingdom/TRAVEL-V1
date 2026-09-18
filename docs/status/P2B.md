@@ -1,6 +1,6 @@
 # P2B TransportEdge / 邻接失效历史 / 三层时间基础
 
-- 当前状态：`feature/p2b-transport-temporal` 实现完成，等待 Draft PR 与 CI
+- 当前状态：`feature/p2b-transport-temporal` 实现完成；Draft PR #7 等待审查，未 Ready、未合并
 - 基线 main：`59e82dae31c49457fafb53351b5fe0d48e8330c8`
 - 基线 main CI：Run `35342774635`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / Extra High
@@ -45,6 +45,10 @@
 - 本机 unit tests：12 files / 63 tests，全部通过。
 - 本机 `pnpm test:integration` 已执行，但因没有 `TEST_DATABASE_URL` 在连接前明确停止；未把它
   记录为通过。
+- 实现提交 `90533f3b71e55b019ee766d6e1e054d7e8713562` 的 GitHub CI Run
+  `35347348752` 已通过：`verify = success`，`Compose verification = success`。
+- 该 CI 的 PostgreSQL 17 integration：7 files / 94 tests，全部通过；CI 证据不等同于本机部署
+  验证。
 - 本机没有 Docker、psql、`TEST_DATABASE_URL` 或 5432 PostgreSQL；PostgreSQL integration 与
   Compose 由 GitHub CI 的隔离 PostgreSQL 17 环境验证，不把 CI 与本机部署混为一谈。
 

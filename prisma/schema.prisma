@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../packages/persistence/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum InvitationStatus {
+  PENDING
+  CONSUMED
+  REVOKED
+}
+
+model User {
+  id              String           @id @default(uuid()) @db.Uuid
+  email           String
+  normalizedEmail String           @unique
+  role            UserRole         @default(USER)
+  status          UserStatus       @default(ACTIVE)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+  invitationsSent Invitation[]     @relation("InvitationInviter")
+  magicLinkTokens MagicLinkToken[]
+  sessions        Session[]
+  preference      UserPreference?
+
+  @@index([status])
+}
+
+model Invitation {
+  id              String           @id @default(uuid()) @db.Uuid
+  email           String
+  normalizedEmail String           @unique
+  invitedByUserId String           @db.Uuid
+  status          InvitationStatus @default(PENDING)
+  expiresAt       DateTime         @db.Timestamptz(3)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  consumedAt      DateTime?        @db.Timestamptz(3)
+  revokedAt       DateTime?        @db.Timestamptz(3)
+  invitedBy       User             @relation("InvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  magicLinkTokens MagicLinkToken[]
+
+  @@index([status, expiresAt])
+}
+
+model MagicLinkToken {
+  id           String      @id @default(uuid()) @db.Uuid
+  userId       String?     @db.Uuid
+  invitationId String?     @db.Uuid
+  tokenDigest  String      @unique @db.VarChar(64)
+  expiresAt    DateTime    @db.Timestamptz(3)
+  consumedAt   DateTime?   @db.Timestamptz(3)
+  createdAt    DateTime    @default(now()) @db.Timestamptz(3)
+  user         User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitation   Invitation? @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model Session {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  tokenDigest String    @unique @db.VarChar(64)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime  @db.Timestamptz(3)
+  revokedAt   DateTime? @db.Timestamptz(3)
+  lastSeenAt  DateTime? @db.Timestamptz(3)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+}
+
+model UserPreference {
+  userId       String   @id @db.Uuid
+  baseCurrency String   @default("CNY") @db.VarChar(3)
+  uiLanguage   String   @default("zh-CN") @db.VarChar(35)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model MagicLinkRequestBucket {
+  keyDigest       String   @id @db.VarChar(64)
+  windowStartedAt DateTime @db.Timestamptz(3)
+  requestCount    Int
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+}

@@ -9,6 +9,7 @@ dist
 **/dist
 coverage
 **/coverage
+packages/persistence/src/generated
 *.tsbuildinfo
 infra/compose/data
 infra/compose/worker-heartbeat

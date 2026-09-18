@@ -22,12 +22,22 @@ services:
       dockerfile: infra/docker/Dockerfile
       target: api
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
+      APP_ENV: ${APP_ENV:-development}
       API_HOST: 0.0.0.0
       API_PORT: 3000
+      AUTH_PUBLIC_BASE_URL: ${AUTH_PUBLIC_BASE_URL:-http://127.0.0.1:3000}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DEFAULT_BASE_CURRENCY: ${DEFAULT_BASE_CURRENCY:-CNY}
+      DEFAULT_UI_LANGUAGE: ${DEFAULT_UI_LANGUAGE:-zh-CN}
+      INVITATION_TTL_SECONDS: ${INVITATION_TTL_SECONDS:-604800}
+      MAGIC_LINK_RATE_LIMIT_MAX_REQUESTS: ${MAGIC_LINK_RATE_LIMIT_MAX_REQUESTS:-5}
+      MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS: ${MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS:-300}
+      MAGIC_LINK_TTL_SECONDS: ${MAGIC_LINK_TTL_SECONDS:-900}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-capture}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-2592000}
     healthcheck:
       test:
         [
@@ -49,8 +59,8 @@ services:
       dockerfile: infra/docker/Dockerfile
       target: worker
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       WORKER_HEARTBEAT_FILE: /tmp/travel-worker-heartbeat.json
@@ -62,6 +72,18 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    restart: 'no'
 
 volumes:
   postgres-data:

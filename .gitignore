@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 coverage/
+packages/persistence/src/generated/
 .env
 .env.*
 !.env.*.example

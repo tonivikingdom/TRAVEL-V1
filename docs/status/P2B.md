@@ -1,13 +1,13 @@
 # P2B TransportEdge / 邻接失效历史 / 三层时间基础
 
-- 当前状态：`feature/p2b-transport-temporal` 实现及合并前时间安全修正完成；Draft PR #7
-  等待复核，未 Ready、未合并
-- 基线 main：`59e82dae31c49457fafb53351b5fe0d48e8330c8`
-- 基线 main CI：Run `35342774635`，`verify` 与 `Compose verification` 均为 success
+- 当前状态：PR #7 已 Squash Merge，P2B 已正式进入 main；远程
+  `feature/p2b-transport-temporal` 已删除
+- 正式 main：`50866c4aa4ec122e4522920dcf2e53b551de7dfb`
+- 正式 main CI：Run `35353581612`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / Extra High
 - 备选：GPT-5.6 Luna / Max，仅用于范围明确的小修
 - 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
-- P3、P4、正式 UI、Provider 与 Production 均未授权
+- P3/P4 代码、正式 UI、Provider 与 Production 均未授权；后续仅获授权落档 O-03 已确认部分
 
 ## 数据与事务
 
@@ -68,11 +68,16 @@
   `35351060374` 已通过：`verify = success`，`Compose verification = success`。
 - 安全修正验证：unit 13 files / 90 tests；PostgreSQL 17 integration 7 files / 101 tests，全部
   通过。
+- 最终 PR HEAD `f4972ffb9dc5b2a63d1043e33d3836f3b678bd44` 的 GitHub CI Run
+  `35351609220` 已通过：`verify = success`，`Compose verification = success`。
+- PR #7 Squash Merge 后 main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb` 的 GitHub CI
+  Run `35353581612` 已通过：`verify = success`，`Compose verification = success`。
 - 本机没有 Docker、psql、`TEST_DATABASE_URL` 或 5432 PostgreSQL；PostgreSQL integration 与
   Compose 由 GitHub CI 的隔离 PostgreSQL 17 环境验证，不把 CI 与本机部署混为一谈。
 
 ## 停止点
 
-O-03 与 O-07 仍未解决。P2B 不实现 Provider、路线查询、Preview/Adopt、时间传播/反推、
-UserTimeIntent、风险、自动生命周期、跨日移动、Trip merge/copy/share、Undo 或正式 UI；P3/P4
-均未进入。
+O-03 已对跨时区 timeline、跨日交通、日期回拨、重复日期卡与当前当地时区依据作部分确认，
+但 DST 当地时间输入、最终 sequence/DayOccurrence 结构和迁移仍未解决；O-07 仍未解决。P2B
+不实现 Provider、路线查询、Preview/Adopt、时间传播/反推、UserTimeIntent、风险、自动生命周期、
+跨日移动、Trip merge/copy/share、Undo 或正式 UI；P3/P4 代码均未进入。

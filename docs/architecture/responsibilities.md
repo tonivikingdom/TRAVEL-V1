@@ -38,7 +38,7 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 - O-01/O-02 已确认；P2A 建立 Trip、DateOwnership、Place 与 ItineraryNode migration/API。
 - 有效日期范围由最早至最晚有效行程内容自然日决定；范围内所有自然日（含中间空白日）归属该 Trip。空 Trip 不占用自然日，创建时的 `start date` 只是规划/编辑锚点。
 - 首尾空白日仅可作为临时编辑态；没有有效内容就离开编辑时自动消失，首尾最后一个有效内容被移除后范围向内收缩。临时首尾日不创建 `DateOwnership`，V1 不提供保留开关。
-- 有效行程内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体；note、todo、普通备注、Attachment、Expense、NotificationEvent 与偏好单独存在时不撑开范围。跨午夜/跨时区投影仍受 O-03 约束。
+- 有效行程内容包括未来的 Visit、FreeAction、Transport 或其他真实行程实体；note、todo、普通备注、Attachment、Expense、NotificationEvent 与偏好单独存在时不撑开范围。跨午夜/跨时区投影遵守 O-03 已确认语义，但最终 sequence/DayOccurrence 实现仍待设计。
 - 同一账号同一自然日最多属于一个 Trip。冲突必须明确返回，不能重复归属、静默覆盖或自动合并；日期锚点、有效范围与 `DateOwnership` 必须是可区分的概念。
 - `DateOwnership(ownerUserId, localDate)` 是唯一日期事实；Day 是 effective range、ownership 与
   nodes 的 API projection，不建 Day 表。
@@ -61,6 +61,23 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   副本，也不承载用户约束。
 - Transport 归档时将相关时间值复制到强类型历史表；三层时间不会因 current edge 删除而丢失。
 - P2B 不公开任意时间写 HTTP API，不实现传播、反推、Provider、Preview/Adopt、风险或生命周期。
+
+## Timeline 与日期卡（O-03 已确认部分，仅规格）
+
+- Domain 的真实先后关系必须使用独立 timeline sequence；有明确 instant 时按 instant 判断时间先后。
+  `localDate` / `localTime` 是当地显示信息，不能承担整趟 Trip 的排序职责。
+- 日期卡投影必须保留 sequence 与独立卡身份。文档暂称 `DayOccurrence`；同一 `localDate` 可出现
+  任意多张卡，application command 将来必须引用具体 occurrence，而不是只传日期值。
+- `DateOwnership` 继续负责用户自然日到 Trip 的唯一归属。同一 Trip 的重复日期卡共享一份自然日
+  归属；另一 Trip 仍不能占用该日期。
+- 连续跨日 Transport 始终是单一实体，只在真实经过的 DayOccurrence 中重复投影。完全被 Transport
+  覆盖的中间自然日进入范围和 ownership，但拒绝普通 Place/FreeAction 内容。
+- 跨日期线导致 localDate 回拨时保留真实日期并按 sequence 生成新卡；跨时区但 localDate 不变、
+  仅钟点回拨时仍在同一卡继续，由 Transport 显示时区切换。
+- 执行阶段的当前当地时区来源优先级为可靠设备定位、设备时区、行程地点时区上下文；服务端默认
+  时区不得参与。位置/时区上下文不能生成 Visit 完成、具体地点到达或 ACTUAL 事实。
+- 当前 P2B schema/排序未在本次文档任务中修改。DST 重复/不存在当地时间、最终 DayOccurrence
+  结构、sequence 迁移和跨日 Transport 的存储/投影仍是实现前闸门。
 
 ## 站内通知（P1B2）
 

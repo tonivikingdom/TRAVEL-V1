@@ -27,7 +27,7 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 | User / Invitation / Session | 受控账号、角色、会话失效 | P1 |
 | UserPreference | 基准货币、语言分别保存 | P1必要字段 |
 | Trip | 所有者、名称、默认人数、有效日期范围、生命周期 | P2；O-01/O-02规则已确认 |
-| Day / DateOwnership | 日期组织、用户内日期归属约束 | P2；按已确认 O-01/O-02 实现 |
+| DayOccurrence / Day projection / DateOwnership | sequence 中的日期卡身份、显示投影、用户内自然日归属约束 | P2 已实现基础 Day projection/DateOwnership；DayOccurrence 为 O-03 架构概念，P3 前再定结构 |
 | Place | 真实地图地点身份/坐标，不是每次访问 | P2 |
 | Visit | 某次出现；PLACE或FREE_ACTION；来源与执行状态 | P2 |
 | TransportEdge / AdoptedRoute | 相邻连接、已采用快照、历史失效 | P2/P4 |
@@ -51,6 +51,20 @@ Day 仍为 projection，不建立独立表。P2B 只增加当前相邻 Transport
 - Trip note、todo、普通备注、Attachment、Expense、NotificationEvent 或用户偏好单独存在时不撑开日期范围；未来若 Task/Expense 附着于有效行程实体，由该实体决定日期范围。跨午夜、跨日期线与跨时区 Day 投影继续受 O-03 约束。
 - 同一账号同一自然日最多属于一个 Trip。范围扩展遇到已占用日期时必须返回明确冲突，不重复占用、不静默覆盖、不自动合并；未来再由用户流程选择合并、调整或取消。
 
+## 2.2 O-03 timeline 与日期卡（部分确认，仅规格）
+
+- 真实行程顺序由独立 timeline sequence 决定；已有明确 instant 时，真实时间先后按 instant 判断。
+  `localDate` / `localTime` 只负责当地显示，不能作为整趟 Trip 的最终排序键。
+- 跨国际日期线可使日期卡按 sequence 出现 `1月9日 → 1月10日 → 1月9日`，同一个
+  `localDate` 可以出现任意多张独立日期卡。文档用 `DayOccurrence` 表示“有独立身份的日期卡”
+  这一概念，正式表名、字段和迁移方案尚未确定。
+- 新增/编辑内容必须定位到具体 DayOccurrence，不能只用 `localDate` 决定目标卡。日期卡顺序来自
+  timeline/sequence，不能按日期数字重排或把同日期卡合并。
+- `DateOwnership` 仍是用户自然日到 Trip 的唯一归属；同一 Trip 有多张同日期卡时仍只有一份
+  日期归属，另一 Trip 不能占用该自然日。
+- 当前 P2B 的 `localDate + position` 是基础阶段实现。在正式支持上述场景前必须升级为独立
+  sequence 语义；本次只记录边界，不修改现有 schema 或代码。
+
 ## 3. 数据归属与权限
 所有私有资源必须通过owner和所属Trip检查权限。owner从服务端会话取得，不信任客户端传来的ownerId。管理员仅能开通/禁用/撤销账号会话，不继承读取他人Trip、附件、位置、费用的权限。[S07]
 
@@ -70,12 +84,29 @@ P2B 的 resolved `TimeValue` 权威字段为明确 `instant`、`timeZone`（IANA
 输出时派生，不持久化第二份时间真相；持续时长用真实时间点之差计算，不使用服务器默认时区。
 用户目标、约束、最低停留与 lock 属于后续 `UserTimeIntent / TimeConstraint`，不能塞入 TimeValue。
 
-没有Trip级统一时区；生命周期日期的调度基准不能暗用服务器UTC，参见O-03。对夏令时重复/不存在钟点、跨日期线不确定归属，返回明确歧义，而不是自动纠正成看似有效的时间。
+没有 Trip 级统一时区；生命周期日期的调度基准不能暗用服务器 UTC，参见 O-03。跨日期线的
+timeline/日期卡显示规则已确认，但最终 sequence/DayOccurrence 实现仍待设计；对夏令时重复或
+不存在钟点、无明确 instant 的当地输入返回明确歧义，不自动纠正成看似有效的时间。
 
-## 5. 一个节点，不复制跨日实体
-跨日Visit或Transport是同一实体，在覆盖的Day里投影显示。费用不因重复显示而重复计数。跨日交通由真实出发/到达事实判断，不让用户手动给普通卡贴跨日标签。
+## 5. 一个实体，按 sequence 投影到日期卡
 
-不要只比较终点本地日期是否“大于”起点本地日期来推时长；跨时区航班可能本地到达钟点看起来更早。首轮先完成同一时区跨午夜与UTC时长测试；跨日期线Day投影待O-03。
+跨日 Visit 或 Transport 是同一业务实体，在它真实经过的日期卡中投影显示；重复显示不复制
+数据库实体，也不重复费用、时间、延误/取消状态或备注。修改或删除一次，所有投影同步变化。
+
+连续 Transport 跨越多个自然日时，被它完整覆盖的中间日期仍需投影日期卡，可概念性称为
+“交通占用日”。该日期进入 Trip 正式范围并由 `DateOwnership` 覆盖，但不能再加入 Place、
+FreeAction 或其他普通行程内容。本轮不锁死数据库 enum 或关系设计。
+
+Transport 与日期卡的显示关系依赖实际 timeline/sequence，不能只按 `localDate` 匹配；如果
+同一日期在 timeline 中重复出现，Transport 只出现在它实际经过的那些 DayOccurrence。
+
+跨时区但 localDate 不变、当地钟点回拨时，不因回拨本身创建第二张同日期卡；同一卡允许显示
+较大的钟点后跟较小钟点，并在发生变化的 Transport 上解释“时区切换/当地时间回拨”。只有真正
+发生跨时区变化的 Transport 卡显示出发/到达时区，后续普通卡不重复显示时区缩写。
+
+不要比较终点本地日期或钟点大小来计算时长；跨时区航班可能当地到达钟点更早，真实持续时长
+使用 instants。跨日期线导致 localDate 回拨时保留真实日期，并按 sequence 生成新的日期回拨卡，
+不得为视觉递增篡改日期。
 
 ## 6. 行程状态与监控状态分开
 Trip生命周期提案：PLANNED、IN_PROGRESS、AWAITING_OUTCOME、FINISHED、NOT_TAKEN。FINISHED另带finishReason NORMAL/INCOMPLETE，不把不完整伪装成未去。

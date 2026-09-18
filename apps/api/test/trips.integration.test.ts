@@ -673,6 +673,10 @@ function authConfig() {
 }
 
 async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
+  await managed.client.transportEdgeHistoryTimeValue.deleteMany();
+  await managed.client.transportEdgeHistory.deleteMany();
+  await managed.client.temporalValue.deleteMany();
+  await managed.client.transportEdge.deleteMany();
   await managed.client.itineraryNode.deleteMany();
   await managed.client.dateOwnership.deleteMany();
   await managed.client.trip.deleteMany();

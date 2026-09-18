@@ -35,6 +35,10 @@ describe('TripService', () => {
       executeCommand: vi.fn(async (): Promise<TripMutationResult> => ({
         status: 'NOT_FOUND',
       })),
+      setTemporalValue: vi.fn(async (): Promise<TripMutationResult> => ({
+        status: 'NOT_FOUND',
+      })),
+      listTransportHistoryOwned: vi.fn(async () => null),
     };
     service = new TripService(repository);
   });
@@ -119,6 +123,83 @@ describe('TripService', () => {
     expect(received).not.toHaveProperty('place');
   });
 
+  it('projects ACTIVE, MISSING, NOT_APPLICABLE, and runtime-origin connections', async () => {
+    const first = placeVisit('2030-10-01', 0, 'A');
+    const second = placeVisit('2030-10-01', 1, 'B');
+    const free = freeAction('2030-10-01', 2);
+    const third = placeVisit('2030-10-01', 3, 'C');
+    const fourth = placeVisit('2030-10-01', 4, 'D');
+    vi.mocked(repository.findOwnedById).mockResolvedValue({
+      ...emptyTripForId(),
+      effectiveStartDate: utcDate('2030-10-01'),
+      effectiveEndDate: utcDate('2030-10-01'),
+      ownedDates: [utcDate('2030-10-01')],
+      nodes: [first, second, free, third, fourth],
+      transportEdges: [manualTransport(first.id, second.id)],
+    });
+
+    const result = await service.getTrip(actor, tripId);
+    expect(result.connections.map((connection) => connection.state)).toEqual([
+      'ACTIVE',
+      'NOT_APPLICABLE',
+      'RUNTIME_ORIGIN_REQUIRED',
+      'MISSING',
+    ]);
+    expect(result.connections[0]?.transport).toMatchObject({
+      mode: 'RAIL',
+      fixedService: false,
+    });
+  });
+
+  it('keeps fixedService independent from transport mode', async () => {
+    let received: RepositoryTripCommand | undefined;
+    vi.mocked(repository.executeCommand).mockImplementation(async (input) => {
+      received = input.command;
+      return { status: 'SUCCESS', trip: emptyTripForId() };
+    });
+    await service.executeCommand(actor, tripId, 1, {
+      type: 'SET_MANUAL_TRANSPORT',
+      fromNodeId: randomUUID(),
+      toNodeId: randomUUID(),
+      mode: 'RAIL',
+      fixedService: false,
+    });
+    expect(received).toMatchObject({ mode: 'RAIL', fixedService: false });
+  });
+
+  it('accepts only resolved instants with an explicit offset and IANA zone', async () => {
+    const subject = { type: 'NODE' as const, nodeId: randomUUID() };
+    vi.mocked(repository.setTemporalValue).mockResolvedValue({
+      status: 'SUCCESS',
+      trip: emptyTripForId(),
+    });
+    await service.setResolvedTemporalValue(actor, tripId, 1, subject, {
+      layer: 'PLANNED',
+      pointKind: 'ARRIVAL',
+      instant: '2030-10-01T10:00:00+08:00',
+      timeZone: 'Asia/Shanghai',
+      sourceKind: 'USER_VALUE',
+    });
+    expect(repository.setTemporalValue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: expect.objectContaining({
+          instant: new Date('2030-10-01T02:00:00.000Z'),
+          timeZone: 'Asia/Shanghai',
+        }),
+      }),
+    );
+
+    await expect(
+      service.setResolvedTemporalValue(actor, tripId, 2, subject, {
+        layer: 'ACTUAL',
+        pointKind: 'ARRIVAL',
+        instant: '2030-10-01T10:00:00',
+        timeZone: 'Asia/Shanghai',
+        sourceKind: 'USER_VALUE',
+      }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_SCENARIO' });
+  });
+
   it('rejects invalid custom Place coordinates before persistence', async () => {
     await expect(
       service.executeCommand(actor, tripId, 1, {
@@ -179,6 +260,7 @@ function emptyTrip(input: {
     updatedAt: timestamp,
     ownedDates: [],
     nodes: [],
+    transportEdges: [],
   };
 }
 
@@ -204,6 +286,50 @@ function freeAction(localDate: string, position: number) {
     source: 'USER_PLANNED' as const,
     createdAt: timestamp,
     updatedAt: timestamp,
+    timeValues: [],
+  };
+}
+
+function placeVisit(localDate: string, position: number, name: string) {
+  const timestamp = new Date('2030-01-01T00:00:00.000Z');
+  return {
+    id: randomUUID(),
+    tripId,
+    kind: 'PLACE_VISIT' as const,
+    localDate: utcDate(localDate),
+    position,
+    place: {
+      id: randomUUID(),
+      ownerUserId,
+      name,
+      latitude: 31.2304,
+      longitude: 121.4737,
+      address: null,
+      createdAt: timestamp,
+    },
+    note: null,
+    source: 'USER_PLANNED' as const,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    timeValues: [],
+  };
+}
+
+function manualTransport(fromNodeId: string, toNodeId: string) {
+  const timestamp = new Date('2030-01-01T00:00:00.000Z');
+  return {
+    id: randomUUID(),
+    tripId,
+    fromNodeId,
+    toNodeId,
+    mode: 'RAIL' as const,
+    fixedService: false,
+    serviceLabel: null,
+    note: null,
+    source: 'MANUAL' as const,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    timeValues: [],
   };
 }
 

@@ -14,3 +14,5 @@ Thumbs.db
 infra/compose/data/
 infra/compose/worker-heartbeat/
 infra/compose/mail-capture/
+infra/compose/object-storage/
+.travel-object-storage/

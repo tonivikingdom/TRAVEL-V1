@@ -45,6 +45,22 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function parseLastJsonLine(output, description) {
+  const line = output
+    .trim()
+    .split(/\r?\n/u)
+    .filter((entry) => entry.trim() !== '')
+    .at(-1);
+  if (line === undefined) {
+    throw new Error(`${description} produced no output`);
+  }
+  try {
+    return JSON.parse(line);
+  } catch {
+    throw new Error(`${description} did not produce a JSON result`);
+  }
+}
+
 function projectName() {
   const runId = process.env.GITHUB_RUN_ID ?? String(process.pid);
   return `travel-v1-ci-${runId}`.toLowerCase().replace(/[^a-z0-9-]/gu, '-');
@@ -284,6 +300,70 @@ async function verifyCompose(compose, composeQuiet, env) {
     throw new Error('Worker-delivered synthetic Magic Link was not consumable');
   }
 
+  const storageOwnerEnvironment = `SYNTHETIC_STORAGE_OWNER_EMAIL=${adminEmail}`;
+  const storageWrite = parseLastJsonLine(
+    await composeQuiet(
+      'exec',
+      '--no-TTY',
+      '-e',
+      storageOwnerEnvironment,
+      'api',
+      'pnpm',
+      'tsx',
+      'scripts/verify-object-storage.ts',
+      'write',
+    ),
+    'Synthetic object write',
+  );
+  if (typeof storageWrite.objectId !== 'string') {
+    throw new Error('Synthetic object write did not return an object ID');
+  }
+  await compose('stop', '--timeout', '10', 'api');
+  await compose('rm', '--force', 'api');
+  await compose('up', '--detach', 'api');
+  await waitFor('API readiness after container recreation', () =>
+    expectHttpStatus(apiPort, '/health/ready', 200),
+  );
+  const storageVerify = parseLastJsonLine(
+    await composeQuiet(
+      'exec',
+      '--no-TTY',
+      '-e',
+      storageOwnerEnvironment,
+      'api',
+      'pnpm',
+      'tsx',
+      'scripts/verify-object-storage.ts',
+      'verify',
+      storageWrite.objectId,
+    ),
+    'Synthetic object verification',
+  );
+  if (
+    storageVerify.objectId !== storageWrite.objectId ||
+    storageVerify.sha256 !== storageWrite.sha256
+  ) {
+    throw new Error('Synthetic object changed across API container recreation');
+  }
+  const storageDelete = parseLastJsonLine(
+    await composeQuiet(
+      'exec',
+      '--no-TTY',
+      '-e',
+      storageOwnerEnvironment,
+      'api',
+      'pnpm',
+      'tsx',
+      'scripts/verify-object-storage.ts',
+      'delete',
+      storageWrite.objectId,
+    ),
+    'Synthetic object deletion',
+  );
+  if (storageDelete.state !== 'DELETED') {
+    throw new Error('Synthetic object metadata was not marked DELETED');
+  }
+
   await compose('stop', '--timeout', '10', 'worker');
   const recoveryKey = `synthetic-lease-recovery-${Date.now()}`;
   await compose(
@@ -441,7 +521,7 @@ async function verifyCompose(compose, composeQuiet, env) {
   );
 
   process.stdout.write(
-    'Compose verification passed: live/ready, async Job delivery, lease recovery, outage/recovery, worker SIGTERM, and named-volume persistence.\n',
+    'Compose verification passed: live/ready, async Job delivery, lease recovery, outage/recovery, worker SIGTERM, PostgreSQL persistence, and private object-volume write/restart/delete.\n',
   );
 }
 

@@ -633,7 +633,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
     providerResult = {
       status: 'SUCCESS',
-      candidates: [candidate('2030-10-01T12:00:00Z', '2030-10-01T13:00:00Z')],
+      candidates: [replacementSingleCandidate('single-route-2')],
     };
     const secondPreview = await createPreview(
       userA,
@@ -761,7 +761,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
     providerResult = {
       status: 'SUCCESS',
-      candidates: [candidate('2030-10-01T12:00:00Z', '2030-10-01T13:00:00Z')],
+      candidates: [replacementSingleCandidate('multi-single-2')],
     };
     const secondPreview = await createPreview(
       userA,
@@ -781,7 +781,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
     providerResult = {
       status: 'SUCCESS',
-      candidates: [candidate('2030-10-01T14:00:00Z', '2030-10-01T15:00:00Z')],
+      candidates: [replacementSingleCandidate('multi-single-3')],
     };
     const thirdPreview = await createPreview(
       userA,
@@ -1228,6 +1228,29 @@ function candidate(
       },
     ],
     fare: null,
+  };
+}
+
+function replacementSingleCandidate(
+  suffix: string,
+): Extract<RouteProviderResult, { status: 'SUCCESS' }>['candidates'][number] {
+  const replacement = candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z');
+  const [leg] = replacement.legs;
+  if (leg === undefined) {
+    throw new Error('Synthetic replacement candidate must contain one leg.');
+  }
+
+  return {
+    ...replacement,
+    candidateId: `candidate-${suffix}`,
+    providerCandidateRef: `SYNTHETIC_REF_${suffix}`,
+    legs: [
+      {
+        ...leg,
+        serviceLabel: `SYNTHETIC-${suffix}`,
+        providerRef: `SYNTHETIC_LEG_${suffix}`,
+      },
+    ],
   };
 }
 

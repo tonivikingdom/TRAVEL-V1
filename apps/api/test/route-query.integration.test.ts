@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AuthService,
   digestOpaqueToken,
+  hashRoutePreviewPayload,
   RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
@@ -11,6 +12,7 @@ import {
   type Actor,
   type RouteProviderQueryInput,
   type RouteProviderResult,
+  type StoredRoutePreviewPayload,
 } from '@travel/application';
 import type {
   RoutePreviewView,
@@ -1649,21 +1651,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     ).toBe(0);
   });
 
-  it('rolls back prior route replacement when a later adoption fails after lifecycle transition', async () => {
-    let initial = await createTrip(userA);
-    initial = await addVisit(userA, initial, 'First occurrence', '2030-10-01');
-    initial = await command(userA, initial, {
-      type: 'ADD_PLACE_VISIT',
-      targetDay: { type: 'NEW', localDate: '2030-10-01', sequence: 1 },
-      position: 0,
-      place: {
-        type: 'CUSTOM',
-        name: 'Repeated occurrence',
-        latitude: 34.0522,
-        longitude: -118.2437,
-      },
-    });
-    const [from, to] = initial.days.flatMap((day) => day.nodes);
+  it('rolls back prior route lifecycle when a later adoption fails mid-transaction', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
     const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
     const first = await adoptSuccessfully(
       userA,
@@ -1672,21 +1662,34 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       'synthetic-adopt-rollback-1',
     );
 
-    providerResult = dateRollbackTransferCandidate();
     const secondPreview = await createPreview(
       userA,
       first.trip,
       from!.id,
       to!.id,
     );
-    let otherTrip = await createTrip(userA);
-    otherTrip = await addVisit(
-      userA,
-      otherTrip,
-      'Ownership blocker',
-      '2030-10-02',
-    );
-    expect(otherTrip.days[0]!.localDate).toBe('2030-10-02');
+    const stored = await managed.client.routePreview.findUniqueOrThrow({
+      where: { id: secondPreview.previewId },
+    });
+    const originalPayload =
+      stored.previewPayload as unknown as StoredRoutePreviewPayload;
+    const invalidPayload: StoredRoutePreviewPayload = {
+      ...originalPayload,
+      changeSummary: {
+        ...originalPayload.changeSummary,
+        proposedSegments: originalPayload.changeSummary.proposedSegments.map(
+          (segment, index) =>
+            index === 0 ? { ...segment, fromRef: 'UNKNOWN_REF' } : segment,
+        ),
+      },
+    };
+    await managed.client.routePreview.update({
+      where: { id: secondPreview.previewId },
+      data: {
+        previewPayload: invalidPayload as never,
+        previewHash: hashRoutePreviewPayload(invalidPayload),
+      },
+    });
     const rejected = await adopt(
       userA,
       first.trip,
@@ -1694,7 +1697,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       'synthetic-adopt-rollback-2',
     );
     expect(rejected.statusCode).toBe(409);
-    expect(rejected.json()).toMatchObject({ error: { code: 'DATE_OWNED' } });
+    expect(rejected.json()).toMatchObject({
+      error: { code: 'PREVIEW_STALE' },
+    });
     expect(
       await managed.client.adoptedRoute.findMany({
         where: { tripId: initial.id },

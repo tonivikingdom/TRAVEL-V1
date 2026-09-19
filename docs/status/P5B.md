@@ -1,6 +1,6 @@
 # P5B Internal Acceptance & Environment Guardrails
 
-- 当前状态：在 `feature/p5b-internal-acceptance` 实施，保持 Draft，不合并
+- 当前状态：Draft PR #17 已创建，保持 Draft，不合并
 - 正式基线 main：`cbf9fe2a727011e4708585ef259c3324c05b4362`
 - 基线 main CI：Run `35435976817`，`verify` 与 `Compose verification` 均为 success
 - 模型建议：Sol / High；备选 Terra / High
@@ -13,6 +13,17 @@
 Route Query/Preview/Adopt/Undo、私有资源隔离、VERSION_CONFLICT、Worker 恢复、
 PostgreSQL 中断恢复和 Provider 局部故障。轻量并发的延迟只作观察数据，
 不构成性能 SLA 或容量承诺。
+
+## 实际验证证据
+
+- 初始实现验证 CI Run `35437285119`：`verify`、`Compose verification`、
+  `P5B acceptance` 均为 success。
+- Unit：26 files / 217 tests success。
+- PostgreSQL integration：15 files / 161 tests success（persistence 9/31，API 6/130）。
+- P5B acceptance：5 users，200/200 观察请求成功，isolation failures = 0，
+  unexpected 5xx = 0，network failures = 0。
+- 延迟观察：median `383.18ms`，p95 `589.24ms`，max `607.79ms`。这些数值不是 SLA。
+- 本机未安装 Docker/PostgreSQL；容器与数据库证据来自隔离的 GitHub CI。
 
 ## 数据安全
 

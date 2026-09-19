@@ -1,7 +1,7 @@
 import type {
-  AdoptRoutePreviewRequest,
-  AdoptRoutePreviewResponse,
   OperationReceiptView,
+  UndoRouteAdoptionRequest,
+  UndoRouteAdoptionResponse,
 } from '@travel/contracts';
 
 import { authorize, type Actor } from './authorization.js';
@@ -11,31 +11,26 @@ import {
   type Clock,
   type OperationReceiptRecord,
   type RoutePlanningRepository,
+  type UndoRouteAdoptionResult,
 } from './route-planning-ports.js';
-import { hashRouteAdoptionRequest } from './route-snapshot.js';
+import { hashRouteUndoRequest } from './route-snapshot.js';
 import { TripService } from './trip-service.js';
 
-export class RouteAdoptionService {
-  private readonly clock: Clock;
-  private readonly undoWindowSeconds: number;
-
+export class RouteUndoService {
   constructor(
     private readonly planningRepository: RoutePlanningRepository,
     private readonly tripService: TripService,
-    options: RouteAdoptionServiceOptions,
-  ) {
-    this.clock = options.clock ?? systemClock;
-    this.undoWindowSeconds = requireUndoWindow(options.undoWindowSeconds);
-  }
+    private readonly clock: Clock = systemClock,
+  ) {}
 
-  async adoptPreview(
+  async undoAdoption(
     actor: Actor,
     tripId: string,
-    previewId: string,
-    input: AdoptRoutePreviewRequest,
-  ): Promise<AdoptRoutePreviewResponse> {
+    operationReceiptId: string,
+    input: UndoRouteAdoptionRequest,
+  ): Promise<UndoRouteAdoptionResponse> {
     requireUuid(tripId, 'tripId');
-    requireUuid(previewId, 'previewId');
+    requireUuid(operationReceiptId, 'operationReceiptId');
     const baseTripVersion = positiveInteger(
       input.baseTripVersion,
       'baseTripVersion',
@@ -45,30 +40,28 @@ export class RouteAdoptionService {
       kind: 'PRIVATE_RESOURCE',
       ownerUserId: actor.userId,
     });
-    if (this.planningRepository.adoptPreview === undefined) {
+    if (this.planningRepository.undoAdoption === undefined) {
       throw new ApplicationError(
         'SERVICE_UNAVAILABLE',
-        '路线采用持久化能力尚未配置。',
+        '路线撤销持久化能力尚未配置。',
         503,
         true,
       );
     }
-    const now = this.clock.now();
-    const result = await this.planningRepository.adoptPreview({
+    const result = await this.planningRepository.undoAdoption({
       ownerUserId: actor.userId,
       tripId,
-      previewId,
+      targetOperationReceiptId: operationReceiptId,
       baseTripVersion,
       idempotencyKey,
-      requestHash: hashRouteAdoptionRequest({
+      requestHash: hashRouteUndoRequest({
         tripId,
-        previewId,
+        targetOperationReceiptId: operationReceiptId,
         baseTripVersion,
       }),
-      now,
-      undoExpiresAt: new Date(now.getTime() + this.undoWindowSeconds * 1_000),
+      now: this.clock.now(),
     });
-    if (result.status !== 'SUCCESS') throw adoptionError(result.status);
+    if (result.status !== 'SUCCESS') throw undoError(result.status);
     return {
       operationReceipt: toReceiptView(result.receipt),
       trip: await this.tripService.getTrip(actor, tripId),
@@ -84,63 +77,36 @@ function toReceiptView(record: OperationReceiptRecord): OperationReceiptView {
   };
 }
 
-export interface RouteAdoptionServiceOptions {
-  readonly undoWindowSeconds: number;
-  readonly clock?: Clock;
-}
-
-function requireUndoWindow(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 1 || value > 604_800) {
-    throw new Error('undoWindowSeconds must be an integer from 1 to 604800');
-  }
-  return value;
-}
-
-function adoptionError(
-  status:
-    | 'NOT_FOUND'
-    | 'VERSION_CONFLICT'
-    | 'IDEMPOTENCY_CONFLICT'
-    | 'PREVIEW_STALE'
-    | 'PREVIEW_BLOCKED'
-    | 'FACT_PROTECTED'
-    | 'DATE_OWNED',
+function undoError(
+  status: Exclude<UndoRouteAdoptionResult['status'], 'SUCCESS'>,
 ): ApplicationError {
   switch (status) {
     case 'NOT_FOUND':
-      return new ApplicationError('NOT_FOUND', '路线预览资源不存在。', 404);
-    case 'VERSION_CONFLICT':
-      return new ApplicationError(
-        'VERSION_CONFLICT',
-        '行程已被其他设备更新，请重新生成路线预览。',
-        409,
-      );
+      return new ApplicationError('NOT_FOUND', '路线操作记录不存在。', 404);
     case 'IDEMPOTENCY_CONFLICT':
       return new ApplicationError(
         'IDEMPOTENCY_CONFLICT',
-        '该幂等键已用于不同的路线采用请求。',
+        '该幂等键已用于不同的路线撤销请求。',
         409,
       );
-    case 'PREVIEW_STALE':
+    case 'UNDO_CONFLICT':
       return new ApplicationError(
-        'PREVIEW_STALE',
-        '路线预览已过期或不再满足当前安全条件。',
+        'UNDO_CONFLICT',
+        '路线采用后已有新修改或事实，无法安全撤销。',
         409,
       );
-    case 'PREVIEW_BLOCKED':
+    case 'UNDO_EXPIRED':
       return new ApplicationError(
-        'PREVIEW_BLOCKED',
-        '路线预览包含不能自动移除的受保护节点。',
+        'UNDO_EXPIRED',
+        '路线撤销窗口已经过期。',
         409,
       );
-    case 'FACT_PROTECTED':
+    case 'UNDO_UNAVAILABLE':
       return new ApplicationError(
-        'FACT_PROTECTED',
-        '已有实际事实，不能由新路线覆盖。',
+        'UNDO_UNAVAILABLE',
+        '该路线操作没有可安全使用的撤销依据。',
         409,
       );
-    case 'DATE_OWNED':
-      return new ApplicationError('DATE_OWNED', '日期已属于另一趟行程。', 409);
   }
 }
 

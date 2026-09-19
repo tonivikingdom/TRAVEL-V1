@@ -156,9 +156,10 @@ export interface AdoptedRouteRecord {
   readonly candidateSnapshotId: string;
   readonly candidateHash: string;
   readonly policyVersion: string;
-  readonly status: 'ACTIVE' | 'REPLACED';
+  readonly status: 'ACTIVE' | 'REPLACED' | 'UNDONE';
   readonly createdAt: Date;
   readonly replacedAt: Date | null;
+  readonly undoneAt: Date | null;
 }
 
 export type RepositoryPlaceInput =

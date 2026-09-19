@@ -213,31 +213,108 @@ export interface AdoptRoutePreviewRequest {
   readonly idempotencyKey: string;
 }
 
+export interface RouteAdoptDayOccurrenceSnapshot {
+  readonly id: string;
+  readonly localDate: string;
+  readonly sequence: number;
+}
+
+export interface RouteAdoptNodePlacementSnapshot {
+  readonly nodeId: string;
+  readonly dayOccurrenceId: string;
+  readonly position: number;
+}
+
+export interface RouteAdoptGeneratedNodeSnapshot {
+  readonly id: string;
+  readonly tripId: string;
+  readonly dayOccurrenceId: string;
+  readonly kind: 'PLACE_VISIT';
+  readonly position: number;
+  readonly placeId: string;
+  readonly note: string | null;
+  readonly source: 'ROUTE_GENERATED';
+  readonly adoptedRouteId: string;
+  readonly provider: string;
+  readonly providerPlaceRef: string | null;
+  readonly providerHubRef: string | null;
+  readonly sourceOperationId: string;
+  readonly autoReplaceable: boolean;
+  readonly userModifiedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RouteAdoptDayProjectionSnapshot {
+  readonly transportEdgeId: string;
+  readonly dayOccurrenceId: string;
+  readonly role: 'SAME_DAY' | 'START' | 'OCCUPIED' | 'END';
+}
+
+export interface RouteAdoptDeltaV2 {
+  readonly schemaVersion: 'route-adopt-delta-v2';
+  readonly createdNodeIds: readonly string[];
+  readonly reusedNodeIds: readonly string[];
+  readonly removedGeneratedNodes: readonly RouteAdoptGeneratedNodeSnapshot[];
+  readonly createdTransportEdgeIds: readonly string[];
+  readonly archivedTransportHistoryIds: readonly string[];
+  readonly createdDayProjections: readonly RouteAdoptDayProjectionSnapshot[];
+  readonly removedDayProjections: readonly RouteAdoptDayProjectionSnapshot[];
+  readonly affectedDayOccurrenceIds: readonly string[];
+  readonly beforeCorridorNodeIds: readonly string[];
+  readonly afterCorridorNodeIds: readonly string[];
+  readonly beforeDayOccurrences: readonly RouteAdoptDayOccurrenceSnapshot[];
+  readonly beforeNodePlacements: readonly RouteAdoptNodePlacementSnapshot[];
+  readonly beforeGeneratedNodes: readonly RouteAdoptGeneratedNodeSnapshot[];
+  readonly beforeOwnedDates: readonly string[];
+  readonly beforeEffectiveStartDate: string | null;
+  readonly beforeEffectiveEndDate: string | null;
+  readonly previousActiveAdoptedRouteId: string | null;
+  readonly createdPlaceIds: readonly string[];
+  readonly createdDayOccurrenceIds: readonly string[];
+}
+
+export interface RouteUndoDeltaV1 {
+  readonly schemaVersion: 'route-undo-delta-v1';
+  readonly targetOperationReceiptId: string;
+  readonly undoneAdoptedRouteId: string;
+  readonly restoredAdoptedRouteId: string | null;
+  readonly removedCreatedNodeIds: readonly string[];
+  readonly restoredNodeIds: readonly string[];
+  readonly removedCreatedTransportEdgeIds: readonly string[];
+  readonly restoredTransportEdgeIds: readonly string[];
+  readonly restoredDayOccurrenceIds: readonly string[];
+  readonly removedAdoptCreatedDayOccurrenceIds: readonly string[];
+  readonly restoredOwnedDates: readonly string[];
+}
+
+export interface UndoRouteAdoptionRequest {
+  readonly baseTripVersion: number;
+  readonly idempotencyKey: string;
+}
+
 export interface OperationReceiptView {
   readonly id: string;
-  readonly operationType: 'ROUTE_ADOPT';
+  readonly operationType: 'ROUTE_ADOPT' | 'ROUTE_UNDO';
   readonly idempotencyKey: string;
   readonly requestHash: string;
   readonly baseTripVersion: number;
   readonly resultingTripVersion: number;
   readonly previewId: string;
   readonly adoptedRouteId: string;
-  readonly delta: {
-    readonly createdNodeIds: readonly string[];
-    readonly reusedNodeIds: readonly string[];
-    readonly removedGeneratedNodes: readonly unknown[];
-    readonly createdTransportEdgeIds: readonly string[];
-    readonly archivedTransportHistoryIds: readonly string[];
-    readonly createdDayProjections: readonly unknown[];
-    readonly removedDayProjections: readonly unknown[];
-    readonly affectedDayOccurrenceIds: readonly string[];
-    readonly beforeCorridorNodeIds: readonly string[];
-    readonly afterCorridorNodeIds: readonly string[];
-  };
+  readonly targetOperationReceiptId: string | null;
+  readonly undoExpiresAt: string | null;
+  readonly delta:
+    RouteAdoptDeltaV2 | RouteUndoDeltaV1 | Record<string, unknown>;
   readonly createdAt: string;
 }
 
 export interface AdoptRoutePreviewResponse {
+  readonly operationReceipt: OperationReceiptView;
+  readonly trip: TripView;
+}
+
+export interface UndoRouteAdoptionResponse {
   readonly operationReceipt: OperationReceiptView;
   readonly trip: TripView;
 }

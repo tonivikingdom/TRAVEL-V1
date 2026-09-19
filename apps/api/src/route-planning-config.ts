@@ -1,6 +1,7 @@
 export interface RoutePlanningRuntimeConfig {
   readonly candidateSnapshotTtlSeconds: number;
   readonly previewTtlSeconds: number;
+  readonly undoWindowSeconds: number;
 }
 
 export function readRoutePlanningConfig(
@@ -18,6 +19,11 @@ export function readRoutePlanningConfig(
     previewTtlSeconds: readTtl(
       environment.ROUTE_PREVIEW_TTL_SECONDS,
       'ROUTE_PREVIEW_TTL_SECONDS',
+      allowSyntheticDefault ? 600 : undefined,
+    ),
+    undoWindowSeconds: readTtl(
+      environment.ROUTE_UNDO_WINDOW_SECONDS,
+      'ROUTE_UNDO_WINDOW_SECONDS',
       allowSyntheticDefault ? 600 : undefined,
     ),
   };

@@ -5,7 +5,14 @@ import {
   type OperationReceiptRecord,
   type StoredRoutePreviewPayload,
 } from '@travel/application';
-import type { RoutePreviewGeneratedNodePlanView } from '@travel/contracts';
+import type {
+  RouteAdoptDayOccurrenceSnapshot,
+  RouteAdoptDayProjectionSnapshot,
+  RouteAdoptDeltaV2,
+  RouteAdoptGeneratedNodeSnapshot,
+  RouteAdoptNodePlacementSnapshot,
+  RoutePreviewGeneratedNodePlanView,
+} from '@travel/contracts';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
@@ -14,6 +21,8 @@ type Transaction = Prisma.TransactionClient;
 interface LockedTripRow {
   readonly id: string;
   readonly version: number;
+  readonly effectiveStartDate: Date | null;
+  readonly effectiveEndDate: Date | null;
 }
 
 interface AdvisoryLockRow {
@@ -28,19 +37,30 @@ interface AdoptionInput {
   readonly idempotencyKey: string;
   readonly requestHash: string;
   readonly now: Date;
+  readonly undoExpiresAt: Date;
 }
 
 interface ReceiptDelta {
+  schemaVersion: 'route-adopt-delta-v2';
   createdNodeIds: string[];
   reusedNodeIds: string[];
-  removedGeneratedNodes: unknown[];
+  removedGeneratedNodes: RouteAdoptGeneratedNodeSnapshot[];
   createdTransportEdgeIds: string[];
   archivedTransportHistoryIds: string[];
-  createdDayProjections: unknown[];
-  removedDayProjections: unknown[];
+  createdDayProjections: RouteAdoptDayProjectionSnapshot[];
+  removedDayProjections: RouteAdoptDayProjectionSnapshot[];
   affectedDayOccurrenceIds: string[];
   beforeCorridorNodeIds: string[];
   afterCorridorNodeIds: string[];
+  beforeDayOccurrences: RouteAdoptDayOccurrenceSnapshot[];
+  beforeNodePlacements: RouteAdoptNodePlacementSnapshot[];
+  beforeGeneratedNodes: RouteAdoptGeneratedNodeSnapshot[];
+  beforeOwnedDates: string[];
+  beforeEffectiveStartDate: string | null;
+  beforeEffectiveEndDate: string | null;
+  previousActiveAdoptedRouteId: string | null;
+  createdPlaceIds: string[];
+  createdDayOccurrenceIds: string[];
 }
 
 export async function adoptRoutePreview(
@@ -89,7 +109,7 @@ async function executeAdoption(
   }
 
   const tripRows = await transaction.$queryRaw<LockedTripRow[]>(Prisma.sql`
-    SELECT "id", "version"
+    SELECT "id", "version", "effectiveStartDate", "effectiveEndDate"
     FROM "Trip"
     WHERE "id" = ${input.tripId}::uuid
       AND "ownerUserId" = ${input.ownerUserId}::uuid
@@ -157,6 +177,61 @@ async function executeAdoption(
   );
   if (corridor === null) return { status: 'PREVIEW_STALE' };
 
+  const [
+    beforeOccurrenceRows,
+    beforeNodeRows,
+    beforeOwnershipRows,
+    beforeGeneratedRows,
+  ] = await Promise.all([
+    transaction.dayOccurrence.findMany({
+      where: { tripId: input.tripId },
+      select: { id: true, localDate: true, sequence: true },
+      orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
+    }),
+    transaction.itineraryNode.findMany({
+      where: { tripId: input.tripId },
+      select: { id: true, dayOccurrenceId: true, position: true },
+      orderBy: [
+        { dayOccurrence: { sequence: 'asc' } },
+        { position: 'asc' },
+        { id: 'asc' },
+      ],
+    }),
+    transaction.dateOwnership.findMany({
+      where: { tripId: input.tripId, ownerUserId: input.ownerUserId },
+      select: { localDate: true },
+      orderBy: { localDate: 'asc' },
+    }),
+    transaction.itineraryNode.findMany({
+      where: {
+        tripId: input.tripId,
+        id: { in: corridor.nodeIds },
+        source: 'ROUTE_GENERATED',
+      },
+      include: { temporalValues: true, timeIntents: true },
+      orderBy: { id: 'asc' },
+    }),
+  ]);
+  if (
+    beforeGeneratedRows.some(
+      (node) =>
+        !node.autoReplaceable ||
+        node.userModifiedAt !== null ||
+        (node.note !== null && node.note.trim() !== '') ||
+        node.timeIntents.length > 0,
+    )
+  ) {
+    return { status: 'PREVIEW_BLOCKED' };
+  }
+  if (
+    beforeGeneratedRows.some((node) =>
+      node.temporalValues.some((value) => value.layer === 'ACTUAL'),
+    )
+  ) {
+    return { status: 'FACT_PROTECTED' };
+  }
+  const beforeGeneratedNodes = beforeGeneratedRows.map(toGeneratedNodeSnapshot);
+
   const removedNodes = await transaction.itineraryNode.findMany({
     where: { id: { in: plan.nodesToRemove.map((node) => node.nodeId) } },
     include: { temporalValues: true, timeIntents: true, place: true },
@@ -196,6 +271,22 @@ async function executeAdoption(
       : { status: 'PREVIEW_STALE' };
   }
 
+  if (plan.currentAdoptedRouteId !== null) {
+    const replacement = await transaction.adoptedRoute.updateMany({
+      where: {
+        id: plan.currentAdoptedRouteId,
+        tripId: input.tripId,
+        anchorFromNodeId: plan.anchorFromNodeId,
+        anchorToNodeId: plan.anchorToNodeId,
+        status: 'ACTIVE',
+      },
+      data: { status: 'REPLACED', replacedAt: input.now },
+    });
+    if (replacement.count !== 1) {
+      throw new AdoptionAbort('PREVIEW_STALE');
+    }
+  }
+
   const adoptedRoute = await transaction.adoptedRoute.create({
     data: {
       tripId: input.tripId,
@@ -220,22 +311,20 @@ async function executeAdoption(
       resultingTripVersion: input.baseTripVersion + 1,
       previewId: preview.id,
       adoptedRouteId: adoptedRoute.id,
+      targetOperationReceiptId: null,
+      undoExpiresAt: input.undoExpiresAt,
       delta: {},
       createdAt: input.now,
     },
   });
 
   const delta: ReceiptDelta = {
+    schemaVersion: 'route-adopt-delta-v2',
     createdNodeIds: [],
     reusedNodeIds: [],
-    removedGeneratedNodes: removedNodes.map((node) => ({
-      id: node.id,
-      dayOccurrenceId: node.dayOccurrenceId,
-      placeId: node.placeId,
-      provider: node.provider,
-      providerPlaceRef: node.providerPlaceRef,
-      providerHubRef: node.providerHubRef,
-    })),
+    removedGeneratedNodes: beforeGeneratedNodes.filter((node) =>
+      plan.nodesToRemove.some((removed) => removed.nodeId === node.id),
+    ),
     createdTransportEdgeIds: [],
     archivedTransportHistoryIds: [],
     createdDayProjections: [],
@@ -249,6 +338,31 @@ async function executeAdoption(
     affectedDayOccurrenceIds: [],
     beforeCorridorNodeIds: corridor.nodeIds,
     afterCorridorNodeIds: [],
+    beforeDayOccurrences: beforeOccurrenceRows.map((occurrence) => ({
+      id: occurrence.id,
+      localDate: localDate(occurrence.localDate),
+      sequence: occurrence.sequence,
+    })),
+    beforeNodePlacements: beforeNodeRows.map((node) => ({
+      nodeId: node.id,
+      dayOccurrenceId: node.dayOccurrenceId,
+      position: node.position,
+    })),
+    beforeGeneratedNodes,
+    beforeOwnedDates: beforeOwnershipRows.map((ownership) =>
+      localDate(ownership.localDate),
+    ),
+    beforeEffectiveStartDate:
+      lockedTrip.effectiveStartDate === null
+        ? null
+        : localDate(lockedTrip.effectiveStartDate),
+    beforeEffectiveEndDate:
+      lockedTrip.effectiveEndDate === null
+        ? null
+        : localDate(lockedTrip.effectiveEndDate),
+    previousActiveAdoptedRouteId: plan.currentAdoptedRouteId,
+    createdPlaceIds: [],
+    createdDayOccurrenceIds: [],
   };
 
   for (const edge of oldEdges) {
@@ -287,22 +401,6 @@ async function executeAdoption(
     delta.archivedTransportHistoryIds.push(history.id);
     await transaction.transportEdge.delete({ where: { id: edge.id } });
   }
-  if (plan.currentAdoptedRouteId !== null) {
-    const replacement = await transaction.adoptedRoute.updateMany({
-      where: {
-        id: plan.currentAdoptedRouteId,
-        tripId: input.tripId,
-        anchorFromNodeId: plan.anchorFromNodeId,
-        anchorToNodeId: plan.anchorToNodeId,
-        status: 'ACTIVE',
-      },
-      data: { status: 'REPLACED', replacedAt: input.now },
-    });
-    if (replacement.count !== 1) {
-      throw new AdoptionAbort('PREVIEW_STALE');
-    }
-  }
-
   await transaction.itineraryNode.deleteMany({
     where: { id: { in: removedNodes.map((node) => node.id) } },
   });
@@ -320,6 +418,8 @@ async function executeAdoption(
   });
   delta.createdNodeIds.push(...resolvedNodes.createdNodeIds);
   delta.reusedNodeIds.push(...resolvedNodes.reusedNodeIds);
+  delta.createdPlaceIds.push(...resolvedNodes.createdPlaceIds);
+  delta.createdDayOccurrenceIds.push(...resolvedNodes.createdDayOccurrenceIds);
   delta.affectedDayOccurrenceIds.push(...resolvedNodes.affectedOccurrenceIds);
 
   const refs = new Map<string, string>([
@@ -412,9 +512,10 @@ async function executeAdoption(
     plan.anchorToNodeId,
   ];
   delta.affectedDayOccurrenceIds = [...new Set(delta.affectedDayOccurrenceIds)];
+  const completeDelta: RouteAdoptDeltaV2 = delta;
   const finalReceipt = await transaction.operationReceipt.update({
     where: { id: receipt.id },
-    data: { delta: delta as unknown as Prisma.InputJsonValue },
+    data: { delta: completeDelta as unknown as Prisma.InputJsonValue },
   });
   await transaction.outboxEvent.create({
     data: {
@@ -531,6 +632,16 @@ async function validateCurrentCorridor(
       }),
     ]);
     if (currentRoute === null || activeRouteCount !== 1) return null;
+  } else {
+    const activeRouteCount = await transaction.adoptedRoute.count({
+      where: {
+        tripId,
+        anchorFromNodeId: plan.anchorFromNodeId,
+        anchorToNodeId: plan.anchorToNodeId,
+        status: 'ACTIVE',
+      },
+    });
+    if (activeRouteCount !== 0) return null;
   }
   const expectedPairs = corridor.slice(0, -1).map((node, index) => ({
     fromNodeId: node.id,
@@ -591,6 +702,8 @@ async function resolveGeneratedNodes(
   const refs = new Map<string, string>();
   const createdNodeIds: string[] = [];
   const reusedNodeIds: string[] = [];
+  const createdPlaceIds: string[] = [];
+  const createdDayOccurrenceIds: string[] = [];
   const affectedOccurrenceIds = new Set<string>([
     from.dayOccurrenceId,
     to.dayOccurrenceId,
@@ -649,6 +762,7 @@ async function resolveGeneratedNodes(
           },
         });
         occurrenceId = occurrence.id;
+        createdDayOccurrenceIds.push(occurrence.id);
         lastCreatedDate = plan.localDate;
         lastCreatedOccurrenceId = occurrence.id;
       }
@@ -715,6 +829,7 @@ async function resolveGeneratedNodes(
     });
     refs.set(plan.ref, node.id);
     createdNodeIds.push(node.id);
+    createdPlaceIds.push(place.id);
   }
 
   await rewriteOccurrenceAndNodeOrder(transaction, input.tripId, {
@@ -726,6 +841,8 @@ async function resolveGeneratedNodes(
     refs,
     createdNodeIds,
     reusedNodeIds,
+    createdPlaceIds,
+    createdDayOccurrenceIds,
     affectedOccurrenceIds: [...affectedOccurrenceIds],
   };
 }
@@ -974,13 +1091,15 @@ function toReceiptRecord(receipt: {
   readonly id: string;
   readonly ownerUserId: string;
   readonly tripId: string;
-  readonly operationType: 'ROUTE_ADOPT';
+  readonly operationType: 'ROUTE_ADOPT' | 'ROUTE_UNDO';
   readonly idempotencyKey: string;
   readonly requestHash: string;
   readonly baseTripVersion: number;
   readonly resultingTripVersion: number;
   readonly previewId: string;
   readonly adoptedRouteId: string;
+  readonly targetOperationReceiptId: string | null;
+  readonly undoExpiresAt: Date | null;
   readonly delta: Prisma.JsonValue;
   readonly createdAt: Date;
 }): OperationReceiptRecord {
@@ -994,6 +1113,56 @@ function refIndex(ref: string): number {
   const match = /^TRANSFER_(\d+)$/u.exec(ref);
   if (match === null) throw new AdoptionAbort('PREVIEW_STALE');
   return Number(match[1]);
+}
+
+function toGeneratedNodeSnapshot(node: {
+  readonly id: string;
+  readonly tripId: string;
+  readonly dayOccurrenceId: string;
+  readonly kind: 'PLACE_VISIT' | 'FREE_ACTION';
+  readonly position: number;
+  readonly placeId: string | null;
+  readonly note: string | null;
+  readonly source: 'USER_PLANNED' | 'ROUTE_GENERATED';
+  readonly adoptedRouteId: string | null;
+  readonly provider: string | null;
+  readonly providerPlaceRef: string | null;
+  readonly providerHubRef: string | null;
+  readonly sourceOperationId: string | null;
+  readonly autoReplaceable: boolean;
+  readonly userModifiedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}): RouteAdoptGeneratedNodeSnapshot {
+  if (
+    node.kind !== 'PLACE_VISIT' ||
+    node.source !== 'ROUTE_GENERATED' ||
+    node.placeId === null ||
+    node.adoptedRouteId === null ||
+    node.provider === null ||
+    node.sourceOperationId === null
+  ) {
+    throw new AdoptionAbort('PREVIEW_STALE');
+  }
+  return {
+    id: node.id,
+    tripId: node.tripId,
+    dayOccurrenceId: node.dayOccurrenceId,
+    kind: node.kind,
+    position: node.position,
+    placeId: node.placeId,
+    note: node.note,
+    source: node.source,
+    adoptedRouteId: node.adoptedRouteId,
+    provider: node.provider,
+    providerPlaceRef: node.providerPlaceRef,
+    providerHubRef: node.providerHubRef,
+    sourceOperationId: node.sourceOperationId,
+    autoReplaceable: node.autoReplaceable,
+    userModifiedAt: node.userModifiedAt?.toISOString() ?? null,
+    createdAt: node.createdAt.toISOString(),
+    updatedAt: node.updatedAt.toISOString(),
+  };
 }
 
 function parseLocalDate(value: string): Date {

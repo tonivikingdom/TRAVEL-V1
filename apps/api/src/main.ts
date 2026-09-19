@@ -4,6 +4,7 @@ import {
   RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
+  RouteUndoService,
   TripService,
 } from '@travel/application';
 import {
@@ -35,6 +36,7 @@ let notificationService: NotificationService | undefined;
 let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
+let routeUndoService: RouteUndoService | undefined;
 let tripService: TripService | undefined;
 
 if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
@@ -75,7 +77,9 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   routeAdoptionService = new RouteAdoptionService(
     planningRepository,
     tripService,
+    { undoWindowSeconds: routePlanningConfig.undoWindowSeconds },
   );
+  routeUndoService = new RouteUndoService(planningRepository, tripService);
 }
 
 const app = buildApi({
@@ -85,6 +89,7 @@ const app = buildApi({
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(routePreviewService === undefined ? {} : { routePreviewService }),
   ...(routeAdoptionService === undefined ? {} : { routeAdoptionService }),
+  ...(routeUndoService === undefined ? {} : { routeUndoService }),
   ...(tripService === undefined ? {} : { tripService }),
 });
 let shuttingDown = false;

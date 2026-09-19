@@ -155,6 +155,14 @@ export function hashRouteAdoptionRequest(input: {
   return createHash('sha256').update(canonicalJson(input)).digest('hex');
 }
 
+export function hashRouteUndoRequest(input: {
+  readonly tripId: string;
+  readonly targetOperationReceiptId: string;
+  readonly baseTripVersion: number;
+}): string {
+  return createHash('sha256').update(canonicalJson(input)).digest('hex');
+}
+
 function nullableOptionalString(
   value: unknown,
 ): value is string | null | undefined {

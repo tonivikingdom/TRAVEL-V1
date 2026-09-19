@@ -53,17 +53,23 @@ export { TripService } from './trip-service.js';
 export { RouteQueryService } from './route-query-service.js';
 export { RoutePreviewService } from './route-preview-service.js';
 export { ROUTE_PREVIEW_POLICY_VERSION } from './route-preview-service.js';
-export { RouteAdoptionService } from './route-adoption-service.js';
+export {
+  RouteAdoptionService,
+  type RouteAdoptionServiceOptions,
+} from './route-adoption-service.js';
+export { RouteUndoService } from './route-undo-service.js';
 export {
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
   hashRouteAdoptionRequest,
+  hashRouteUndoRequest,
   restoreNormalizedCandidate,
 } from './route-snapshot.js';
 export {
   systemClock,
   type Clock,
   type AdoptRoutePreviewResult,
+  type UndoRouteAdoptionResult,
   type OperationReceiptRecord,
   type CreateRoutePreviewResult,
   type RouteCandidatePayload,

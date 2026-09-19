@@ -24,6 +24,8 @@ const snapshotId = '00000000-0000-4000-8000-000000000006';
 const previewId = '00000000-0000-4000-8000-000000000007';
 const transportId = '00000000-0000-4000-8000-000000000008';
 const intentId = '00000000-0000-4000-8000-000000000009';
+const adoptedRouteId = '00000000-0000-4000-8000-000000000010';
+const staleRouteId = '00000000-0000-4000-8000-000000000011';
 const now = new Date('2030-01-01T00:00:00.000Z');
 
 const actor: Actor = {
@@ -98,6 +100,42 @@ describe('RoutePreviewService', () => {
     expect(tripRepository.executeCommand).not.toHaveBeenCalled();
     expect(tripRepository.setTemporalValue).not.toHaveBeenCalled();
     expect(trip.version).toBe(3);
+  });
+
+  it('identifies a directly adjacent ACTIVE adopted route from its current edge', async () => {
+    trip = singleLegAdoptedTrip();
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.routeCorridor).toMatchObject({
+      currentAdoptedRouteId: adoptedRouteId,
+      currentNodeIds: [fromNodeId, toNodeId],
+    });
+    expect(preview.changeSummary.willReplaceTransportEdgeIds).toEqual([
+      transportId,
+    ]);
+  });
+
+  it('rejects ambiguous ACTIVE route lifecycle records instead of selecting the first', async () => {
+    const current = singleLegAdoptedTrip();
+    trip = {
+      ...current,
+      adoptedRoutes: [
+        ...current.adoptedRoutes!,
+        {
+          ...current.adoptedRoutes![0]!,
+          id: staleRouteId,
+          sourcePreviewId: staleRouteId,
+          candidateSnapshotId: staleRouteId,
+        },
+      ],
+    };
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    await expect(
+      service().createPreview(actor, tripId, request()),
+    ).rejects.toMatchObject({ code: 'PREVIEW_STALE' });
   });
 
   it('preserves multi-leg walking and fixed-service facts and proposes located transfers', async () => {
@@ -647,6 +685,47 @@ function baseTrip(
           },
         ]
       : [],
+  };
+}
+
+function singleLegAdoptedTrip(): TripAggregateRecord {
+  const trip = baseTrip();
+  return {
+    ...trip,
+    transportEdges: [
+      {
+        id: transportId,
+        tripId,
+        fromNodeId,
+        toNodeId,
+        mode: 'BUS',
+        fixedService: false,
+        serviceLabel: null,
+        note: null,
+        source: 'ADOPTED_ROUTE',
+        adoptedRouteId,
+        provider: 'SYNTHETIC',
+        providerRef: 'synthetic-current-edge',
+        createdAt: now,
+        updatedAt: now,
+        timeValues: [],
+      },
+    ],
+    adoptedRoutes: [
+      {
+        id: adoptedRouteId,
+        tripId,
+        anchorFromNodeId: fromNodeId,
+        anchorToNodeId: toNodeId,
+        sourcePreviewId: previewId,
+        candidateSnapshotId: snapshotId,
+        candidateHash: 'a'.repeat(64),
+        policyVersion: 'route-adoption-preview-v2',
+        status: 'ACTIVE',
+        createdAt: now,
+        replacedAt: null,
+      },
+    ],
   };
 }
 

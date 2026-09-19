@@ -288,10 +288,19 @@ async function executeAdoption(
     await transaction.transportEdge.delete({ where: { id: edge.id } });
   }
   if (plan.currentAdoptedRouteId !== null) {
-    await transaction.adoptedRoute.update({
-      where: { id: plan.currentAdoptedRouteId },
+    const replacement = await transaction.adoptedRoute.updateMany({
+      where: {
+        id: plan.currentAdoptedRouteId,
+        tripId: input.tripId,
+        anchorFromNodeId: plan.anchorFromNodeId,
+        anchorToNodeId: plan.anchorToNodeId,
+        status: 'ACTIVE',
+      },
       data: { status: 'REPLACED', replacedAt: input.now },
     });
+    if (replacement.count !== 1) {
+      throw new AdoptionAbort('PREVIEW_STALE');
+    }
   }
 
   await transaction.itineraryNode.deleteMany({
@@ -500,17 +509,56 @@ async function validateCurrentCorridor(
   ) {
     return null;
   }
-  const edgeIds = (
-    await transaction.transportEdge.findMany({
-      where: {
-        tripId,
-        fromNodeId: { in: corridor.map((node) => node.id) },
-        toNodeId: { in: corridor.map((node) => node.id) },
-      },
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    })
-  ).map((edge) => edge.id);
+  if (plan.currentAdoptedRouteId !== null) {
+    const [currentRoute, activeRouteCount] = await Promise.all([
+      transaction.adoptedRoute.findFirst({
+        where: {
+          id: plan.currentAdoptedRouteId,
+          tripId,
+          anchorFromNodeId: plan.anchorFromNodeId,
+          anchorToNodeId: plan.anchorToNodeId,
+          status: 'ACTIVE',
+        },
+        select: { id: true },
+      }),
+      transaction.adoptedRoute.count({
+        where: {
+          tripId,
+          anchorFromNodeId: plan.anchorFromNodeId,
+          anchorToNodeId: plan.anchorToNodeId,
+          status: 'ACTIVE',
+        },
+      }),
+    ]);
+    if (currentRoute === null || activeRouteCount !== 1) return null;
+  }
+  const expectedPairs = corridor.slice(0, -1).map((node, index) => ({
+    fromNodeId: node.id,
+    toNodeId: corridor[index + 1]!.id,
+  }));
+  const edges = await transaction.transportEdge.findMany({
+    where: { tripId, OR: expectedPairs },
+    select: {
+      id: true,
+      fromNodeId: true,
+      toNodeId: true,
+      source: true,
+      adoptedRouteId: true,
+    },
+    orderBy: { id: 'asc' },
+  });
+  if (
+    plan.currentAdoptedRouteId !== null &&
+    (edges.length !== expectedPairs.length ||
+      edges.some(
+        (edge) =>
+          edge.source !== 'ADOPTED_ROUTE' ||
+          edge.adoptedRouteId !== plan.currentAdoptedRouteId,
+      ))
+  ) {
+    return null;
+  }
+  const edgeIds = edges.map((edge) => edge.id);
   if (!sameArray(edgeIds, [...plan.willReplaceTransportEdgeIds].sort())) {
     return null;
   }

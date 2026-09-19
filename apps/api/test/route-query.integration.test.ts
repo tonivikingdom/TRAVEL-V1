@@ -619,6 +619,220 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   });
 
+  it('replaces a single-leg adopted route and keeps idempotent replay lifecycle-neutral', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-single-route-1',
+    );
+    const route1Id = first.operationReceipt.adoptedRouteId;
+
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [candidate('2030-10-01T12:00:00Z', '2030-10-01T13:00:00Z')],
+    };
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    expect(
+      secondPreview.changeSummary.routeCorridor?.currentAdoptedRouteId,
+    ).toBe(route1Id);
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-single-route-2',
+    );
+    const route2Id = second.operationReceipt.adoptedRouteId;
+
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: route1Id },
+      }),
+    ).toMatchObject({ status: 'REPLACED', replacedAt: currentNow });
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: route2Id },
+      }),
+    ).toMatchObject({ status: 'ACTIVE', replacedAt: null });
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: initial.id, status: 'ACTIVE' },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.transportEdgeHistory.findMany({
+        where: { tripId: initial.id, adoptedRouteId: route1Id },
+      }),
+    ).toEqual([
+      expect.objectContaining({ invalidationReason: 'USER_REPLACED' }),
+    ]);
+
+    const replay = await adopt(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-single-route-2',
+    );
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({
+      operationReceipt: { id: second.operationReceipt.id },
+      trip: { version: second.trip.version },
+    });
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: initial.id, status: 'ACTIVE' },
+      }),
+    ).toBe(1);
+  });
+
+  it('replaces a single-leg route with a multi-leg route and re-queries the new corridor', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-single-multi-1',
+    );
+
+    providerResult = transferCandidate();
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    expect(
+      secondPreview.changeSummary.routeCorridor?.currentAdoptedRouteId,
+    ).toBe(first.operationReceipt.adoptedRouteId);
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-single-multi-2',
+    );
+
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: first.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'REPLACED' });
+    expect(
+      second.trip.days
+        .flatMap((day) => day.nodes)
+        .filter((node) => node.source === 'ROUTE_GENERATED'),
+    ).toHaveLength(1);
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: initial.id, status: 'ACTIVE' },
+      }),
+    ).toBe(1);
+
+    const requery = await query(
+      userA,
+      second.trip,
+      from!.id,
+      to!.id,
+      departHint(),
+    );
+    expect(requery.statusCode).toBe(200);
+  });
+
+  it('keeps one ACTIVE route through multi-leg to repeated single-leg replacements', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    providerResult = transferCandidate();
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-multi-single-1',
+    );
+
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [candidate('2030-10-01T12:00:00Z', '2030-10-01T13:00:00Z')],
+    };
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    expect(
+      secondPreview.changeSummary.routeCorridor?.currentAdoptedRouteId,
+    ).toBe(first.operationReceipt.adoptedRouteId);
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-multi-single-2',
+    );
+
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [candidate('2030-10-01T14:00:00Z', '2030-10-01T15:00:00Z')],
+    };
+    const thirdPreview = await createPreview(
+      userA,
+      second.trip,
+      from!.id,
+      to!.id,
+    );
+    expect(
+      thirdPreview.changeSummary.routeCorridor?.currentAdoptedRouteId,
+    ).toBe(second.operationReceipt.adoptedRouteId);
+    const third = await adoptSuccessfully(
+      userA,
+      second.trip,
+      thirdPreview.previewId,
+      'synthetic-multi-single-3',
+    );
+
+    const routes = await managed.client.adoptedRoute.findMany({
+      where: { tripId: initial.id },
+    });
+    expect(routes).toHaveLength(3);
+    expect(routes.filter((route) => route.status === 'ACTIVE')).toEqual([
+      expect.objectContaining({ id: third.operationReceipt.adoptedRouteId }),
+    ]);
+    expect(
+      routes
+        .filter((route) => route.status === 'REPLACED')
+        .map((route) => route.id)
+        .sort(),
+    ).toEqual(
+      [
+        first.operationReceipt.adoptedRouteId,
+        second.operationReceipt.adoptedRouteId,
+      ].sort(),
+    );
+    expect(
+      await managed.client.transportEdgeHistory.count({
+        where: {
+          tripId: initial.id,
+          invalidationReason: 'USER_REPLACED',
+          adoptedRouteId: {
+            in: [
+              first.operationReceipt.adoptedRouteId,
+              second.operationReceipt.adoptedRouteId,
+            ],
+          },
+        },
+      }),
+    ).toBe(3);
+  });
+
   it('allows only one concurrent adoption for two previews at the same Trip version', async () => {
     const trip = await tripWithVisits(userA, ['From', 'To']);
     const [from, to] = trip.days[0]!.nodes;
@@ -914,6 +1128,31 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         idempotencyKey,
       },
     });
+  }
+
+  async function adoptSuccessfully(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    previewId: string,
+    idempotencyKey: string,
+  ): Promise<{
+    operationReceipt: {
+      id: string;
+      adoptedRouteId: string;
+      resultingTripVersion: number;
+    };
+    trip: TripView;
+  }> {
+    const response = await adopt(identity, trip, previewId, idempotencyKey);
+    expect(response.statusCode).toBe(200);
+    return response.json() as {
+      operationReceipt: {
+        id: string;
+        adoptedRouteId: string;
+        resultingTripVersion: number;
+      };
+      trip: TripView;
+    };
   }
 
   async function databaseFacts(tripId: string) {

@@ -28,6 +28,7 @@ import {
   evaluateTripScheduleRecord,
   orderedTripNodes,
 } from './schedule-evaluation.js';
+import { resolveCurrentRouteCorridor } from './route-corridor.js';
 import {
   parseAbsoluteInstantInput,
   validateIanaTimeZoneInput,
@@ -455,28 +456,7 @@ function isQueryableRouteCorridor(
   fromIndex: number,
   toIndex: number,
 ): boolean {
-  if (toIndex === fromIndex + 1) return true;
-  if (fromIndex < 0 || toIndex <= fromIndex + 1) return false;
-  const from = nodes[fromIndex];
-  const to = nodes[toIndex];
-  if (from === undefined || to === undefined) return false;
-  const route = (trip.adoptedRoutes ?? []).find(
-    (candidate) =>
-      candidate.status === 'ACTIVE' &&
-      candidate.anchorFromNodeId === from.id &&
-      candidate.anchorToNodeId === to.id,
-  );
-  return (
-    route !== undefined &&
-    nodes
-      .slice(fromIndex + 1, toIndex)
-      .every(
-        (node) =>
-          node.kind === 'PLACE_VISIT' &&
-          node.source === 'ROUTE_GENERATED' &&
-          node.adoptedRouteId === route.id,
-      )
-  );
+  return resolveCurrentRouteCorridor(trip, nodes, fromIndex, toIndex) !== null;
 }
 
 function providerCandidateUsesSupportedZones(

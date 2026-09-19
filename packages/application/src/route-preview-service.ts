@@ -29,6 +29,7 @@ import {
   evaluateTripScheduleRecord,
   orderedTripNodes,
 } from './schedule-evaluation.js';
+import { resolveCurrentRouteCorridor } from './route-corridor.js';
 import { validateIanaTimeZoneInput } from './time-input.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
 
@@ -243,50 +244,12 @@ function requireCurrentCorridor(
   const nodes = orderedTripNodes(trip);
   const fromIndex = nodes.findIndex((node) => node.id === snapshot.fromNodeId);
   const toIndex = nodes.findIndex((node) => node.id === snapshot.toNodeId);
-  const fromNode = nodes[fromIndex];
-  const toNode = nodes[toIndex];
-  if (
-    fromIndex < 0 ||
-    toIndex <= fromIndex ||
-    fromNode?.kind !== 'PLACE_VISIT' ||
-    toNode?.kind !== 'PLACE_VISIT'
-  ) {
-    throw stalePreview();
-  }
-  const corridorNodes = nodes.slice(fromIndex, toIndex + 1);
-  let currentAdoptedRouteId: string | null = null;
-  if (toIndex !== fromIndex + 1) {
-    const route = (trip.adoptedRoutes ?? []).find(
-      (candidate) =>
-        candidate.status === 'ACTIVE' &&
-        candidate.anchorFromNodeId === fromNode.id &&
-        candidate.anchorToNodeId === toNode.id,
-    );
-    if (
-      route === undefined ||
-      corridorNodes
-        .slice(1, -1)
-        .some(
-          (node) =>
-            node.kind !== 'PLACE_VISIT' ||
-            node.source !== 'ROUTE_GENERATED' ||
-            node.adoptedRouteId !== route.id,
-        )
-    ) {
-      throw stalePreview();
-    }
-    currentAdoptedRouteId = route.id;
-  }
-  const corridorIds = new Set(corridorNodes.map((node) => node.id));
+  const corridor = resolveCurrentRouteCorridor(trip, nodes, fromIndex, toIndex);
+  if (corridor === null) throw stalePreview();
   return {
-    fromNode,
-    toNode,
-    nodes: corridorNodes,
-    currentAdoptedRouteId,
-    currentTransports: trip.transportEdges.filter(
-      (edge) =>
-        corridorIds.has(edge.fromNodeId) && corridorIds.has(edge.toNodeId),
-    ),
+    fromNode: corridor.nodes[0]!,
+    toNode: corridor.nodes.at(-1)!,
+    ...corridor,
   };
 }
 

@@ -4,14 +4,20 @@ const CREDENTIAL_KEY = 'travel.debug.credential';
 const SELECTED_TRIP_KEY = 'travel.debug.selectedTripId';
 const RECEIPT_KEY = 'travel.debug.lastReceipt';
 
+interface StoredReceipt {
+  readonly tripId: string;
+  readonly receipt: OperationReceiptView;
+}
+
 export interface SessionStore {
   getCredential(): string | null;
   setCredential(value: string): void;
   clearCredential(): void;
   getSelectedTripId(): string | null;
   setSelectedTripId(value: string | null): void;
-  getLastReceipt(): OperationReceiptView | null;
-  setLastReceipt(value: OperationReceiptView | null): void;
+  getLastReceipt(tripId: string | null): OperationReceiptView | null;
+  setLastReceipt(tripId: string, value: OperationReceiptView): void;
+  clearLastReceipt(): void;
   clearTripState(): void;
 }
 
@@ -25,20 +31,25 @@ export function createSessionStore(storage: Storage): SessionStore {
       if (value === null) storage.removeItem(SELECTED_TRIP_KEY);
       else storage.setItem(SELECTED_TRIP_KEY, value);
     },
-    getLastReceipt() {
+    getLastReceipt(tripId) {
+      if (tripId === null) return null;
       const raw = storage.getItem(RECEIPT_KEY);
       if (raw === null) return null;
       try {
-        return JSON.parse(raw) as OperationReceiptView;
+        const stored = JSON.parse(raw) as Partial<StoredReceipt>;
+        if (stored.tripId !== tripId || stored.receipt === undefined) {
+          return null;
+        }
+        return stored.receipt;
       } catch {
         storage.removeItem(RECEIPT_KEY);
         return null;
       }
     },
-    setLastReceipt(value) {
-      if (value === null) storage.removeItem(RECEIPT_KEY);
-      else storage.setItem(RECEIPT_KEY, JSON.stringify(value));
+    setLastReceipt(tripId, value) {
+      storage.setItem(RECEIPT_KEY, JSON.stringify({ tripId, receipt: value }));
     },
+    clearLastReceipt: () => storage.removeItem(RECEIPT_KEY),
     clearTripState() {
       storage.removeItem(SELECTED_TRIP_KEY);
       storage.removeItem(RECEIPT_KEY);

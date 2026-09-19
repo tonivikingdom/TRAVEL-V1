@@ -38,6 +38,10 @@ export function isVersionConflict(error: unknown): boolean {
   return error instanceof DebugApiError && error.code === 'VERSION_CONFLICT';
 }
 
+export function shouldClearRecoveredOutage(error: unknown): boolean {
+  return error === null || isCoreUnavailable(error);
+}
+
 export function orderedDays(days: readonly DayView[]): readonly DayView[] {
   return [...days].sort((left, right) => left.sequence - right.sequence);
 }

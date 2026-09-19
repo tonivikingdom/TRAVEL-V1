@@ -36,10 +36,12 @@ describe('debug-web credential and Magic Link handling', () => {
     const receipt = syntheticReceipt();
     store.setCredential('SYNTHETIC_SESSION');
     store.setSelectedTripId('trip-1');
-    store.setLastReceipt(receipt);
+    store.setLastReceipt('trip-1', receipt);
     expect(store.getCredential()).toBe('SYNTHETIC_SESSION');
     expect(store.getSelectedTripId()).toBe('trip-1');
-    expect(store.getLastReceipt()).toEqual(receipt);
+    expect(store.getLastReceipt('trip-1')).toEqual(receipt);
+    expect(store.getLastReceipt('trip-2')).toBeNull();
+    expect(store.getLastReceipt(null)).toBeNull();
     expect([...memory.keys()].sort()).toEqual([
       'travel.debug.credential',
       'travel.debug.lastReceipt',

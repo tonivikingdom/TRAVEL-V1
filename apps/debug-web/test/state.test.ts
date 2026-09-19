@@ -9,6 +9,7 @@ import {
   isCoreUnavailable,
   isVersionConflict,
   orderedDays,
+  shouldClearRecoveredOutage,
 } from '../src/state.js';
 
 describe('debug-web UI state rules', () => {
@@ -34,6 +35,20 @@ describe('debug-web UI state rules', () => {
       ),
     ).toBe(true);
     expect(isCoreUnavailable(apiError('SERVICE_UNAVAILABLE', 503))).toBe(true);
+  });
+
+  it('clears a stale outage error after recovery without hiding other errors', () => {
+    expect(
+      shouldClearRecoveredOutage(
+        new DebugApiError('offline', 'NETWORK', null, null, null, true),
+      ),
+    ).toBe(true);
+    expect(
+      shouldClearRecoveredOutage(apiError('SERVICE_UNAVAILABLE', 503)),
+    ).toBe(true);
+    expect(shouldClearRecoveredOutage(apiError('VERSION_CONFLICT', 409))).toBe(
+      false,
+    );
   });
 
   it('invalidates stale Candidate and Preview together', () => {

@@ -32,6 +32,7 @@ import {
   isCoreUnavailable,
   isVersionConflict,
   orderedDays,
+  shouldClearRecoveredOutage,
 } from './state.js';
 import './styles.css';
 
@@ -72,7 +73,7 @@ const state: DebugState = {
   schedule: null,
   routeResponse: null,
   preview: null,
-  receipt: store.getLastReceipt(),
+  receipt: store.getLastReceipt(store.getSelectedTripId()),
   history: [],
 };
 
@@ -153,6 +154,7 @@ async function refreshHealth(allowRecovery: boolean): Promise<void> {
     state.unavailable = false;
     if (allowRecovery && wasUnavailable && store.getCredential() !== null) {
       await recoverSession();
+      if (shouldClearRecoveredOutage(state.error)) state.error = null;
       state.message = '服务已恢复，身份和当前 Trip 已重新同步。';
     }
   } catch (error) {
@@ -349,6 +351,7 @@ async function loadTrip(id: string): Promise<void> {
     `/trips/${encodeURIComponent(id)}`,
   );
   store.setSelectedTripId(id);
+  state.receipt = store.getLastReceipt(id);
   state.schedule = null;
   state.history = [];
   Object.assign(state, invalidateRouteArtifacts());
@@ -527,7 +530,7 @@ async function adoptPreview(): Promise<void> {
     );
     state.currentTrip = response.trip;
     state.receipt = response.operationReceipt;
-    store.setLastReceipt(response.operationReceipt);
+    store.setLastReceipt(trip.id, response.operationReceipt);
     Object.assign(state, invalidateRouteArtifacts());
     state.message = '路线已采用；OperationReceipt 已保留供人工核验。';
   });
@@ -544,7 +547,7 @@ async function undoAdoption(): Promise<void> {
     );
     state.currentTrip = response.trip;
     state.receipt = response.operationReceipt;
-    store.setLastReceipt(response.operationReceipt);
+    store.setLastReceipt(trip.id, response.operationReceipt);
     state.message = '路线采用已通过补偿事务撤销。';
   });
 }

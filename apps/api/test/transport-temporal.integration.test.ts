@@ -918,6 +918,122 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     expect(await managed.client.transportEdgeHistoryTimeValue.count()).toBe(3);
   });
 
+  it('writes a resolved temporal value through the authenticated HTTP API', async () => {
+    const trip = await tripWithPlaces(userA, ['A']);
+    const nodeId = trip.days[0]!.nodes[0]!.id;
+    const response = await temporalValueResponse(userA, trip, {
+      type: 'NODE',
+      nodeId,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const updated = response.json() as TripView;
+    expect(updated.version).toBe(trip.version + 1);
+    expect(updated.days[0]!.nodes[0]!.timeValues[0]).toMatchObject({
+      layer: 'PLANNED',
+      pointKind: 'ARRIVAL',
+      instant: '2030-10-01T11:30:00.000Z',
+      timeZone: 'Asia/Shanghai',
+      sourceKind: 'USER_VALUE',
+    });
+  });
+
+  it('hides temporal-value Trip existence from another owner and ADMIN', async () => {
+    const trip = await tripWithPlaces(userA, ['A']);
+    const subject = { type: 'NODE', nodeId: trip.days[0]!.nodes[0]!.id };
+
+    for (const identity of [userB, admin]) {
+      const response = await temporalValueResponse(identity, trip, subject);
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    }
+  });
+
+  it('preserves VERSION_CONFLICT and ACTUAL protection through temporal HTTP', async () => {
+    let trip = await tripWithPlaces(userA, ['A']);
+    const subject = {
+      type: 'NODE',
+      nodeId: trip.days[0]!.nodes[0]!.id,
+    } as const;
+    const stale = await temporalValueResponse(userA, trip, subject, {
+      baseTripVersion: trip.version - 1,
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({
+      error: { code: 'VERSION_CONFLICT' },
+    });
+
+    const actual = await temporalValueResponse(userA, trip, subject, {
+      layer: 'ACTUAL',
+      sourceKind: 'PROVIDER_OBSERVATION',
+      observedAt: '2030-10-01T19:31:00+08:00',
+    });
+    expect(actual.statusCode).toBe(200);
+    trip = actual.json() as TripView;
+    const overwrite = await temporalValueResponse(userA, trip, subject, {
+      layer: 'ACTUAL',
+      instant: '2030-10-01T19:32:00+08:00',
+      sourceKind: 'PROVIDER_OBSERVATION',
+      observedAt: '2030-10-01T19:33:00+08:00',
+    });
+    expect(overwrite.statusCode).toBe(409);
+    expect(overwrite.json()).toMatchObject({
+      error: { code: 'FACT_PROTECTED' },
+    });
+  });
+
+  it('rejects an offset masquerading as an IANA time zone over HTTP', async () => {
+    const trip = await tripWithPlaces(userA, ['A']);
+    const response = await temporalValueResponse(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: trip.days[0]!.nodes[0]!.id },
+      { timeZone: '+08:00' },
+    );
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR' },
+    });
+  });
+
+  it('lists complete transport history over HTTP for the owner only', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    trip = await setTransport(userA, trip, 0, 1, {
+      mode: 'RAIL',
+      fixedService: true,
+    });
+    const original = trip.connections[0]!.transport!;
+    trip = await addVisit(userA, trip, 'C', 1);
+
+    const ownerResponse = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/transport-history`,
+      headers: bearer(userA),
+    });
+    expect(ownerResponse.statusCode).toBe(200);
+    expect(ownerResponse.json()).toMatchObject({
+      history: [
+        {
+          originalTransportEdgeId: original.id,
+          invalidationReason: 'ADJACENCY_CHANGED',
+          source: 'MANUAL',
+          provider: null,
+          timeValues: [],
+        },
+      ],
+    });
+
+    for (const identity of [userB, admin]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/transport-history`,
+        headers: bearer(identity),
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    }
+  });
+
   it('exposes committed P2B tables, subject check, and endpoint constraints', async () => {
     const tables = await managed.client.$queryRaw<
       Array<{ table_name: string }>
@@ -1103,6 +1219,38 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
       url: `/trips/${tripId}/commands`,
       headers: bearer(identity),
       payload: { baseTripVersion, command },
+    });
+  }
+
+  function temporalValueResponse(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    subject: Record<string, unknown>,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const baseTripVersion =
+      typeof overrides.baseTripVersion === 'number'
+        ? overrides.baseTripVersion
+        : trip.version;
+    const valueOverrides = { ...overrides };
+    delete valueOverrides.baseTripVersion;
+    return app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(identity),
+      payload: {
+        baseTripVersion,
+        subject,
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T19:30:00+08:00',
+          timeZone: 'Asia/Shanghai',
+          sourceKind: 'USER_VALUE',
+          sourceRef: 'SYNTHETIC_HTTP_P5A',
+          ...valueOverrides,
+        },
+      },
     });
   }
 

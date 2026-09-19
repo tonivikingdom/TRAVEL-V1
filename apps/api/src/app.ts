@@ -15,7 +15,9 @@ import type {
   LivenessResponse,
   PlaceInput,
   ReadinessResponse,
+  ResolvedTemporalValueInput,
   RouteQueryHint,
+  TemporalSubjectInput,
   TransportMode,
   TripCommandInput,
 } from '@travel/contracts';
@@ -329,6 +331,42 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request.params.id,
         requiredNumber(body, 'basisVersion'),
       );
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/temporal-values',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireTripService(dependencies).setResolvedTemporalValue(
+        authenticated.actor,
+        request.params.id,
+        requiredNumber(body, 'baseTripVersion'),
+        parseTemporalSubject(body.subject),
+        parseResolvedTemporalValue(body.value),
+      );
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/trips/:id/transport-history',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return {
+        history: await requireTripService(dependencies).listTransportHistory(
+          authenticated.actor,
+          request.params.id,
+        ),
+      };
     },
   );
 
@@ -701,6 +739,64 @@ function parseRouteHint(value: unknown): RouteQueryHint | null {
     instant: requiredString(hint, 'instant'),
     timeZone: requiredString(hint, 'timeZone'),
   };
+}
+
+function parseTemporalSubject(value: unknown): TemporalSubjectInput {
+  const subject = requiredRecord(value);
+  const type = requiredString(subject, 'type');
+  if (type === 'NODE') {
+    return { type, nodeId: requiredString(subject, 'nodeId') };
+  }
+  if (type === 'TRANSPORT') {
+    return {
+      type,
+      transportEdgeId: requiredString(subject, 'transportEdgeId'),
+    };
+  }
+  throw new ApplicationError('VALIDATION_ERROR', '时间主体无效。', 400);
+}
+
+function parseResolvedTemporalValue(
+  value: unknown,
+): ResolvedTemporalValueInput {
+  const temporal = requiredRecord(value);
+  return {
+    layer: parseTemporalLayer(requiredString(temporal, 'layer')),
+    pointKind: parseTemporalPointKind(requiredString(temporal, 'pointKind')),
+    instant: requiredString(temporal, 'instant'),
+    timeZone: requiredString(temporal, 'timeZone'),
+    sourceKind: parseTemporalSourceKind(requiredString(temporal, 'sourceKind')),
+    ...(hasOwn(temporal, 'sourceRef')
+      ? { sourceRef: optionalNullableString(temporal, 'sourceRef') }
+      : {}),
+    ...(hasOwn(temporal, 'observedAt')
+      ? { observedAt: optionalNullableString(temporal, 'observedAt') }
+      : {}),
+  };
+}
+
+function parseTemporalLayer(
+  value: string,
+): ResolvedTemporalValueInput['layer'] {
+  if (value === 'PLANNED' || value === 'ESTIMATED' || value === 'ACTUAL') {
+    return value;
+  }
+  throw new ApplicationError('VALIDATION_ERROR', '时间层无效。', 400);
+}
+
+function parseTemporalSourceKind(
+  value: string,
+): ResolvedTemporalValueInput['sourceKind'] {
+  switch (value) {
+    case 'USER_VALUE':
+    case 'ADOPTED_TRANSPORT_FACT':
+    case 'SYSTEM_SUGGESTION':
+    case 'DERIVED':
+    case 'PROVIDER_OBSERVATION':
+      return value;
+    default:
+      throw new ApplicationError('VALIDATION_ERROR', '时间来源无效。', 400);
+  }
 }
 
 function parseTemporalPointKind(value: string): 'ARRIVAL' | 'DEPARTURE' {

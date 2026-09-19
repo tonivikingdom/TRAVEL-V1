@@ -43,12 +43,20 @@ describe('P4B2 populated P4B1 database migration', () => {
         await seedP4b1Data(target);
         const before = await officialCounts(target);
 
-        await target.query(
-          await readFile(
-            `${migrationsPath}/${p4b2Migration}/migration.sql`,
-            'utf8',
-          ),
+        const adoptionMigration = await readFile(
+          `${migrationsPath}/${p4b2Migration}/migration.sql`,
+          'utf8',
         );
+        // Prisma deploy executes PostgreSQL migration statements outside one
+        // all-enclosing transaction. Preserve that production behavior here:
+        // newly added enum values must commit before later CHECK constraints
+        // can reference them.
+        for (const statement of adoptionMigration
+          .split(';')
+          .map((value) => value.trim())
+          .filter((value) => value !== '')) {
+          await target.query(statement);
+        }
 
         expect(await officialCounts(target)).toEqual(before);
         const legacy = await target.query<{

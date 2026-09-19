@@ -305,3 +305,14 @@ Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后�
   ROUTE_UNDO receipt 和 ROUTE_UNDONE outbox 与所有恢复写入同事务；ROUTE_ADOPTED 历史不删除。
 - Undo 窗口在 Adopt 时按显式配置固化；P4B3 只支持最近一步 Route Adopt，不支持 Undo-of-Undo、Redo 或
   通用历史版本恢复。
+
+### P5A Debug Web 测试台
+
+- `apps/debug-web` 只负责编排已有 HTTP API 和展示数据库返回的真实投影，不复制 application 规则，
+  不创造 Recommendation、风险、通知或 Provider 事实。
+- 浏览器只在 sessionStorage 保存 bearer credential、当前 Trip ID 与最近 receipt；不保存 Trip cache，
+  不使用 Service Worker、IndexedDB、offline queue 或 background sync。
+- 核心 API/数据库不可用时测试台隐藏旧 Trip；服务恢复后必须重新验证 ready、Session 与选中 Trip。
+  Provider 单点故障只影响路线查询区域。
+- Debug Web 通过 Vite Development proxy 使用相对 `/api`，不要求 API 开放通配 CORS，也不进入
+  Production Compose。该技术选择不约束未来正式 Desktop/Mobile 客户端。

@@ -16,8 +16,9 @@
 | P4B1 | 服务端 Candidate Snapshot 与持久 Preview foundation | 已通过 PR #13 Squash Merge；main commit `9ec780d010257f0c98dba58928a68920bfa4308c`；main CI Run `35423819550` 通过 | immutable snapshot/preview foundation 已完成；真实/付费 Provider 仍未接入            |
 | P4B2 | Adopt、事务/幂等、正式节点与交通写入                | 已通过 PR #14 Squash Merge；main commit `66ffaed90acaa08798dd3afe6ff62c13d80cb667`；main CI Run `35430697966` 通过 | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox 已完成                |
 | P4B3 | Route Adopt 单步 Undo                               | 已通过 PR #15 Squash Merge；main `d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`；CI `35434086597` 通过                 | 已完成短时单步前向补偿；不包含 Undo stack 或 Redo                                    |
-| P5A  | Dev/Test Debug Web 薄测试台                         | 已授权，正在 `feature/p5a-debug-web` 实施                                                                          | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、监控、Push 或离线编辑     |
-| P5B+ | 后续执行/提醒/正式客户端能力                        | 未授权、未实现                                                                                                     | 根据 P5A 人工验收结果另行决定；O-09 上线配置仍 Deferred                              |
+| P5A  | Dev/Test Debug Web 薄测试台                         | 已通过 PR #16 合并；main `cbf9fe2a727011e4708585ef259c3324c05b4362`；CI `35435976817` 通过                         | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、监控、Push 或离线编辑     |
+| P5B  | Development/Test 内部验收与环境闸门                 | 已授权，在 `feature/p5b-internal-acceptance` 实施                                                                  | ≤5 synthetic 用户跨层验收；不是性能容量认证、Staging 许可或 Production readiness     |
+| P5C+ | 后续执行/提醒/正式客户端能力                        | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。

@@ -1,8 +1,8 @@
 # P5A Debug Web 薄测试台
 
-- 当前状态：在 `feature/p5a-debug-web` 实施；只创建 Draft PR，不 Ready、不合并
-- 正式基线 main：`d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`
-- 基线 main CI：Run `35434086597`，`verify` 与 `Compose verification` 均为 success
+- 当前状态：已通过 PR #16 Squash Merge，P5A completed
+- 正式基线 main：`cbf9fe2a727011e4708585ef259c3324c05b4362`
+- 基线 main CI：Run `35435976817`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / High；备选 GPT-5.6 Terra / High
 - 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
 
@@ -34,4 +34,4 @@ Mobile 客户端技术栈。它使用 Vite、Vanilla TypeScript、原生 HTML/CS
 ## 明确未实现
 
 RecommendationPolicy、自动最佳方案、实时风险监控、quiet-assist 状态机、snooze、Push、后台定位、
-真实 Route Provider、正式 Desktop/Mobile 客户端、Production 部署与 P5B 均未实现或未授权。
+真实 Route Provider、正式 Desktop/Mobile 客户端与 Production 部署均未实现或未授权。

@@ -7,6 +7,8 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "vitest.integration.config.ts",
-    "../../vitest.workspace-aliases.ts"
+    "../../vitest.workspace-aliases.ts",
+    "../../scripts/p5b-reset.ts",
+    "../../scripts/p5b-support.ts"
   ]
 }

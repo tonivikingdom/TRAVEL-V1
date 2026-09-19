@@ -10,6 +10,10 @@ export default defineConfig({
       enabled: false,
     },
     exclude: ['**/dist/**', '**/node_modules/**', '**/*.integration.test.ts'],
-    include: ['apps/**/*.test.ts', 'packages/**/*.test.ts'],
+    include: [
+      'apps/**/*.test.ts',
+      'packages/**/*.test.ts',
+      'scripts/**/*.test.ts',
+    ],
   },
 });

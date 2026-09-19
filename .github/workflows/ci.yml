@@ -89,3 +89,51 @@ jobs:
           EOF
       - name: Build and verify Compose services
         run: node scripts/verify-compose.mjs --env-file "$RUNNER_TEMP/travel-v1-compose.env"
+
+  p5b-acceptance:
+    name: P5B acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create isolated synthetic P5B environment
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/travel-v1-p5b.env" <<'EOF'
+          COMPOSE_PROJECT_NAME=travel-v1-p5b-ci
+          APP_ENV=test
+          API_PORT=39100
+          POSTGRES_DB=travel_ci_p5b
+          POSTGRES_USER=travel_ci_p5b
+          POSTGRES_PASSWORD=SYNTHETIC_CI_ONLY
+          POSTGRES_HOST_PORT=35433
+          AUTH_MAGIC_LINK_LANDING_URL=http://127.0.0.1:39100/login/magic
+          MAGIC_LINK_TOKEN_KEY=SYNTHETIC_CI_MAGIC_LINK_TOKEN_KEY_0123456789abcdef
+          MAIL_PROVIDER=capture
+          ROUTE_PROVIDER=synthetic
+          ROUTE_UNDO_WINDOW_SECONDS=600
+          JOB_MAX_ATTEMPTS=5
+          JOB_LEASE_DURATION_MS=5000
+          JOB_POLL_INTERVAL_MS=250
+          JOB_RETRY_BASE_DELAY_MS=500
+          JOB_RETRY_MAX_DELAY_MS=5000
+          JOB_EXECUTION_TIMEOUT_MS=3000
+          OBJECT_MAX_FILE_BYTES=1048576
+          OBJECT_MAX_USER_TOTAL_BYTES=4194304
+          OBJECT_ALLOWED_MEDIA_TYPES=application/pdf,image/jpeg,image/png,text/plain
+          WORKER_SHUTDOWN_TIMEOUT_MS=5000
+          WORKER_HEARTBEAT_INTERVAL_MS=1000
+          WORKER_HEARTBEAT_MAX_AGE_MS=3000
+          EOF
+      - name: Run isolated P5B acceptance
+        run: pnpm p5b:acceptance -- --env-file "$RUNNER_TEMP/travel-v1-p5b.env"

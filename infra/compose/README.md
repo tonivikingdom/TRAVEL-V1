@@ -43,3 +43,19 @@ P1B2 的 API 容器挂载 `/var/lib/travel-objects` 私有命名卷；对象 key
 文件和 PostgreSQL 元数据仍存在，再执行幂等删除并确认不可读取。Staging/Production 不启用
 Local Filesystem adapter，真实 ObjectStorage provider 仍为
 `OBJECT_STORAGE_PROVIDER_UNCONFIGURED`。
+
+## P5B synthetic 内部验收与 reset
+
+P5B 验收使用单独 env file 和独立 `travel-v1-p5b-*` Compose project：
+
+```bash
+pnpm p5b:acceptance -- --env-file /absolute/path/to/p5b.env
+```
+
+它只允许 `APP_ENV=test`、capture mail 和 synthetic Route Provider，结束时只清理自己的
+容器、网络与命名卷，不会动 Dev/Staging project。
+
+`pnpm p5b:reset` 默认 dry-run，只显示 APP_ENV、数据库 host/name 和严格命名空间的
+匹配数。实际删除必须加 `--confirm-synthetic-p5b-reset`；Staging 还必须加
+`--allow-staging`；Production 永久拒绝。`down --volumes` 不是普通 Dev/Staging 的 reset
+方法，不得用它替代 allowlist reset。

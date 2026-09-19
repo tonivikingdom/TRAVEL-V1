@@ -262,9 +262,21 @@ Visit/FreeAction 重叠，起止日仍可编辑。
 
 ## 8. 撤销不是把世界倒回过去
 
-单步、短时撤销恢复上一用户操作及其内部连带数据；不得回滚后续真实航班更新、实际位置或已发生事实。
+P4B3 的 Route Adopt Undo 是单步、短时的前向补偿事务，不是版本或数据库快照回滚。只有 Trip 当前
+version 仍等于 target Adopt resulting version 时才允许执行；成功后 Trip version 再 +1。服务器只使用
+新 Adopt receipt 中的 `route-adopt-delta-v2` 恢复原 ID、DayOccurrence sequence、Node placement、
+Transport/时间/投影、DateOwnership/effective range 与 prior route，不接受客户端上传 before state。
 
-若自上次操作后Trip版本已被其他设备修改，撤销返回UNDO_CONFLICT，不覆盖新改动。撤销成功后按最新可靠证据重新计算风险，不能恢复一个已经失真的“正常”状态。
+撤销窗口在 Adopt receipt 创建时固化。历史 P4B2 receipt 没有完整 inverse basis，因此返回
+UNDO_UNAVAILABLE，不能 best-effort 猜测。Route lifecycle 使用 ACTIVE / REPLACED / UNDONE；成功 Undo
+写 ROUTE_UNDO receipt 与 ROUTE_UNDONE outbox，保留原 ROUTE_ADOPTED 历史。
+
+单步撤销恢复一次 Route Adopt 及其自动连带数据；不得回滚后续真实航班更新、实际位置或已发生事实。
+若 target-created Node/Edge 出现 ACTUAL、新用户内容或未知引用，必须返回 UNDO_CONFLICT，不删除或搬运事实。
+
+若自上次操作后 Trip 版本已被其他设备修改，或原日期已经属于同 owner 的另一 Trip，撤销返回
+UNDO_CONFLICT 并整体回滚，不覆盖新改动。撤销成功后按最新可靠证据重新计算风险，不能恢复一个已经
+失真的“正常”状态。
 
 Trip永久删除与不可逆合并不享有普通Undo；须用其已确认强提示流程。
 
@@ -291,7 +303,7 @@ Trip永久删除与不可逆合并不享有普通Undo；须用其已确认强提
 ## 10. 统一错误与解释结果
 
 错误建议包含`code`、面向用户的中文`message`、`requestId`、`retryable`、必要的非敏感详情。示例：
-UNAUTHENTICATED / FORBIDDEN / VERSION_CONFLICT / PREVIEW_STALE / DATE_OWNED / PROVIDER_UNAVAILABLE / NO_MATCHING_CANDIDATE / LOCATION_UNKNOWN / CONSTRAINT_CONFLICT / AMBIGUOUS_TIME_INPUT / UNSUPPORTED_SCENARIO。
+UNAUTHENTICATED / FORBIDDEN / VERSION_CONFLICT / PREVIEW_STALE / DATE_OWNED / PROVIDER_UNAVAILABLE / NO_MATCHING_CANDIDATE / LOCATION_UNKNOWN / CONSTRAINT_CONFLICT / UNDO_CONFLICT / UNDO_EXPIRED / UNDO_UNAVAILABLE / AMBIGUOUS_TIME_INPUT / UNSUPPORTED_SCENARIO。
 
 `NO_MATCHING_CANDIDATE`与`PROVIDER_UNAVAILABLE`分开；都不能自动变成“今天没车”。数据错误不能以空数组悄悄隐藏。
 

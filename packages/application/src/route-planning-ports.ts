@@ -72,11 +72,12 @@ export type CreateRoutePreviewResult =
 
 export interface OperationReceiptRecord extends Omit<
   OperationReceiptView,
-  'createdAt'
+  'createdAt' | 'undoExpiresAt'
 > {
   readonly ownerUserId: string;
   readonly tripId: string;
   readonly createdAt: Date;
+  readonly undoExpiresAt: Date | null;
 }
 
 export type AdoptRoutePreviewResult =
@@ -94,6 +95,21 @@ export type AdoptRoutePreviewResult =
         | 'PREVIEW_BLOCKED'
         | 'FACT_PROTECTED'
         | 'DATE_OWNED';
+    };
+
+export type UndoRouteAdoptionResult =
+  | {
+      readonly status: 'SUCCESS';
+      readonly receipt: OperationReceiptRecord;
+      readonly idempotentReplay: boolean;
+    }
+  | {
+      readonly status:
+        | 'NOT_FOUND'
+        | 'IDEMPOTENCY_CONFLICT'
+        | 'UNDO_CONFLICT'
+        | 'UNDO_EXPIRED'
+        | 'UNDO_UNAVAILABLE';
     };
 
 export interface RoutePlanningRepository {
@@ -138,7 +154,17 @@ export interface RoutePlanningRepository {
     readonly idempotencyKey: string;
     readonly requestHash: string;
     readonly now: Date;
+    readonly undoExpiresAt: Date;
   }): Promise<AdoptRoutePreviewResult>;
+  undoAdoption?(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly targetOperationReceiptId: string;
+    readonly baseTripVersion: number;
+    readonly idempotencyKey: string;
+    readonly requestHash: string;
+    readonly now: Date;
+  }): Promise<UndoRouteAdoptionResult>;
 }
 
 export const systemClock: Clock = { now: () => new Date() };

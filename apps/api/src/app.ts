@@ -5,6 +5,7 @@ import {
   RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
+  RouteUndoService,
   TripService,
   isApplicationError,
 } from '@travel/application';
@@ -33,6 +34,7 @@ export interface ApiDependencies {
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
   readonly routeAdoptionService?: RouteAdoptionService;
+  readonly routeUndoService?: RouteUndoService;
   readonly tripService?: TripService;
   readonly credentialTransport?: CredentialTransport;
 }
@@ -180,6 +182,27 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         authenticated.actor,
         request.params.id,
         request.params.previewId,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string; operationReceiptId: string } }>(
+    '/trips/:id/operations/:operationReceiptId/undo',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireRouteUndoService(dependencies).undoAdoption(
+        authenticated.actor,
+        request.params.id,
+        request.params.operationReceiptId,
         {
           baseTripVersion: requiredNumber(body, 'baseTripVersion'),
           idempotencyKey: requiredString(body, 'idempotencyKey'),
@@ -496,6 +519,20 @@ function requireRouteAdoptionService(
     );
   }
   return dependencies.routeAdoptionService;
+}
+
+function requireRouteUndoService(
+  dependencies: ApiDependencies,
+): RouteUndoService {
+  if (dependencies.routeUndoService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '路线撤销服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.routeUndoService;
 }
 
 function optionalIntegerArray(

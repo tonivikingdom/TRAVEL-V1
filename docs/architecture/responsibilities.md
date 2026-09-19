@@ -283,7 +283,25 @@ Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后�
   DayOccurrence sequence；严格中间 `OCCUPIED` 日禁止增加/移入普通 itinerary Node，起止日仍可编辑。
   projection 也是正式 itinerary content，因此 DateOwnership/effective range 不会丢失 transport-only 日。
 - 幂等范围为 owner + Trip + operation type + key；同 key/同 payload 返回首次 receipt，不二次写入或
-  递增版本，同 key/不同 payload 返回 `IDEMPOTENCY_CONFLICT`。P4B3 Undo 尚未实现。
+  递增版本，同 key/不同 payload 返回 `IDEMPOTENCY_CONFLICT`。P4B3 对新的 Adopt receipt 扩展完整
+  inverse basis；历史 P4B2 receipt 不伪造缺失状态。
 - Development/Test 只有显式 `ROUTE_PROVIDER=synthetic` 才启用 SYNTHETIC adapter；
   Staging/Production 禁止 synthetic，真实 adapter 未配置时明确返回
   `ROUTE_PROVIDER_UNCONFIGURED`，绝不静默回退。
+
+### P4B3 Route Adopt 单步 Undo
+
+- Undo API 只引用服务器保存的 ROUTE_ADOPT receipt，只接收 `baseTripVersion + idempotencyKey`；客户端
+  不得提供 before topology 或 delta。
+- 新 Adopt 使用 `route-adopt-delta-v2` 固定保存全 Trip DayOccurrence/Node placement、corridor generated
+  Node 可逆元数据、DateOwnership/effective range、prior route 与 forward-created IDs。旧 receipt 缺少
+  v2 basis 或 `undoExpiresAt` 时返回 `UNDO_UNAVAILABLE`。
+- Undo 是新的 forward compensation transaction：owner advisory lock、Trip row lock、当前 version、
+  route/corridor/edge/node/history/ownership identity 与事实保护全部复核后，精确恢复原 ID 和 sequence，
+  Trip version 只向前 +1。
+- ACTUAL、新 note/UserTimeIntent/userModified 内容、未知引用、corridor 漂移或日期被另一 Trip 占用都会
+  返回 `UNDO_CONFLICT`；不迁移或删除新事实。
+- `ACTIVE / REPLACED / UNDONE` lifecycle 与 ACTIVE corridor partial unique index 防止歧义当前路线。
+  ROUTE_UNDO receipt 和 ROUTE_UNDONE outbox 与所有恢复写入同事务；ROUTE_ADOPTED 历史不删除。
+- Undo 窗口在 Adopt 时按显式配置固化；P4B3 只支持最近一步 Route Adopt，不支持 Undo-of-Undo、Redo 或
+  通用历史版本恢复。

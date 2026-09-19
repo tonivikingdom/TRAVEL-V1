@@ -14,8 +14,8 @@
 | P3B+ | 完整路线求解、候选与推荐衔接                        | 未授权、未实现                                                                                                     | P3B2 只产出要求窗口；P4 路线候选、Preview/Adopt 与 RecommendationPolicy 仍须单独授权          |
 | P4A1 | Provider-neutral Route Query、候选归一化与二次校验  | 已通过 PR #12 Squash Merge；main commit `4a50beb711e2c56679b9b846ca6a4d9ff56403cb`；main CI Run `35420894762` 通过 | 仅 SYNTHETIC 测试适配器；真实/付费 Provider 未接入                                            |
 | P4B1 | 服务端 Candidate Snapshot 与持久 Preview foundation | 已通过 PR #13 Squash Merge；main commit `9ec780d010257f0c98dba58928a68920bfa4308c`；main CI Run `35423819550` 通过 | immutable snapshot/preview foundation 已完成；真实/付费 Provider 仍未接入                     |
-| P4B2 | Adopt、事务/幂等、正式节点与交通写入                | 已授权，正在 `feature/p4b2-route-adoption` 实施                                                                    | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox；不实现 Undo                   |
-| P4B3 | Undo                                                | 未授权、未实现                                                                                                     | OperationReceipt 与显式撤销边界尚未设计/实现                                                  |
+| P4B2 | Adopt、事务/幂等、正式节点与交通写入                | 已通过 PR #14 Squash Merge；main commit `66ffaed90acaa08798dd3afe6ff62c13d80cb667`；main CI Run `35430697966` 通过 | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox 已完成                         |
+| P4B3 | Route Adopt 单步 Undo                               | 已授权，正在 `feature/p4b3-route-undo` 实施                                                                        | 前向补偿、delta v2、时限/幂等/事实保护；不实现 Undo stack 或 Redo                             |
 | P5   | 薄测试台、站内通知、已确认流程 E2E                  | 未授权、未实现                                                                                                     | O-08/O-10/O-11 产品规则已确认；监控/通知、故障态、备份、回顾/分享实现与 O-09 上线配置仍待授权 |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
@@ -65,8 +65,10 @@ O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI
   Squash Merge 到 main `0c5fcbdfe09b049c5fbbf77abe20ec296ded4383`，main CI Run `35418153790`
   通过。P4A1 已通过 PR #12 Squash Merge 到 main `4a50beb711e2c56679b9b846ca6a4d9ff56403cb`，
   main CI Run `35420894762` 通过。P4B1 已通过 PR #13 合并到 main
-  `9ec780d010257f0c98dba58928a68920bfa4308c`，main CI Run `35423819550` 通过。P4B2 已获
-  单独授权，范围仅为 Preview v2 到原子 Adopt 的正式写入；真实 Provider、推荐和 Undo 仍未授权。
+  `9ec780d010257f0c98dba58928a68920bfa4308c`，main CI Run `35423819550` 通过。P4B2 已通过
+  PR #14 合并到 main `66ffaed90acaa08798dd3afe6ff62c13d80cb667`，main CI Run `35430697966`
+  通过。P4B3 随后获得单独授权，只实现最近一次 Route Adopt 的短时安全补偿；真实 Provider、推荐、
+  多级 Undo/Redo 与 Production 仍未授权。
 
 ## P1A → P1B 邮件安全闸门
 

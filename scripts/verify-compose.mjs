@@ -412,6 +412,57 @@ async function verifyCompose(compose, composeQuiet, env) {
       'Synthetic P4B2 receipt/outbox transaction evidence is missing',
     );
   }
+  const undoIdempotencyKey = `synthetic-compose-undo-${Date.now()}`;
+  const undo = await apiJson(
+    `/trips/${routeTrip.id}/operations/${adoption.operationReceipt.id}/undo`,
+    'POST',
+    {
+      baseTripVersion: adoption.trip.version,
+      idempotencyKey: undoIdempotencyKey,
+    },
+  );
+  if (
+    undo.trip.version !== routeTrip.version + 2 ||
+    undo.trip.connections[0]?.state !== 'MISSING' ||
+    undo.trip.connections[0]?.transport !== null ||
+    undo.operationReceipt.operationType !== 'ROUTE_UNDO' ||
+    undo.operationReceipt.targetOperationReceiptId !==
+      adoption.operationReceipt.id
+  ) {
+    throw new Error('Synthetic P4B3 Undo did not restore the prior corridor');
+  }
+  const undoReplay = await apiJson(
+    `/trips/${routeTrip.id}/operations/${adoption.operationReceipt.id}/undo`,
+    'POST',
+    {
+      baseTripVersion: adoption.trip.version,
+      idempotencyKey: undoIdempotencyKey,
+    },
+  );
+  if (
+    undoReplay.operationReceipt.id !== undo.operationReceipt.id ||
+    undoReplay.trip.version !== undo.trip.version
+  ) {
+    throw new Error('Synthetic P4B3 Undo replay was not idempotent');
+  }
+  const undoEvidence = await composeQuiet(
+    'exec',
+    '--no-TTY',
+    'postgres',
+    'psql',
+    '-tA',
+    '-U',
+    databaseUser,
+    '-d',
+    databaseName,
+    '-c',
+    `SELECT (SELECT count(*) FROM "OperationReceipt" WHERE "tripId" = '${routeTrip.id}' AND "operationType" = 'ROUTE_ADOPT') || ':' || (SELECT count(*) FROM "OperationReceipt" WHERE "tripId" = '${routeTrip.id}' AND "operationType" = 'ROUTE_UNDO') || ':' || (SELECT count(*) FROM "OutboxEvent" WHERE "tripId" = '${routeTrip.id}' AND "type" = 'ROUTE_ADOPTED') || ':' || (SELECT count(*) FROM "OutboxEvent" WHERE "tripId" = '${routeTrip.id}' AND "type" = 'ROUTE_UNDONE') || ':' || (SELECT "status"::text FROM "AdoptedRoute" WHERE "id" = '${adoption.operationReceipt.adoptedRouteId}');`,
+  );
+  if (undoEvidence.trim() !== '1:1:1:1:UNDONE') {
+    throw new Error(
+      'Synthetic P4B3 receipt/outbox/lifecycle evidence is missing',
+    );
+  }
 
   const storageOwnerEnvironment = `SYNTHETIC_STORAGE_OWNER_EMAIL=${adminEmail}`;
   const storageWrite = parseLastJsonLine(
@@ -634,7 +685,7 @@ async function verifyCompose(compose, composeQuiet, env) {
   );
 
   process.stdout.write(
-    'Compose verification passed: live/ready, async Job delivery, route adoption receipt/outbox, lease recovery, outage/recovery, worker SIGTERM, PostgreSQL persistence, and private object-volume write/restart/delete.\n',
+    'Compose verification passed: live/ready, async Job delivery, route adoption/Undo receipt and outbox, lease recovery, outage/recovery, worker SIGTERM, PostgreSQL persistence, and private object-volume write/restart/delete.\n',
   );
 }
 

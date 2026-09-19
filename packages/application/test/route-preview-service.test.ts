@@ -724,6 +724,7 @@ function singleLegAdoptedTrip(): TripAggregateRecord {
         status: 'ACTIVE',
         createdAt: now,
         replacedAt: null,
+        undoneAt: null,
       },
     ],
   };

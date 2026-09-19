@@ -78,6 +78,7 @@ enum TransportSource {
 enum AdoptedRouteStatus {
   ACTIVE
   REPLACED
+  UNDONE
 }
 
 enum TransportDayProjectionRole {
@@ -89,10 +90,12 @@ enum TransportDayProjectionRole {
 
 enum OperationType {
   ROUTE_ADOPT
+  ROUTE_UNDO
 }
 
 enum OutboxEventType {
   ROUTE_ADOPTED
+  ROUTE_UNDONE
 }
 
 enum TransportInvalidationReason {
@@ -537,6 +540,7 @@ model AdoptedRoute {
   status              AdoptedRouteStatus     @default(ACTIVE)
   createdAt           DateTime               @default(now()) @db.Timestamptz(3)
   replacedAt          DateTime?              @db.Timestamptz(3)
+  undoneAt            DateTime?              @db.Timestamptz(3)
   trip                Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
   anchorFrom          ItineraryNode          @relation("AdoptedRouteFromAnchor", fields: [anchorFromNodeId, tripId], references: [id, tripId], onDelete: Restrict)
   anchorTo            ItineraryNode          @relation("AdoptedRouteToAnchor", fields: [anchorToNodeId, tripId], references: [id, tripId], onDelete: Restrict)
@@ -566,23 +570,27 @@ model TransportDayProjection {
 }
 
 model OperationReceipt {
-  id                   String        @id @default(uuid()) @db.Uuid
-  ownerUserId          String        @db.Uuid
-  tripId               String        @db.Uuid
-  operationType        OperationType
-  idempotencyKey       String        @db.VarChar(200)
-  requestHash          String        @db.VarChar(64)
-  baseTripVersion      Int
-  resultingTripVersion Int
-  previewId            String        @db.Uuid
-  adoptedRouteId       String        @db.Uuid
-  delta                Json          @db.JsonB
-  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
-  owner                User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  trip                 Trip          @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
-  preview              RoutePreview  @relation(fields: [previewId], references: [id], onDelete: Restrict)
-  adoptedRoute         AdoptedRoute  @relation(fields: [adoptedRouteId], references: [id], onDelete: Restrict)
-  outboxEvents         OutboxEvent[]
+  id                       String            @id @default(uuid()) @db.Uuid
+  ownerUserId              String            @db.Uuid
+  tripId                   String            @db.Uuid
+  operationType            OperationType
+  idempotencyKey           String            @db.VarChar(200)
+  requestHash              String            @db.VarChar(64)
+  baseTripVersion          Int
+  resultingTripVersion     Int
+  previewId                String            @db.Uuid
+  adoptedRouteId           String            @db.Uuid
+  targetOperationReceiptId String?           @unique @db.Uuid
+  undoExpiresAt            DateTime?         @db.Timestamptz(3)
+  delta                    Json              @db.JsonB
+  createdAt                DateTime          @default(now()) @db.Timestamptz(3)
+  owner                    User              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                     Trip              @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  preview                  RoutePreview      @relation(fields: [previewId], references: [id], onDelete: Restrict)
+  adoptedRoute             AdoptedRoute      @relation(fields: [adoptedRouteId], references: [id], onDelete: Restrict)
+  targetOperationReceipt   OperationReceipt? @relation("OperationUndoTarget", fields: [targetOperationReceiptId], references: [id], onDelete: Restrict)
+  undoReceipt              OperationReceipt? @relation("OperationUndoTarget")
+  outboxEvents             OutboxEvent[]
 
   @@unique([ownerUserId, tripId, operationType, idempotencyKey])
   @@index([ownerUserId, tripId, createdAt(sort: Desc)])

@@ -8,10 +8,12 @@ import type {
   RoutePreviewRecord,
   SaveRouteCandidateSnapshotsResult,
   StoredRoutePreviewPayload,
+  UndoRouteAdoptionResult,
 } from '@travel/application';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { adoptRoutePreview } from './prisma-route-adoption.js';
+import { undoRouteAdoption } from './prisma-route-undo.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -165,8 +167,21 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly idempotencyKey: string;
     readonly requestHash: string;
     readonly now: Date;
+    readonly undoExpiresAt: Date;
   }): Promise<AdoptRoutePreviewResult> {
     return adoptRoutePreview(this.client, input);
+  }
+
+  async undoAdoption(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly targetOperationReceiptId: string;
+    readonly baseTripVersion: number;
+    readonly idempotencyKey: string;
+    readonly requestHash: string;
+    readonly now: Date;
+  }): Promise<UndoRouteAdoptionResult> {
+    return undoRouteAdoption(this.client, input);
   }
 }
 

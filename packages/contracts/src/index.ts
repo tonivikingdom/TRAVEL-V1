@@ -22,6 +22,17 @@ export type {
   NotificationView,
 } from './notifications.js';
 export type {
+  RouteCandidateLegView,
+  RouteCandidateView,
+  RouteFareView,
+  RouteLocationView,
+  RouteQueryHint,
+  RouteQueryRequest,
+  RouteQueryResponse,
+  RouteQueryTimeConditionView,
+  RouteTimePointView,
+} from './routes.js';
+export type {
   ConnectionState,
   ConnectionView,
   CustomPlaceInput,

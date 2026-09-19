@@ -234,3 +234,20 @@ Adopt 一次事务写入节点、交通、来源、版本和 outbox。同一幂�
 拒绝；两台设备基于同一版本时最多一个成功。外部 API 调用不放进长数据库事务。
 
 Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后的新事实或其他设备修改。
+
+### P4A1 Route Query foundation
+
+- `POST /trips/:id/routes/query` 只读取 owner Trip 与指定 `basisVersion`，只允许当前 timeline 中相邻的
+  `PLACE_VISIT` 作为端点；FreeAction 不会被伪造成静态路线起点。
+- Application 复用 P3B2 projection：取 from Node DEPARTURE 的 earliest 和 to Node ARRIVAL 的
+  latest 作为 hard window。一次性 `DEPART_AT`/`ARRIVE_BY` hint 只能进一步收紧，不能写入
+  UserTimeIntent、TemporalValue 或 Trip，也不能放宽 hard window。
+- RouteProvider port 只接收 absolute instant、IANA timeZone context 与归一化地点；Domain 不依赖
+  HTTP、SDK 或第三方 JSON。Provider 返回 success/no-match/unavailable/unsupported 四类结果。
+- Application 对 normalized candidate 再次验证 hard window、时刻、时区、duration 与响应内
+  candidateId 唯一性；Provider success 但全部越界时返回 `NO_MATCHING_CANDIDATE`。
+- RouteCandidate 与 TransportEdge 完全分离；多 leg、walking、fixedService、fare 与 provider
+  provenance 都只是本次查询事实。P4A1 不持久化 candidate，也不创建节点、交通或版本写入。
+- Development/Test 只有显式 `ROUTE_PROVIDER=synthetic` 才启用 SYNTHETIC adapter；
+  Staging/Production 禁止 synthetic，真实 adapter 未配置时明确返回
+  `ROUTE_PROVIDER_UNCONFIGURED`，绝不静默回退。

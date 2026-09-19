@@ -50,6 +50,14 @@ export {
   digestOpaqueToken,
 } from './tokens.js';
 export { TripService } from './trip-service.js';
+export { RouteQueryService } from './route-query-service.js';
+export type {
+  RouteProvider,
+  RouteProviderLocationInput,
+  RouteProviderQueryInput,
+  RouteProviderResult,
+  RouteProviderTimePreference,
+} from './route-ports.js';
 export type {
   DayOccurrenceRecord,
   ItineraryNodeRecord,

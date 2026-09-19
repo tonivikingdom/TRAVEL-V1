@@ -22,9 +22,7 @@ import type {
   UserTimeIntentView,
 } from '@travel/contracts';
 import {
-  AbsoluteInstantError,
   evaluateScheduleConstraints,
-  parseAbsoluteIsoInstant,
   type ScheduleConstraintEvaluation,
   type ScheduleBoundBasis,
   type ScheduleMeasure,
@@ -35,6 +33,11 @@ import {
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
+import { evaluateTripScheduleRecord } from './schedule-evaluation.js';
+import {
+  parseAbsoluteInstantInput,
+  validateIanaTimeZoneInput,
+} from './time-input.js';
 import type {
   ItineraryNodeRecord,
   PlaceRecord,
@@ -224,48 +227,7 @@ export class TripService {
         409,
       );
     }
-    const result = evaluateScheduleConstraints({
-      nodes: orderedNodes(trip).map((node) => ({
-        nodeId: node.id,
-        dayOccurrenceId: node.dayOccurrenceId,
-        timeValues: node.timeValues,
-        intents: node.timeIntents.map(toDomainIntent),
-      })),
-      fixedTransportAnchors: trip.transportEdges.flatMap((edge) =>
-        edge.fixedService
-          ? edge.timeValues
-              .filter((value) => value.layer === 'PLANNED')
-              .map((value) => ({
-                transportEdgeId: edge.id,
-                nodeId:
-                  value.pointKind === 'DEPARTURE'
-                    ? edge.fromNodeId
-                    : edge.toNodeId,
-                pointKind: value.pointKind,
-                value,
-              }))
-          : [],
-      ),
-      propagationTransportAnchors: trip.transportEdges.flatMap((edge) =>
-        edge.timeValues
-          .filter(
-            (value) =>
-              value.layer === 'ACTUAL' ||
-              (edge.fixedService && value.layer === 'PLANNED'),
-          )
-          .map((value) => ({
-            transportEdgeId: edge.id,
-            nodeId:
-              value.pointKind === 'DEPARTURE' ? edge.fromNodeId : edge.toNodeId,
-            pointKind: value.pointKind,
-            anchorKind:
-              value.layer === 'ACTUAL'
-                ? ('TRANSPORT_ACTUAL' as const)
-                : ('FIXED_TRANSPORT_PLANNED' as const),
-            value,
-          })),
-      ),
-    });
+    const result = evaluateTripScheduleRecord(trip);
     return {
       tripId: trip.id,
       basisVersion: trip.version,
@@ -357,8 +319,8 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
         ...command,
         pointKind: validateTemporalPointKind(command.pointKind),
         operator: validatePointTimeOperator(command.operator),
-        instant: parseAbsoluteInstant(command.instant, 'instant'),
-        timeZone: validateIanaTimeZone(command.timeZone),
+        instant: parseAbsoluteInstantInput(command.instant, 'instant'),
+        timeZone: validateIanaTimeZoneInput(command.timeZone),
         locked: requiredBoolean(command.locked, 'locked'),
       };
     case 'REMOVE_TIME_INTENT':
@@ -820,14 +782,14 @@ function validateTemporalValue(
   return {
     layer: value.layer,
     pointKind: value.pointKind,
-    instant: parseAbsoluteInstant(value.instant, 'instant'),
-    timeZone: validateIanaTimeZone(value.timeZone),
+    instant: parseAbsoluteInstantInput(value.instant, 'instant'),
+    timeZone: validateIanaTimeZoneInput(value.timeZone),
     sourceKind: value.sourceKind,
     sourceRef: optionalText(value.sourceRef, 'sourceRef', 300),
     observedAt:
       value.observedAt === undefined || value.observedAt === null
         ? null
-        : parseAbsoluteInstant(value.observedAt, 'observedAt'),
+        : parseAbsoluteInstantInput(value.observedAt, 'observedAt'),
   };
 }
 
@@ -846,41 +808,6 @@ function validatePointTimeOperator(
   }
   return value as 'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER';
 }
-
-function parseAbsoluteInstant(value: string, field: string): Date {
-  if (typeof value !== 'string') {
-    throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
-  }
-  try {
-    return parseAbsoluteIsoInstant(value, field);
-  } catch (error) {
-    if (error instanceof AbsoluteInstantError && error.reason === 'FORMAT') {
-      throw new ApplicationError(
-        'UNSUPPORTED_SCENARIO',
-        `${field} 必须是带 Z 或明确 UTC offset 的绝对时刻。`,
-        400,
-      );
-    }
-    if (error instanceof AbsoluteInstantError) {
-      throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
-    }
-    throw error;
-  }
-}
-
-function validateIanaTimeZone(value: string): string {
-  if (
-    typeof value !== 'string' ||
-    value.length < 1 ||
-    value.length > 100 ||
-    (value !== 'UTC' && !SUPPORTED_IANA_TIME_ZONES.has(value))
-  ) {
-    throw new ApplicationError('VALIDATION_ERROR', 'timeZone 无效。', 400);
-  }
-  return value;
-}
-
-const SUPPORTED_IANA_TIME_ZONES = new Set(Intl.supportedValuesOf('timeZone'));
 
 function validateTransportMode(value: TransportMode): TransportMode {
   if (
@@ -946,54 +873,6 @@ function requiredBoolean(value: boolean, field: string): boolean {
     throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
   }
   return value;
-}
-
-function toDomainIntent(record: UserTimeIntentRecord): ScheduleUserTimeIntent {
-  if (
-    record.kind === 'POINT_TIME' &&
-    record.pointKind !== null &&
-    record.operator !== 'MINIMUM' &&
-    record.instant !== null &&
-    record.timeZone !== null &&
-    record.durationSeconds === null
-  ) {
-    return {
-      id: record.id,
-      nodeId: record.nodeId,
-      kind: 'POINT_TIME',
-      pointKind: record.pointKind,
-      operator: record.operator,
-      instant: record.instant,
-      timeZone: record.timeZone,
-      durationSeconds: null,
-      locked: record.locked,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    };
-  }
-  if (
-    record.kind === 'MIN_DWELL' &&
-    record.pointKind === null &&
-    record.operator === 'MINIMUM' &&
-    record.instant === null &&
-    record.timeZone === null &&
-    record.durationSeconds !== null
-  ) {
-    return {
-      id: record.id,
-      nodeId: record.nodeId,
-      kind: 'MIN_DWELL',
-      pointKind: null,
-      operator: 'MINIMUM',
-      instant: null,
-      timeZone: null,
-      durationSeconds: record.durationSeconds,
-      locked: record.locked,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    };
-  }
-  throw new Error('UserTimeIntent persistence invariant is broken');
 }
 
 function toIntentViewFromDomain(

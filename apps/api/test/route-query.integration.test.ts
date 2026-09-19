@@ -743,7 +743,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(0);
 
-    await command(userA, trip, {
+    trip = await command(userA, trip, {
       type: 'DELETE_NODE',
       nodeId: node.id,
     });
@@ -753,22 +753,17 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(0);
 
-    const tripToDelete = await tripWithVisitsOnDate(
-      userA,
-      ['Cascade trip', 'Next'],
-      '2030-10-02',
-    );
-    const cascadeNode = tripToDelete.days[0]!.nodes[0]!;
+    const cascadeNode = trip.days[0]!.nodes[0]!;
     expect(
       await tripRepository.setSystemDwellSuggestion({
         ownerUserId: userA.actor.userId,
-        tripId: tripToDelete.id,
-        baseTripVersion: tripToDelete.version,
+        tripId: trip.id,
+        baseTripVersion: trip.version,
         nodeId: cascadeNode.id,
         durationSeconds: 900,
       }),
     ).toMatchObject({ status: 'SUCCESS' });
-    await managed.client.trip.delete({ where: { id: tripToDelete.id } });
+    await managed.client.trip.delete({ where: { id: trip.id } });
     expect(
       await managed.client.systemDwellSuggestion.count({
         where: { nodeId: cascadeNode.id },
@@ -880,14 +875,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   });
 
   it('does not let Undo overwrite a later user MIN_DWELL change, removal, or lock decision', async () => {
-    for (const [index, mutation] of (
-      ['CHANGE', 'REMOVE', 'LOCK'] as const
-    ).entries()) {
-      const scenario = await adjustableAdoption(
-        userA,
-        `undo-${mutation}`,
-        `2030-10-0${index + 1}`,
-      );
+    for (const mutation of ['CHANGE', 'REMOVE', 'LOCK'] as const) {
+      const scenario = await adjustableAdoption(userA, `undo-${mutation}`);
       const adopted = await adoptSuccessfully(
         userA,
         scenario.trip,
@@ -935,6 +924,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           where: { tripId: scenario.trip.id, operationType: 'ROUTE_UNDO' },
         }),
       ).toBe(0);
+      await managed.client.trip.delete({ where: { id: scenario.trip.id } });
     }
   });
 
@@ -2407,7 +2397,6 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   async function adjustableAdoption(
     identity: SyntheticIdentity,
     label: string,
-    localDate = '2030-10-01',
   ): Promise<{
     trip: TripView;
     preview: RoutePreviewView;
@@ -2416,11 +2405,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       RoutePreviewView['changeSummary']['requiredUserAdjustments']
     >;
   }> {
-    let trip = await tripWithVisitsOnDate(
-      identity,
-      [`SYNTHETIC ${label} from`, `SYNTHETIC ${label} to`],
-      localDate,
-    );
+    let trip = await tripWithVisits(identity, [
+      `SYNTHETIC ${label} from`,
+      `SYNTHETIC ${label} to`,
+    ]);
     const [from, to] = trip.days[0]!.nodes;
     const temporal = await app.inject({
       method: 'POST',

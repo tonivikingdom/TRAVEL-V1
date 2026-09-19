@@ -1,6 +1,7 @@
 import {
   AuthService,
   NotificationService,
+  RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
   TripService,
@@ -33,6 +34,7 @@ let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
 let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
+let routeAdoptionService: RouteAdoptionService | undefined;
 let tripService: TripService | undefined;
 
 if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
@@ -70,6 +72,10 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     { previewTtlSeconds: routePlanningConfig.previewTtlSeconds },
   );
   tripService = new TripService(tripRepository);
+  routeAdoptionService = new RouteAdoptionService(
+    planningRepository,
+    tripService,
+  );
 }
 
 const app = buildApi({
@@ -78,6 +84,7 @@ const app = buildApi({
   ...(notificationService === undefined ? {} : { notificationService }),
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(routePreviewService === undefined ? {} : { routePreviewService }),
+  ...(routeAdoptionService === undefined ? {} : { routeAdoptionService }),
   ...(tripService === undefined ? {} : { tripService }),
 });
 let shuttingDown = false;

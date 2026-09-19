@@ -52,13 +52,19 @@ export {
 export { TripService } from './trip-service.js';
 export { RouteQueryService } from './route-query-service.js';
 export { RoutePreviewService } from './route-preview-service.js';
+export { ROUTE_PREVIEW_POLICY_VERSION } from './route-preview-service.js';
+export { RouteAdoptionService } from './route-adoption-service.js';
 export {
   hashRouteCandidateSnapshot,
+  hashRoutePreviewPayload,
+  hashRouteAdoptionRequest,
   restoreNormalizedCandidate,
 } from './route-snapshot.js';
 export {
   systemClock,
   type Clock,
+  type AdoptRoutePreviewResult,
+  type OperationReceiptRecord,
   type CreateRoutePreviewResult,
   type RouteCandidatePayload,
   type RouteCandidateSnapshotDraft,

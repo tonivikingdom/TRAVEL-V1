@@ -1,4 +1,5 @@
 import type {
+  OperationReceiptView,
   RouteCandidateView,
   RoutePreviewView,
   RouteQueryTimeConditionView,
@@ -48,6 +49,7 @@ export interface RoutePreviewRecord {
   readonly candidateHash: string;
   readonly policyVersion: string;
   readonly previewPayload: StoredRoutePreviewPayload;
+  readonly previewHash?: string | null;
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }
@@ -66,6 +68,32 @@ export type CreateRoutePreviewResult =
   | {
       readonly status:
         'NOT_FOUND' | 'VERSION_CONFLICT' | 'PREVIEW_STALE' | 'NOT_ADJACENT';
+    };
+
+export interface OperationReceiptRecord extends Omit<
+  OperationReceiptView,
+  'createdAt'
+> {
+  readonly ownerUserId: string;
+  readonly tripId: string;
+  readonly createdAt: Date;
+}
+
+export type AdoptRoutePreviewResult =
+  | {
+      readonly status: 'SUCCESS';
+      readonly receipt: OperationReceiptRecord;
+      readonly idempotentReplay: boolean;
+    }
+  | {
+      readonly status:
+        | 'NOT_FOUND'
+        | 'VERSION_CONFLICT'
+        | 'IDEMPOTENCY_CONFLICT'
+        | 'PREVIEW_STALE'
+        | 'PREVIEW_BLOCKED'
+        | 'FACT_PROTECTED'
+        | 'DATE_OWNED';
     };
 
 export interface RoutePlanningRepository {
@@ -92,6 +120,7 @@ export interface RoutePlanningRepository {
     readonly toNodeId: string;
     readonly policyVersion: string;
     readonly previewPayload: StoredRoutePreviewPayload;
+    readonly previewHash: string;
     readonly now: Date;
     readonly createdAt: Date;
     readonly expiresAt: Date;
@@ -101,6 +130,15 @@ export interface RoutePlanningRepository {
     readonly tripId: string;
     readonly previewId: string;
   }): Promise<RoutePreviewRecord | null>;
+  adoptPreview?(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly previewId: string;
+    readonly baseTripVersion: number;
+    readonly idempotencyKey: string;
+    readonly requestHash: string;
+    readonly now: Date;
+  }): Promise<AdoptRoutePreviewResult>;
 }
 
 export const systemClock: Clock = { now: () => new Date() };

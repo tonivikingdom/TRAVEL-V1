@@ -1,5 +1,5 @@
 export type ItineraryNodeKind = 'PLACE_VISIT' | 'FREE_ACTION';
-export type ItineraryNodeSource = 'USER_PLANNED';
+export type ItineraryNodeSource = 'USER_PLANNED' | 'ROUTE_GENERATED';
 export type TransportMode =
   | 'WALKING'
   | 'DRIVING'
@@ -9,7 +9,9 @@ export type TransportMode =
   | 'FERRY'
   | 'FLIGHT'
   | 'OTHER';
-export type TransportSource = 'MANUAL';
+export type TransportSource = 'MANUAL' | 'ADOPTED_ROUTE';
+export type TransportDayProjectionRole =
+  'SAME_DAY' | 'START' | 'OCCUPIED' | 'END';
 export type TransportInvalidationReason =
   | 'ADJACENCY_CHANGED'
   | 'ENDPOINT_REPLACED'
@@ -62,6 +64,13 @@ export interface ItineraryNodeView {
   readonly place: PlaceView | null;
   readonly note: string | null;
   readonly source: ItineraryNodeSource;
+  readonly adoptedRouteId: string | null;
+  readonly provider: string | null;
+  readonly providerPlaceRef: string | null;
+  readonly providerHubRef: string | null;
+  readonly sourceOperationId: string | null;
+  readonly autoReplaceable: boolean;
+  readonly userModifiedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly timeValues: readonly TemporalValueView[];
@@ -90,6 +99,9 @@ export interface TransportEdgeView {
   readonly serviceLabel: string | null;
   readonly note: string | null;
   readonly source: TransportSource;
+  readonly adoptedRouteId: string | null;
+  readonly provider: string | null;
+  readonly providerRef: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly timeValues: readonly TemporalValueView[];
@@ -105,6 +117,9 @@ export interface TransportHistoryView {
   readonly serviceLabel: string | null;
   readonly note: string | null;
   readonly source: TransportSource;
+  readonly adoptedRouteId: string | null;
+  readonly provider: string | null;
+  readonly providerRef: string | null;
   readonly originalCreatedAt: string;
   readonly invalidatedAt: string;
   readonly invalidationReason: TransportInvalidationReason;
@@ -123,6 +138,13 @@ export interface DayView {
   readonly localDate: string;
   readonly sequence: number;
   readonly nodes: readonly ItineraryNodeView[];
+  readonly transportProjections: readonly TransportDayProjectionView[];
+}
+
+export interface TransportDayProjectionView {
+  readonly transportEdgeId: string;
+  readonly dayOccurrenceId: string;
+  readonly role: TransportDayProjectionRole;
 }
 
 export interface TripView {

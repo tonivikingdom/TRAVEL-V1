@@ -28,6 +28,7 @@ import {
   evaluateTripScheduleRecord,
   orderedTripNodes,
 } from './schedule-evaluation.js';
+import { resolveCurrentRouteCorridor } from './route-corridor.js';
 import {
   parseAbsoluteInstantInput,
   validateIanaTimeZoneInput,
@@ -35,6 +36,7 @@ import {
 import type {
   ItineraryNodeRecord,
   PlaceRecord,
+  TripAggregateRecord,
   TripRepository,
 } from './trip-ports.js';
 
@@ -103,10 +105,10 @@ export class RouteQueryService {
     if (fromIndex < 0 || toIndex < 0) {
       throw new ApplicationError('NOT_FOUND', '行程节点不存在。', 404);
     }
-    if (toIndex !== fromIndex + 1) {
+    if (!isQueryableRouteCorridor(trip, nodes, fromIndex, toIndex)) {
       throw new ApplicationError(
         'ROUTE_QUERY_UNSUPPORTED',
-        '路线查询只支持当前 timeline 中相邻的两个节点。',
+        '路线查询只能连接相邻节点或同一当前已采用路线的两个锚点。',
         422,
       );
     }
@@ -445,7 +447,16 @@ function toTimePointView(point: {
 }
 
 function toLocationView(location: RouteLocation) {
-  return location;
+  return { ...location, providerHubRef: location.providerHubRef ?? null };
+}
+
+function isQueryableRouteCorridor(
+  trip: TripAggregateRecord,
+  nodes: readonly ItineraryNodeRecord[],
+  fromIndex: number,
+  toIndex: number,
+): boolean {
+  return resolveCurrentRouteCorridor(trip, nodes, fromIndex, toIndex) !== null;
 }
 
 function providerCandidateUsesSupportedZones(

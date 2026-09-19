@@ -24,6 +24,8 @@ const snapshotId = '00000000-0000-4000-8000-000000000006';
 const previewId = '00000000-0000-4000-8000-000000000007';
 const transportId = '00000000-0000-4000-8000-000000000008';
 const intentId = '00000000-0000-4000-8000-000000000009';
+const adoptedRouteId = '00000000-0000-4000-8000-000000000010';
+const staleRouteId = '00000000-0000-4000-8000-000000000011';
 const now = new Date('2030-01-01T00:00:00.000Z');
 
 const actor: Actor = {
@@ -80,7 +82,7 @@ describe('RoutePreviewService', () => {
       previewId,
       candidateSnapshotId: snapshotId,
       candidateHash: snapshot.candidateHash,
-      policyVersion: 'route-adoption-preview-v1',
+      policyVersion: 'route-adoption-preview-v2',
       adoptable: true,
       status: 'ACTIVE',
       currentConnection: { state: 'MISSING', transport: null },
@@ -98,6 +100,42 @@ describe('RoutePreviewService', () => {
     expect(tripRepository.executeCommand).not.toHaveBeenCalled();
     expect(tripRepository.setTemporalValue).not.toHaveBeenCalled();
     expect(trip.version).toBe(3);
+  });
+
+  it('identifies a directly adjacent ACTIVE adopted route from its current edge', async () => {
+    trip = singleLegAdoptedTrip();
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.routeCorridor).toMatchObject({
+      currentAdoptedRouteId: adoptedRouteId,
+      currentNodeIds: [fromNodeId, toNodeId],
+    });
+    expect(preview.changeSummary.willReplaceTransportEdgeIds).toEqual([
+      transportId,
+    ]);
+  });
+
+  it('rejects ambiguous ACTIVE route lifecycle records instead of selecting the first', async () => {
+    const current = singleLegAdoptedTrip();
+    trip = {
+      ...current,
+      adoptedRoutes: [
+        ...current.adoptedRoutes!,
+        {
+          ...current.adoptedRoutes![0]!,
+          id: staleRouteId,
+          sourcePreviewId: staleRouteId,
+          candidateSnapshotId: staleRouteId,
+        },
+      ],
+    };
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    await expect(
+      service().createPreview(actor, tripId, request()),
+    ).rejects.toMatchObject({ code: 'PREVIEW_STALE' });
   });
 
   it('preserves multi-leg walking and fixed-service facts and proposes located transfers', async () => {
@@ -262,6 +300,177 @@ describe('RoutePreviewService', () => {
 
     const fetched = await service().getPreview(actor, tripId, active.previewId);
     expect(fetched).toMatchObject({ status: 'EXPIRED', adoptable: false });
+  });
+
+  it('keeps a v1 preview readable but marks it SUPERSEDED_POLICY', async () => {
+    const active = await service().createPreview(actor, tripId, request());
+    const persisted = await vi.mocked(planningRepository.createPreview).mock
+      .results[0]!.value;
+    if (persisted.status !== 'SUCCESS') throw new Error('expected preview');
+    vi.mocked(planningRepository.findPreviewOwned).mockResolvedValue({
+      ...persisted.preview,
+      policyVersion: 'route-adoption-preview-v1',
+      previewPayload: {
+        ...persisted.preview.previewPayload,
+        policyVersion: 'route-adoption-preview-v1',
+      },
+    });
+
+    await expect(
+      service().getPreview(actor, tripId, active.previewId),
+    ).resolves.toMatchObject({
+      status: 'SUPERSEDED_POLICY',
+      adoptable: false,
+    });
+  });
+
+  it('collapses a structured same-hub walking transfer without creating a formal segment', async () => {
+    const from = location('From', 35, 139, 'from');
+    const railStation = {
+      ...location('Rail Station', 35.1, 139.1, 'rail-station'),
+      providerHubRef: 'hub-station',
+    };
+    const busStop = {
+      ...location('Bus Stop', 35.11, 139.11, 'bus-stop'),
+      providerHubRef: 'hub-station',
+    };
+    const to = location('To', 36, 140, 'to');
+    snapshot = candidateSnapshot(
+      payload([
+        leg(
+          'RAIL',
+          from,
+          railStation,
+          '2030-01-01T01:00:00.000Z',
+          '2030-01-01T01:20:00.000Z',
+          true,
+        ),
+        leg(
+          'WALKING',
+          railStation,
+          busStop,
+          '2030-01-01T01:20:00.000Z',
+          '2030-01-01T01:30:00.000Z',
+          false,
+        ),
+        leg(
+          'BUS',
+          busStop,
+          to,
+          '2030-01-01T01:40:00.000Z',
+          '2030-01-01T02:00:00.000Z',
+          true,
+        ),
+      ]),
+    );
+    vi.mocked(planningRepository.findSnapshotOwned).mockResolvedValue(snapshot);
+
+    const preview = await service().createPreview(actor, tripId, request());
+    expect(preview.changeSummary.generatedTransferPoints).toHaveLength(1);
+    expect(preview.changeSummary.proposedSegments).toHaveLength(2);
+    expect(preview.changeSummary.internalTransferDetails).toEqual([
+      expect.objectContaining({
+        legIndex: 1,
+        mode: 'WALKING',
+        evidence: 'SYSTEM_STRUCTURED',
+      }),
+    ]);
+  });
+
+  it('accepts typed user same-hub confirmation but never rewrites candidate facts', async () => {
+    const from = location('From', 35, 139, 'from');
+    const station = location('Station', 35.1, 139.1, 'station');
+    const stop = location('Stop', 35.11, 139.11, 'stop');
+    const to = location('To', 36, 140, 'to');
+    snapshot = candidateSnapshot(
+      payload([
+        leg(
+          'RAIL',
+          from,
+          station,
+          '2030-01-01T01:00:00.000Z',
+          '2030-01-01T01:20:00.000Z',
+          true,
+        ),
+        leg(
+          'WALKING',
+          station,
+          stop,
+          '2030-01-01T01:20:00.000Z',
+          '2030-01-01T01:30:00.000Z',
+          false,
+        ),
+        leg(
+          'BUS',
+          stop,
+          to,
+          '2030-01-01T01:40:00.000Z',
+          '2030-01-01T02:00:00.000Z',
+          true,
+        ),
+      ]),
+    );
+    vi.mocked(planningRepository.findSnapshotOwned).mockResolvedValue(snapshot);
+
+    const preview = await service().createPreview(actor, tripId, {
+      ...request(),
+      sameHubWalkingLegIndexes: [1],
+    });
+    expect(preview.changeSummary.internalTransferDetails?.[0]).toMatchObject({
+      evidence: 'USER_CONFIRMED',
+      durationSeconds: 600,
+    });
+    expect(preview.candidate.legs[1]).toMatchObject({
+      mode: 'WALKING',
+      providerRef: 'walking-1',
+      durationSeconds: 600,
+    });
+  });
+
+  it('does not infer same-hub grouping from similar names or nearby coordinates', async () => {
+    const from = location('From', 35, 139, 'from');
+    const station = location('Central Station', 35.1, 139.1, 'station');
+    const stop = location(
+      'Central Station Bus Stop',
+      35.10001,
+      139.10001,
+      'bus-stop',
+    );
+    const to = location('To', 36, 140, 'to');
+    snapshot = candidateSnapshot(
+      payload([
+        leg(
+          'RAIL',
+          from,
+          station,
+          '2030-01-01T01:00:00.000Z',
+          '2030-01-01T01:20:00.000Z',
+          true,
+        ),
+        leg(
+          'WALKING',
+          station,
+          stop,
+          '2030-01-01T01:20:00.000Z',
+          '2030-01-01T01:30:00.000Z',
+          false,
+        ),
+        leg(
+          'BUS',
+          stop,
+          to,
+          '2030-01-01T01:40:00.000Z',
+          '2030-01-01T02:00:00.000Z',
+          true,
+        ),
+      ]),
+    );
+    vi.mocked(planningRepository.findSnapshotOwned).mockResolvedValue(snapshot);
+
+    const preview = await service().createPreview(actor, tripId, request());
+    expect(preview.changeSummary.generatedTransferPoints).toHaveLength(2);
+    expect(preview.changeSummary.proposedSegments).toHaveLength(3);
+    expect(preview.changeSummary.internalTransferDetails).toEqual([]);
   });
 
   function service(): RoutePreviewService {
@@ -476,6 +685,47 @@ function baseTrip(
           },
         ]
       : [],
+  };
+}
+
+function singleLegAdoptedTrip(): TripAggregateRecord {
+  const trip = baseTrip();
+  return {
+    ...trip,
+    transportEdges: [
+      {
+        id: transportId,
+        tripId,
+        fromNodeId,
+        toNodeId,
+        mode: 'BUS',
+        fixedService: false,
+        serviceLabel: null,
+        note: null,
+        source: 'ADOPTED_ROUTE',
+        adoptedRouteId,
+        provider: 'SYNTHETIC',
+        providerRef: 'synthetic-current-edge',
+        createdAt: now,
+        updatedAt: now,
+        timeValues: [],
+      },
+    ],
+    adoptedRoutes: [
+      {
+        id: adoptedRouteId,
+        tripId,
+        anchorFromNodeId: fromNodeId,
+        anchorToNodeId: toNodeId,
+        sourcePreviewId: previewId,
+        candidateSnapshotId: snapshotId,
+        candidateHash: 'a'.repeat(64),
+        policyVersion: 'route-adoption-preview-v2',
+        status: 'ACTIVE',
+        createdAt: now,
+        replacedAt: null,
+      },
+    ],
   };
 }
 

@@ -2,6 +2,7 @@ import {
   ApplicationError,
   AuthService,
   NotificationService,
+  RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
   TripService,
@@ -31,6 +32,7 @@ export interface ApiDependencies {
   readonly notificationService?: NotificationService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
+  readonly routeAdoptionService?: RouteAdoptionService;
   readonly tripService?: TripService;
   readonly credentialTransport?: CredentialTransport;
 }
@@ -152,8 +154,37 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       ).createPreview(authenticated.actor, request.params.id, {
         basisVersion: requiredNumber(body, 'basisVersion'),
         candidateSnapshotId: requiredString(body, 'candidateSnapshotId'),
+        ...(optionalIntegerArray(body, 'sameHubWalkingLegIndexes') === undefined
+          ? {}
+          : {
+              sameHubWalkingLegIndexes: optionalIntegerArray(
+                body,
+                'sameHubWalkingLegIndexes',
+              )!,
+            }),
       });
       return reply.code(201).send(preview);
+    },
+  );
+
+  app.post<{ Params: { id: string; previewId: string } }>(
+    '/trips/:id/previews/:previewId/adopt',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireRouteAdoptionService(dependencies).adoptPreview(
+        authenticated.actor,
+        request.params.id,
+        request.params.previewId,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      );
     },
   );
 
@@ -451,6 +482,32 @@ function requireRoutePreviewService(
     );
   }
   return dependencies.routePreviewService;
+}
+
+function requireRouteAdoptionService(
+  dependencies: ApiDependencies,
+): RouteAdoptionService {
+  if (dependencies.routeAdoptionService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '路线采用服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.routeAdoptionService;
+}
+
+function optionalIntegerArray(
+  body: Record<string, unknown>,
+  key: string,
+): readonly number[] | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(Number.isSafeInteger)) {
+    throw new ApplicationError('VALIDATION_ERROR', `${key} 无效。`, 400);
+  }
+  return value as number[];
 }
 
 function requiredBodyString(body: unknown, key: string): string {

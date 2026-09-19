@@ -13,6 +13,7 @@ export interface RouteLocation {
   readonly latitude: number | null;
   readonly longitude: number | null;
   readonly providerPlaceRef: string | null;
+  readonly providerHubRef?: string | null;
 }
 
 export interface RouteTimePoint {
@@ -142,6 +143,13 @@ function validLeg(leg: RouteCandidateLeg): boolean {
 
 function validLocation(location: RouteLocation): boolean {
   if (location.name.trim() === '') return false;
+  if (
+    location.providerHubRef !== undefined &&
+    location.providerHubRef !== null &&
+    location.providerHubRef.trim() === ''
+  ) {
+    return false;
+  }
   if (
     (location.latitude === null) !== (location.longitude === null) ||
     (location.latitude !== null &&

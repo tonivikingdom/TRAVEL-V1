@@ -239,7 +239,22 @@ expiry、hash、adjacency、domain 与 P3B2 hard window，并以明确 policyVer
 Preview 可重新读取；过期时 `adoptable=false`。它只描述 CREATE/REPLACE、transfer points 和 proposed
 segments，不创建 Place/Node/Transport，不复制时间到 Node，不修改正式 Trip 或版本。
 
-**Adopt**：服务端重新校验权限、Trip版本、预览过期和Provider适用性；有效则一次事务落地节点、交通、来源与相关结果，并产生outbox事件。
+P4B2 把 Preview 升级为 `route-adoption-preview-v2`：必须先算清 route corridor、generated Node 的
+新建/可靠复用/移除/保护、正式 Transport 分段、internal transfer 和跨 DayOccurrence 投影。仅依
+Provider structured `providerHubRef` 或用户在当前 Preview 中的明确确认合并同一枢纽；不用名称或距离
+猜测。同枢纽 internal WALKING 保留解释依据但不创建假 TransportEdge。旧 v1 Preview 可读且
+标记 `SUPERSEDED_POLICY`，不可直接 Adopt。
+
+**Adopt**：`POST /trips/:id/previews/:previewId/adopt` 只接受 `baseTripVersion` 和
+`idempotencyKey`。服务端在 owner/Trip 锁保护下复核 Preview/Snapshot/hash/corridor/事实保护，不再调
+Provider；有效时用一次事务写入 AdoptedRoute、`ROUTE_GENERATED` Node、`ADOPTED_ROUTE`
+TransportEdge、Transport 的 `PLANNED + ADOPTED_TRANSPORT_FACT`、TransportDayProjection、
+USER_REPLACED History、DateOwnership、Trip version +1、OperationReceipt 和 `ROUTE_ADOPTED` outbox。
+候选不会写 Node 时间或 ACTUAL。
+
+跨日 Transport 仍只有一个 Edge，按 DayOccurrence sequence 投影为 `SAME_DAY` 或
+`START/OCCUPIED/END`；严格中间 OCCUPIED 日是正式 itinerary content，保留 DateOwnership 并禁止普通
+Visit/FreeAction 重叠，起止日仍可编辑。
 
 必须有requestId/idempotencyKey；同一请求重试不能重复插入Visit、费用、任务或通知。相同key不同payload要拒绝。两设备同时采用同一baseVersion最多一个成功；另一个明确VERSION_CONFLICT。[S09]
 

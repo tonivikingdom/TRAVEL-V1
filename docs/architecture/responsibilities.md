@@ -263,6 +263,27 @@ Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后�
 - Snapshot/Preview 只写各自临时表；不增加 Trip version，不写正式 Place、Node、Transport、TemporalValue、
   History 或 Notification。过期 Preview 可读取但 `status=EXPIRED`、`adoptable=false`。
 - P4B1 不实现 Adopt、idempotency、OperationReceipt、outbox 或 Undo；这些分别属于 P4B2/P4B3 后续闸门。
+
+### P4B2 Route Adopt 与正式写入
+
+- `route-adoption-preview-v2` 把 corridor、节点新建/复用/移除、内部换乘、正式交通段和跨日投影预先冻结为
+  deterministic plan。历史 v1 Preview 可读但是 `SUPERSEDED_POLICY`，不可 Adopt。
+- 中转节点只代表真实下车/换乘/等待位置；同一物理枢纽的合并只信任 Provider `providerHubRef` 或
+  Preview 中的用户明确确认，不使用名称、距离或 fuzzy matching。同枢纽内部 WALKING 留在 provenance/
+  receipt，不生成独立 TransportEdge；不同地点间的 WALKING 仍是正式交通。
+- `AdoptedRoute` 表达当前 route corridor；`ROUTE_GENERATED` Node 保留 provider identity、source operation、
+  auto-replaceable 状态。ACTUAL、UserTimeIntent、note 或用户手动移动/替换都会阻止静默删除；只依据
+  `providerPlaceRef` / `providerHubRef` 复用节点。
+- Adopt API 只接收 `baseTripVersion + idempotencyKey` 并引用服务端 Preview，不接受客户端 Candidate JSON。
+  owner lock、Trip row lock、preview/snapshot/hash/corridor/protection 复核、旧路线归档、节点/交通/时间/投影写入、
+  DateOwnership、Trip version +1、OperationReceipt 与 outbox 全部在一个 PostgreSQL transaction 中完成。
+- Adopt 不再调 Provider；候选时间只写 Transport `PLANNED + ADOPTED_TRANSPORT_FACT`，不复制到 Node，
+  绝不生成 ACTUAL。被替换的交通以 `USER_REPLACED` 进入强类型 History。
+- `TransportDayProjection` 把同一 TransportEdge 以 `SAME_DAY` 或 `START/OCCUPIED/END` 投影到
+  DayOccurrence sequence；严格中间 `OCCUPIED` 日禁止增加/移入普通 itinerary Node，起止日仍可编辑。
+  projection 也是正式 itinerary content，因此 DateOwnership/effective range 不会丢失 transport-only 日。
+- 幂等范围为 owner + Trip + operation type + key；同 key/同 payload 返回首次 receipt，不二次写入或
+  递增版本，同 key/不同 payload 返回 `IDEMPOTENCY_CONFLICT`。P4B3 Undo 尚未实现。
 - Development/Test 只有显式 `ROUTE_PROVIDER=synthetic` 才启用 SYNTHETIC adapter；
   Staging/Production 禁止 synthetic，真实 adapter 未配置时明确返回
   `ROUTE_PROVIDER_UNCONFIGURED`，绝不静默回退。

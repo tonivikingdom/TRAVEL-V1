@@ -17,6 +17,9 @@
   和跨卡移动。legacy localDate-only 命令不再接受。
 - current Transport adjacency、connection projection 与结构变化失效使用新顺序；Transport 历史、
   ACTUAL/FACT_PROTECTED、owner isolation 和一次 command 只递增一次 Trip version 的边界保持。
+- 跨 occurrence MOVE_NODE 在受锁 Trip mutation 事务内保护 Node ACTUAL：有 ACTUAL 时返回
+  FACT_PROTECTED 且不产生部分结构、Transport history、ownership 或 version 变化；同 occurrence
+  重排以及仅有 PLANNED / ESTIMATED 的跨卡移动保持允许。
 - O-01/O-02 保持：首尾空白 occurrence 收缩，中间空白 occurrence 保留；重复日期卡只共享一份
   DateOwnership；Trip 变空时 range、ownership 与 occurrences 全部清空。
 

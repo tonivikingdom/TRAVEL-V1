@@ -848,6 +848,7 @@ async function moveNode(
   if (targetPosition > targetIds.length) {
     throw new TripTransactionAbort('INVALID_POSITION');
   }
+  await assertNodeActualNotProtected(transaction, node.id);
   const temporaryPosition = targetIds.length + sourceIds.length + 1;
   await transaction.itineraryNode.update({
     where: { id: node.id },

@@ -24,6 +24,9 @@ sequence，localDate 只承担当地日期语义。
   范围按保留 occurrence 的自然日期最小/最大值计算。
 - 首尾没有有效节点的 occurrence 在同一 Trip mutation 事务中收缩；中间空白 occurrence 保留；
   Trip 变空时 occurrence、ownership 与 effective range 全部清空。
+- 普通结构命令不得把已有 ACTUAL 时间事实的 Node 移到另一张 occurrence；该检查与 Trip row lock、
+  version 校验和结构修改处于同一事务。相同 occurrence 内重排不改变日期卡身份，继续允许；
+  PLANNED / ESTIMATED 不触发该保护。历史事实纠错留给后续显式流程。
 - 旧数据 migration 按原 effective range 为每个自然日建一张 occurrence（含中间空白日），sequence
   按旧日期升序回填，再以旧 localDate + position 绑定 Node，保持 P2B 顺序无损。
 

@@ -36,8 +36,8 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 | Visit                                          | 某次出现；PLACE或FREE_ACTION；来源与执行状态            | P2                                                             |
 | TransportEdge / AdoptedRoute                   | 相邻连接、已采用快照、历史失效                          | P2/P4                                                          |
 | RouteCandidate / RouteReference                | 尚未采用的查询候选 / 复制来的旧方案参考                 | P4；不直接当现行事实                                           |
-| UserTimeIntent / TimeConstraint                | 固定/最早/最晚/最低停留/预留要求                        | P3                                                             |
-| ScheduleProjection                             | 从当前版本与证据计算出的结果                            | P3                                                             |
+| UserTimeIntent / TimeConstraint                | 精确/最早/最晚/最低停留与 lock 元数据                   | P3B1 已实现当前要求基础；完整传播后置                           |
+| ScheduleProjection                             | 从当前版本、事实与用户要求纯计算出的可解释评估          | P3B1 已实现 V1 只读评估；完整 solver 后置                      |
 | Evidence / ProviderSnapshot                    | 观测时间、来源、适用位置、可靠性                        | P3/P4                                                          |
 | Preview / OperationReceipt                     | 变更预览与采用回执、幂等与撤销依据                      | P4                                                             |
 | Job / NotificationEvent                        | 持久任务与站内通知                                      | P1骨架/P5业务                                                  |
@@ -95,6 +95,14 @@ P2B 的 resolved `TimeValue` 权威字段为明确 `instant`、`timeZone`（IANA
 `pointKind`、`sourceKind`、`sourceRef` 与 `observedAt`。`localDateTime` 由 instant + timeZone
 输出时派生，不持久化第二份时间真相；持续时长用真实时间点之差计算，不使用服务器默认时区。
 用户目标、约束、最低停留与 lock 属于后续 `UserTimeIntent / TimeConstraint`，不能塞入 TimeValue。
+
+P3B1 已将该边界落地为独立 `UserTimeIntent`：POINT_TIME 支持 ARRIVAL/DEPARTURE 的 EXACT、
+NOT_BEFORE、NOT_AFTER，MIN_DWELL 保存正数秒数；同一 Node 的同一要求槽位只有一个当前值。
+`locked` 只表达用户不希望自动放宽，不保证现实可满足。`POST /trips/:id/schedule/evaluate`
+基于指定 `basisVersion` 只读计算 `ScheduleProjection`，不会写回 PLANNED、TemporalValue 或 Trip。
+当前值按 ACTUAL、ESTIMATED、PLANNED 事实层选择；已采用 fixedService Transport 的 PLANNED
+时刻作为显式锚点参与判断，但不复制到 Node 时间表。用户要求彼此矛盾时返回 CONFLICT，缺证据
+返回 UNKNOWN。本阶段不包含 forward/backward solver、自动修改或 Recommendation。
 
 没有 Trip 级统一时区；生命周期日期的调度基准不能暗用服务器 UTC，参见 O-03。跨日期线与
 DST 产品规则已确认；sequence/DayOccurrence 与 migration 在 P3A 落地，输入 command/UI 仍待实现。

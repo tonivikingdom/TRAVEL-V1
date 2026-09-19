@@ -1,8 +1,8 @@
 # P3A DayOccurrence + timeline sequence foundation
 
-- 当前状态：在 `feature/p3a-day-occurrence-sequence` 实施；只创建 Draft PR，不 Ready、不合并
-- 正式基线 main：`be573533e025acc3730f44ad3dc7d4499ed55d1b`
-- 基线 main CI：Run `35366718778`，`verify` 与 `Compose verification` 均为 success
+- 当前状态：已通过 PR #9 Squash Merge 到 main
+- 正式 main：`330f9f2d469f5ff1eda7a98d45457f9c21c7265f`
+- main CI：Run `35409984734`，`verify` 与 `Compose verification` 均为 success
 - 推荐模型 / 强度：GPT-5.6 Sol / High
 - 备选：GPT-5.6 Sol / Medium
 - 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
@@ -34,10 +34,11 @@
 
 跨日 Transport 多日期卡投影、交通占用日、DST ambiguous/nonexistent 输入、完整 solver、
 UserTimeIntent、TimeConstraint、双向时间传播、RecommendationPolicy、Provider、实时监控、自动
-生命周期、回顾/分享、正式 UI 和 Production 均不在 P3A。
+生命周期、回顾/分享、正式 UI 和 Production 均不在 P3A。UserTimeIntent 与只读约束评估随后在
+单独授权的 P3B1 实施，不改变本阶段交付边界。
 
 ## 验证状态
 
-- 本机无 PostgreSQL/Docker；PostgreSQL migration/integration 与 Compose 以 Draft PR 的隔离 CI 为准。
-- 本地 `prisma:validate`、lint、typecheck 与 unit tests 已通过；最终数量和 CI 证据在 PR 正文及交付
-  回复中记录，不把待运行检查写成通过。
+- P3A PR 与合并后 main 的 PostgreSQL migration/integration、verify 和 Compose 验证均已完成；最终
+  main CI 证据为 Run `35409984734`。
+- 本机没有因此被宣称完成 Docker/PostgreSQL 部署验证；CI 容器验证与用户电脑实机验证继续区分。

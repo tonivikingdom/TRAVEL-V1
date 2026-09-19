@@ -86,6 +86,23 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   ownership 与 Trip version 同事务。跨日 Transport 多卡投影、交通占用日、DST command/UI、solver
   与时间传播仍未实现。
 
+## UserTimeIntent 与只读约束评估（P3B1 foundation）
+
+- `UserTimeIntent` 是用户要求，不是当前计划结果。POINT_TIME 支持 ARRIVAL/DEPARTURE 的 EXACT、
+  NOT_BEFORE、NOT_AFTER；MIN_DWELL 保存正数秒数。它们不得写成假的 `TemporalValue`。
+- 同一 Node 的同一要求槽位只有一个当前 Intent；修改更新该槽位，不建立互相覆盖的当前记录堆栈。
+  `locked` 只表示用户不希望未来 solver 自动放宽，不能把不可行要求伪装为可满足。
+- Intent command 继续取得 owner advisory lock 与 Trip row lock，校验 baseTripVersion；成功一次只让
+  Trip version +1，失败不留下部分 Intent。Node 与 Intent 以 `(nodeId, tripId)` 强 FK 保持归属一致。
+- `POST /trips/:id/schedule/evaluate` 是只读 Query：指定 basisVersion，读取当前 Trip、Intent 和三层
+  TemporalValue 后调用纯 domain evaluator；不写 Trip、Intent、TemporalValue、Transport、通知或推荐。
+- 当前点值按 ACTUAL、ESTIMATED、PLANNED 选择，三层仍分开返回。fixedService Transport 的 PLANNED
+  DEPARTURE/ARRIVAL 可以作为相邻 Node 的显式锚点参与判断，但不会复制成 Node TemporalValue。
+- evaluator 按 instant 判断 EXACT/bounds/dwell；缺少必要点为 UNKNOWN，用户 bounds/EXACT 自相矛盾为
+  CONFLICT。输出只含结构化依据和简短业务解释，不包含隐藏推理过程。
+- P3B1 不包含 forward/backward/bidirectional solver、自动改 PLANNED、Provider、Preview/Adopt、
+  RecommendationPolicy、风险通知、跨日 Transport 多卡投影或 DST wall-clock command/UI。
+
 ## 受保护安排（O-04 产品规则已确认，仅规格）
 
 - 保护来源只接受可靠结构化事实（例如已采用固定班次、结构化确认的预约/门票时间）或用户主动

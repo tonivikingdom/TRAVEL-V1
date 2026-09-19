@@ -68,4 +68,5 @@ export type {
   TripNodeKind,
   TripNodeSource,
   TripRepository,
+  UserTimeIntentRecord,
 } from './trip-ports.js';

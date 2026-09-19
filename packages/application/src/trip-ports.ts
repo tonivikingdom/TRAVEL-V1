@@ -3,6 +3,7 @@ import type {
   TemporalPointKind,
   TemporalSourceKind,
   TransportMode,
+  UserTimeIntentOperator,
 } from '@travel/contracts';
 
 export type TripNodeKind = 'PLACE_VISIT' | 'FREE_ACTION';
@@ -49,6 +50,22 @@ export interface ItineraryNodeRecord {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly timeValues: readonly TemporalValueRecord[];
+  readonly timeIntents: readonly UserTimeIntentRecord[];
+}
+
+export interface UserTimeIntentRecord {
+  readonly id: string;
+  readonly tripId: string;
+  readonly nodeId: string;
+  readonly kind: 'POINT_TIME' | 'MIN_DWELL';
+  readonly pointKind: TemporalPointKind | null;
+  readonly operator: UserTimeIntentOperator;
+  readonly instant: Date | null;
+  readonly timeZone: string | null;
+  readonly durationSeconds: number | null;
+  readonly locked: boolean;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 export interface DayOccurrenceRecord {
@@ -157,6 +174,36 @@ export type RepositoryTripCommand =
   | {
       readonly type: 'CLEAR_TRANSPORT';
       readonly transportEdgeId: string;
+    }
+  | {
+      readonly type: 'SET_TIME_INTENT';
+      readonly nodeId: string;
+      readonly pointKind: TemporalPointKind;
+      readonly operator: Exclude<UserTimeIntentOperator, 'MINIMUM'>;
+      readonly instant: Date;
+      readonly timeZone: string;
+      readonly locked: boolean;
+    }
+  | {
+      readonly type: 'REMOVE_TIME_INTENT';
+      readonly nodeId: string;
+      readonly pointKind: TemporalPointKind;
+      readonly operator: Exclude<UserTimeIntentOperator, 'MINIMUM'>;
+    }
+  | {
+      readonly type: 'SET_MIN_DWELL';
+      readonly nodeId: string;
+      readonly durationSeconds: number;
+      readonly locked: boolean;
+    }
+  | {
+      readonly type: 'REMOVE_MIN_DWELL';
+      readonly nodeId: string;
+    }
+  | {
+      readonly type: 'SET_TIME_INTENT_LOCK';
+      readonly intentId: string;
+      readonly locked: boolean;
     };
 
 export type RepositoryDayOccurrenceTarget =

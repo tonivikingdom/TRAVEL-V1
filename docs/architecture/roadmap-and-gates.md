@@ -1,17 +1,18 @@
 # 阶段计划、闸门与未决项
 
-| 阶段 | 计划交付                                           | 当前状态                                                                                                | 进入条件 / 关联未决项                                                                            |
-| ---- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| P0   | 蓝图、workspace、API/Worker 健康、Compose、CI      | 已合并 main；main CI Run `35294938746` 通过                                                             | 已完成                                                                                           |
-| P1A  | 邀请、Magic Link、可撤销多设备 Session、集中授权   | 已 Squash Merge；main CI Run `35309420185` 通过                                                         | 已完成；真实邮件 provider 仍未配置                                                               |
-| P1B1 | 持久 Job、Worker 执行框架、Magic Link 异步邮件     | 已 Squash Merge；main CI Run `35322043421` 通过                                                         | 已完成；真实邮件 provider 仍未配置                                                               |
-| P1B2 | NotificationEvent、ObjectStorage 边界              | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过 | 只含站内通知基础与私有本地测试存储，不进入 P2                                                    |
-| P2A  | Trip/DateOwnership/Place/Visit/FreeAction、版本    | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过 | 已完成；O-03/O-07 不阻塞当前基础自然日能力                                                       |
-| P2B  | Transport、失效历史、resolved 三层时间基础         | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过 | 已完成；O-03/O-07 不阻塞已交付的基础边界                                                         |
-| P3A  | DayOccurrence identity、sequence 与节点日期卡归属  | PR #8 规格已合并；P3A foundation 已获授权，正在 `feature/p3a-day-occurrence-sequence` 实施              | 只落地日期卡身份/排序、无损迁移及 P2A/P2B 联动；不包含 solver、跨日 Transport 投影或 DST 输入 UI |
-| P3B+ | 双向传播、来源解释、约束与冲突                     | 未授权、未实现                                                                                          | O-03～O-08、O-10/O-11 产品规则已确认；O-09 Deferred；具体 solver/生命周期阶段仍需单独授权        |
-| P4   | Provider 探针、候选、Preview/Adopt、事务/幂等/撤销 | 未授权、未实现                                                                                          | O-04/O-05/O-06 已确认；Provider 字段验证、版本与幂等仍是工程进入条件                             |
-| P5   | 薄测试台、站内通知、已确认流程 E2E                 | 未授权、未实现                                                                                          | O-08/O-10/O-11 产品规则已确认；监控/通知、故障态、备份、回顾/分享实现与 O-09 上线配置仍待授权    |
+| 阶段 | 计划交付                                           | 当前状态                                                                                                | 进入条件 / 关联未决项                                                                         |
+| ---- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| P0   | 蓝图、workspace、API/Worker 健康、Compose、CI      | 已合并 main；main CI Run `35294938746` 通过                                                             | 已完成                                                                                        |
+| P1A  | 邀请、Magic Link、可撤销多设备 Session、集中授权   | 已 Squash Merge；main CI Run `35309420185` 通过                                                         | 已完成；真实邮件 provider 仍未配置                                                            |
+| P1B1 | 持久 Job、Worker 执行框架、Magic Link 异步邮件     | 已 Squash Merge；main CI Run `35322043421` 通过                                                         | 已完成；真实邮件 provider 仍未配置                                                            |
+| P1B2 | NotificationEvent、ObjectStorage 边界              | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过 | 只含站内通知基础与私有本地测试存储，不进入 P2                                                 |
+| P2A  | Trip/DateOwnership/Place/Visit/FreeAction、版本    | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过 | 已完成；O-03/O-07 不阻塞当前基础自然日能力                                                    |
+| P2B  | Transport、失效历史、resolved 三层时间基础         | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过 | 已完成；O-03/O-07 不阻塞已交付的基础边界                                                      |
+| P3A  | DayOccurrence identity、sequence 与节点日期卡归属  | 已 Squash Merge；main commit `330f9f2d469f5ff1eda7a98d45457f9c21c7265f`；main CI Run `35409984734` 通过 | 已完成 foundation；solver、跨日 Transport 投影与 DST 输入 UI 仍后置                           |
+| P3B1 | UserTimeIntent、最低停留、lock 与只读约束评估      | 已授权，正在 `feature/p3b1-time-intent-constraints` 实施                                                | 只判断当前状态与用户要求；不自动改时间、不做完整传播或推荐                                    |
+| P3B+ | 双向传播、来源解释、约束求解                       | 未授权、未实现                                                                                          | P3B1 评估基础完成后仍须单独授权 solver；O-09 Deferred                                         |
+| P4   | Provider 探针、候选、Preview/Adopt、事务/幂等/撤销 | 未授权、未实现                                                                                          | O-04/O-05/O-06 已确认；Provider 字段验证、版本与幂等仍是工程进入条件                          |
+| P5   | 薄测试台、站内通知、已确认流程 E2E                 | 未授权、未实现                                                                                          | O-08/O-10/O-11 产品规则已确认；监控/通知、故障态、备份、回顾/分享实现与 O-09 上线配置仍待授权 |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。
@@ -55,7 +56,8 @@ O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI
   产品规则：O-03（含 DST）至 O-08、
   O-10 与 O-11 均在产品规则层面 RESOLVED；O-09 保持 Deferred。无业务代码、migration、P3
   solver、RecommendationPolicy、P4 Provider、实时监控、故障客户端、图片备份或回顾/分享实现。
-  P3A 的 DayOccurrence/sequence foundation 随后获得单独授权；其余上述工程能力仍需后续授权。
+  P3A 的 DayOccurrence/sequence foundation 已通过 PR #9 合并到 main，main CI Run `35409984734` 通过。
+  P3B1 已获单独授权，只实现 UserTimeIntent 与确定性只读约束评估；其余上述工程能力仍需后续授权。
 
 ## P1A → P1B 邮件安全闸门
 

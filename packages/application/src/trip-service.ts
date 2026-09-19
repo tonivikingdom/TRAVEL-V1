@@ -6,6 +6,10 @@ import type {
   PlaceInput,
   PlaceView,
   ResolvedTemporalValueInput,
+  ScheduleConstraintEvaluationView,
+  ScheduleMeasureView,
+  SchedulePointProjectionView,
+  ScheduleProjectionView,
   TemporalSubjectInput,
   TemporalValueView,
   TransportEdgeView,
@@ -13,8 +17,17 @@ import type {
   TransportMode,
   TripCommandInput,
   TripView,
+  UserTimeIntentView,
 } from '@travel/contracts';
-import { AbsoluteInstantError, parseAbsoluteIsoInstant } from '@travel/domain';
+import {
+  AbsoluteInstantError,
+  evaluateScheduleConstraints,
+  parseAbsoluteIsoInstant,
+  type ScheduleConstraintEvaluation,
+  type ScheduleMeasure,
+  type SchedulePointProjection,
+  type ScheduleUserTimeIntent,
+} from '@travel/domain';
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
@@ -32,6 +45,7 @@ import type {
   TripAggregateRecord,
   TripMutationResult,
   TripRepository,
+  UserTimeIntentRecord,
 } from './trip-ports.js';
 
 export class TripService {
@@ -180,6 +194,79 @@ export class TripService {
     }
     return records.map(toTransportHistoryView);
   }
+
+  async evaluateSchedule(
+    actor: Actor,
+    tripId: string,
+    basisVersion: number,
+  ): Promise<ScheduleProjectionView> {
+    requireUuid(tripId, 'tripId');
+    authorizeSelf(actor, 'READ_PRIVATE_RESOURCE');
+    const trip = await this.repository.findOwnedById({
+      ownerUserId: actor.userId,
+      tripId,
+    });
+    if (trip === null) {
+      throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
+    }
+    const normalizedBasisVersion = positiveInteger(
+      basisVersion,
+      'basisVersion',
+    );
+    if (trip.version !== normalizedBasisVersion) {
+      throw new ApplicationError(
+        'VERSION_CONFLICT',
+        '行程版本已变化，请刷新后重新评估。',
+        409,
+      );
+    }
+    const result = evaluateScheduleConstraints({
+      nodes: orderedNodes(trip).map((node) => ({
+        nodeId: node.id,
+        dayOccurrenceId: node.dayOccurrenceId,
+        timeValues: node.timeValues,
+        intents: node.timeIntents.map(toDomainIntent),
+      })),
+      fixedTransportAnchors: trip.transportEdges.flatMap((edge) =>
+        edge.fixedService
+          ? edge.timeValues
+              .filter((value) => value.layer === 'PLANNED')
+              .map((value) => ({
+                transportEdgeId: edge.id,
+                nodeId:
+                  value.pointKind === 'DEPARTURE'
+                    ? edge.fromNodeId
+                    : edge.toNodeId,
+                pointKind: value.pointKind,
+                value,
+              }))
+          : [],
+      ),
+    });
+    return {
+      tripId: trip.id,
+      basisVersion: trip.version,
+      nodes: result.nodes.map((node) => ({
+        nodeId: node.nodeId,
+        dayOccurrenceId: node.dayOccurrenceId,
+        arrival: toSchedulePointProjectionView(node.arrival),
+        departure: toSchedulePointProjectionView(node.departure),
+        activeUserTimeIntents: node.intents.map(toIntentViewFromDomain),
+        anchors: node.anchors.map((anchor) => ({
+          type: 'FIXED_TRANSPORT',
+          transportEdgeId: anchor.transportEdgeId,
+          nodeId: anchor.nodeId,
+          pointKind: anchor.pointKind,
+          value: toScheduleTemporalValueView(anchor.value),
+        })),
+        dwellSeconds: node.dwellSeconds,
+        status: node.status,
+        evaluations: node.evaluations.map(toConstraintEvaluationView),
+      })),
+      violations: result.violations.map(toConstraintEvaluationView),
+      conflicts: result.conflicts.map(toConstraintEvaluationView),
+    };
+  }
 }
 
 function validateCommand(command: TripCommandInput): RepositoryTripCommand {
@@ -241,6 +328,42 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
     case 'CLEAR_TRANSPORT':
       requireUuid(command.transportEdgeId, 'transportEdgeId');
       return command;
+    case 'SET_TIME_INTENT':
+      requireUuid(command.nodeId, 'nodeId');
+      return {
+        ...command,
+        pointKind: validateTemporalPointKind(command.pointKind),
+        operator: validatePointTimeOperator(command.operator),
+        instant: parseAbsoluteInstant(command.instant, 'instant'),
+        timeZone: validateIanaTimeZone(command.timeZone),
+        locked: requiredBoolean(command.locked, 'locked'),
+      };
+    case 'REMOVE_TIME_INTENT':
+      requireUuid(command.nodeId, 'nodeId');
+      return {
+        ...command,
+        pointKind: validateTemporalPointKind(command.pointKind),
+        operator: validatePointTimeOperator(command.operator),
+      };
+    case 'SET_MIN_DWELL':
+      requireUuid(command.nodeId, 'nodeId');
+      return {
+        ...command,
+        durationSeconds: positiveInteger(
+          command.durationSeconds,
+          'durationSeconds',
+        ),
+        locked: requiredBoolean(command.locked, 'locked'),
+      };
+    case 'REMOVE_MIN_DWELL':
+      requireUuid(command.nodeId, 'nodeId');
+      return command;
+    case 'SET_TIME_INTENT_LOCK':
+      requireUuid(command.intentId, 'intentId');
+      return {
+        ...command,
+        locked: requiredBoolean(command.locked, 'locked'),
+      };
   }
 }
 
@@ -412,6 +535,24 @@ function toNodeView(record: ItineraryNodeRecord): ItineraryNodeView {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     timeValues: record.timeValues.map(toTemporalValueView),
+    timeIntents: record.timeIntents.map(toUserTimeIntentView),
+  };
+}
+
+function toUserTimeIntentView(
+  record: UserTimeIntentRecord,
+): UserTimeIntentView {
+  return {
+    id: record.id,
+    kind: record.kind,
+    pointKind: record.pointKind,
+    operator: record.operator,
+    instant: record.instant?.toISOString() ?? null,
+    timeZone: record.timeZone,
+    durationSeconds: record.durationSeconds,
+    locked: record.locked,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
   };
 }
 
@@ -667,6 +808,22 @@ function validateTemporalValue(
   };
 }
 
+function validateTemporalPointKind(value: string): 'ARRIVAL' | 'DEPARTURE' {
+  if (value !== 'ARRIVAL' && value !== 'DEPARTURE') {
+    throw new ApplicationError('VALIDATION_ERROR', '时间点类型无效。', 400);
+  }
+  return value;
+}
+
+function validatePointTimeOperator(
+  value: string,
+): 'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER' {
+  if (!['EXACT', 'NOT_BEFORE', 'NOT_AFTER'].includes(value)) {
+    throw new ApplicationError('VALIDATION_ERROR', '时间要求操作符无效。', 400);
+  }
+  return value as 'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER';
+}
+
 function parseAbsoluteInstant(value: string, field: string): Date {
   if (typeof value !== 'string') {
     throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
@@ -755,10 +912,150 @@ function optionalText(
 }
 
 function positiveInteger(value: number, field: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647) {
     throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
   }
   return value;
+}
+
+function requiredBoolean(value: boolean, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
+  }
+  return value;
+}
+
+function toDomainIntent(record: UserTimeIntentRecord): ScheduleUserTimeIntent {
+  if (
+    record.kind === 'POINT_TIME' &&
+    record.pointKind !== null &&
+    record.operator !== 'MINIMUM' &&
+    record.instant !== null &&
+    record.timeZone !== null &&
+    record.durationSeconds === null
+  ) {
+    return {
+      id: record.id,
+      nodeId: record.nodeId,
+      kind: 'POINT_TIME',
+      pointKind: record.pointKind,
+      operator: record.operator,
+      instant: record.instant,
+      timeZone: record.timeZone,
+      durationSeconds: null,
+      locked: record.locked,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+  if (
+    record.kind === 'MIN_DWELL' &&
+    record.pointKind === null &&
+    record.operator === 'MINIMUM' &&
+    record.instant === null &&
+    record.timeZone === null &&
+    record.durationSeconds !== null
+  ) {
+    return {
+      id: record.id,
+      nodeId: record.nodeId,
+      kind: 'MIN_DWELL',
+      pointKind: null,
+      operator: 'MINIMUM',
+      instant: null,
+      timeZone: null,
+      durationSeconds: record.durationSeconds,
+      locked: record.locked,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+  throw new Error('UserTimeIntent persistence invariant is broken');
+}
+
+function toIntentViewFromDomain(
+  intent: ScheduleUserTimeIntent,
+): UserTimeIntentView {
+  return {
+    id: intent.id,
+    kind: intent.kind,
+    pointKind: intent.pointKind,
+    operator: intent.operator,
+    instant: intent.instant?.toISOString() ?? null,
+    timeZone: intent.timeZone,
+    durationSeconds: intent.durationSeconds,
+    locked: intent.locked,
+    createdAt: intent.createdAt.toISOString(),
+    updatedAt: intent.updatedAt.toISOString(),
+  };
+}
+
+function toSchedulePointProjectionView(
+  point: SchedulePointProjection,
+): SchedulePointProjectionView {
+  return {
+    planned:
+      point.planned === null
+        ? null
+        : toScheduleTemporalValueView(point.planned),
+    estimated:
+      point.estimated === null
+        ? null
+        : toScheduleTemporalValueView(point.estimated),
+    actual:
+      point.actual === null ? null : toScheduleTemporalValueView(point.actual),
+    effective:
+      point.effective === null
+        ? null
+        : {
+            value: toScheduleTemporalValueView(point.effective.value),
+            subjectType: point.effective.subjectType,
+            subjectId: point.effective.subjectId,
+            anchor: point.effective.anchor,
+          },
+  };
+}
+
+function toScheduleTemporalValueView(
+  value: Parameters<
+    typeof evaluateScheduleConstraints
+  >[0]['nodes'][number]['timeValues'][number],
+): TemporalValueView {
+  return {
+    id: value.id,
+    layer: value.layer,
+    pointKind: value.pointKind,
+    instant: value.instant.toISOString(),
+    timeZone: value.timeZone,
+    sourceKind: value.sourceKind as TemporalValueView['sourceKind'],
+    sourceRef: value.sourceRef,
+    observedAt: value.observedAt?.toISOString() ?? null,
+    createdAt: value.createdAt.toISOString(),
+    updatedAt: value.updatedAt.toISOString(),
+  };
+}
+
+function toConstraintEvaluationView(
+  evaluation: ScheduleConstraintEvaluation,
+): ScheduleConstraintEvaluationView {
+  return {
+    ...evaluation,
+    expected: toMeasureView(evaluation.expected),
+    current: toMeasureView(evaluation.current),
+  };
+}
+
+function toMeasureView(
+  value: ScheduleMeasure | null,
+): ScheduleMeasureView | null {
+  if (value === null || value.kind === 'DURATION') {
+    return value;
+  }
+  return {
+    kind: 'INSTANT',
+    instant: value.instant.toISOString(),
+    timeZone: value.timeZone,
+  };
 }
 
 function nonnegativeInteger(value: number, field: string): number {

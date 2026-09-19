@@ -100,6 +100,18 @@ enum TemporalSourceKind {
   PROVIDER_OBSERVATION
 }
 
+enum UserTimeIntentKind {
+  POINT_TIME
+  MIN_DWELL
+}
+
+enum UserTimeIntentOperator {
+  EXACT
+  NOT_BEFORE
+  NOT_AFTER
+  MINIMUM
+}
+
 model User {
   id              String              @id @default(uuid()) @db.Uuid
   email           String
@@ -270,6 +282,7 @@ model Trip {
   nodes              ItineraryNode[]
   transportEdges     TransportEdge[]
   transportHistory   TransportEdgeHistory[]
+  timeIntents        UserTimeIntent[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -332,11 +345,32 @@ model ItineraryNode {
   dayOccurrence   DayOccurrence       @relation(fields: [dayOccurrenceId, tripId], references: [id, tripId], onDelete: Cascade)
   place           Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
   temporalValues  TemporalValue[]
+  timeIntents     UserTimeIntent[]
 
   @@unique([dayOccurrenceId, position])
   @@unique([id, tripId])
   @@index([tripId, dayOccurrenceId, position])
   @@index([placeId])
+}
+
+model UserTimeIntent {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tripId          String                 @db.Uuid
+  nodeId          String                 @db.Uuid
+  kind            UserTimeIntentKind
+  pointKind       TemporalPointKind?
+  operator        UserTimeIntentOperator
+  instant         DateTime?              @db.Timestamptz(3)
+  timeZone        String?                @db.VarChar(100)
+  durationSeconds Int?
+  locked          Boolean                @default(false)
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @db.Timestamptz(3)
+  trip            Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  node            ItineraryNode          @relation(fields: [nodeId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@index([tripId, nodeId])
+  @@index([nodeId, kind, pointKind, operator])
 }
 
 model TransportEdge {

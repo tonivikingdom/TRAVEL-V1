@@ -26,6 +26,14 @@ const tripInclude = {
           temporalValues: {
             orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }],
           },
+          timeIntents: {
+            orderBy: [
+              { kind: 'asc' },
+              { pointKind: 'asc' },
+              { operator: 'asc' },
+              { id: 'asc' },
+            ],
+          },
         },
         orderBy: [{ position: 'asc' }, { id: 'asc' }],
       },
@@ -156,12 +164,18 @@ export class PrismaTripRepository implements TripRepository {
         await lockOwner(transaction, input.ownerUserId);
         await requireLockedTrip(transaction, input);
         await applyCommand(transaction, input);
-        const range = await reconcileDateOwnership(transaction, input);
+        const range = isTimeIntentCommand(input.command)
+          ? undefined
+          : await reconcileDateOwnership(transaction, input);
         await transaction.trip.update({
           where: { id: input.tripId },
           data: {
-            effectiveStartDate: range?.minimum ?? null,
-            effectiveEndDate: range?.maximum ?? null,
+            ...(range === undefined
+              ? {}
+              : {
+                  effectiveStartDate: range?.minimum ?? null,
+                  effectiveEndDate: range?.maximum ?? null,
+                }),
             version: { increment: 1 },
           },
         });
@@ -398,7 +412,167 @@ async function applyCommand(
         input.command.transportEdgeId,
       );
       return;
+    case 'SET_TIME_INTENT':
+      await setPointTimeIntent(transaction, input.tripId, input.command);
+      return;
+    case 'REMOVE_TIME_INTENT':
+      await removePointTimeIntent(transaction, input.tripId, input.command);
+      return;
+    case 'SET_MIN_DWELL':
+      await setMinimumDwellIntent(transaction, input.tripId, input.command);
+      return;
+    case 'REMOVE_MIN_DWELL':
+      await removeMinimumDwellIntent(
+        transaction,
+        input.tripId,
+        input.command.nodeId,
+      );
+      return;
+    case 'SET_TIME_INTENT_LOCK':
+      await setTimeIntentLock(
+        transaction,
+        input.tripId,
+        input.command.intentId,
+        input.command.locked,
+      );
+      return;
   }
+}
+
+function isTimeIntentCommand(command: RepositoryTripCommand): boolean {
+  return [
+    'SET_TIME_INTENT',
+    'REMOVE_TIME_INTENT',
+    'SET_MIN_DWELL',
+    'REMOVE_MIN_DWELL',
+    'SET_TIME_INTENT_LOCK',
+  ].includes(command.type);
+}
+
+async function setPointTimeIntent(
+  transaction: Transaction,
+  tripId: string,
+  command: Extract<RepositoryTripCommand, { readonly type: 'SET_TIME_INTENT' }>,
+): Promise<void> {
+  const node = await requireTripNode(transaction, tripId, command.nodeId);
+  const existing = await transaction.userTimeIntent.findFirst({
+    where: {
+      nodeId: node.id,
+      kind: 'POINT_TIME',
+      pointKind: command.pointKind,
+      operator: command.operator,
+    },
+    select: { id: true },
+  });
+  const data = {
+    kind: 'POINT_TIME' as const,
+    pointKind: command.pointKind,
+    operator: command.operator,
+    instant: command.instant,
+    timeZone: command.timeZone,
+    durationSeconds: null,
+    locked: command.locked,
+  };
+  if (existing === null) {
+    await transaction.userTimeIntent.create({
+      data: { tripId, nodeId: node.id, ...data },
+    });
+    return;
+  }
+  await transaction.userTimeIntent.update({
+    where: { id: existing.id },
+    data,
+  });
+}
+
+async function removePointTimeIntent(
+  transaction: Transaction,
+  tripId: string,
+  command: Extract<
+    RepositoryTripCommand,
+    { readonly type: 'REMOVE_TIME_INTENT' }
+  >,
+): Promise<void> {
+  const node = await requireTripNode(transaction, tripId, command.nodeId);
+  const existing = await transaction.userTimeIntent.findFirst({
+    where: {
+      nodeId: node.id,
+      kind: 'POINT_TIME',
+      pointKind: command.pointKind,
+      operator: command.operator,
+    },
+    select: { id: true },
+  });
+  if (existing === null) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+  await transaction.userTimeIntent.delete({ where: { id: existing.id } });
+}
+
+async function setMinimumDwellIntent(
+  transaction: Transaction,
+  tripId: string,
+  command: Extract<RepositoryTripCommand, { readonly type: 'SET_MIN_DWELL' }>,
+): Promise<void> {
+  const node = await requireTripNode(transaction, tripId, command.nodeId);
+  const existing = await transaction.userTimeIntent.findFirst({
+    where: { nodeId: node.id, kind: 'MIN_DWELL' },
+    select: { id: true },
+  });
+  const data = {
+    kind: 'MIN_DWELL' as const,
+    pointKind: null,
+    operator: 'MINIMUM' as const,
+    instant: null,
+    timeZone: null,
+    durationSeconds: command.durationSeconds,
+    locked: command.locked,
+  };
+  if (existing === null) {
+    await transaction.userTimeIntent.create({
+      data: { tripId, nodeId: node.id, ...data },
+    });
+    return;
+  }
+  await transaction.userTimeIntent.update({
+    where: { id: existing.id },
+    data,
+  });
+}
+
+async function removeMinimumDwellIntent(
+  transaction: Transaction,
+  tripId: string,
+  nodeId: string,
+): Promise<void> {
+  const node = await requireTripNode(transaction, tripId, nodeId);
+  const existing = await transaction.userTimeIntent.findFirst({
+    where: { nodeId: node.id, kind: 'MIN_DWELL' },
+    select: { id: true },
+  });
+  if (existing === null) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+  await transaction.userTimeIntent.delete({ where: { id: existing.id } });
+}
+
+async function setTimeIntentLock(
+  transaction: Transaction,
+  tripId: string,
+  intentId: string,
+  locked: boolean,
+): Promise<void> {
+  const intent = await transaction.userTimeIntent.findFirst({
+    where: { id: intentId, tripId },
+    select: { id: true },
+  });
+  if (intent === null) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+  await transaction.userTimeIntent.update({
+    where: { id: intent.id },
+    data: { locked },
+  });
 }
 
 async function setManualTransport(
@@ -1114,6 +1288,20 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
         createdAt: node.createdAt,
         updatedAt: node.updatedAt,
         timeValues: node.temporalValues.map(toTemporalValueRecord),
+        timeIntents: node.timeIntents.map((intent) => ({
+          id: intent.id,
+          tripId: intent.tripId,
+          nodeId: intent.nodeId,
+          kind: intent.kind,
+          pointKind: intent.pointKind,
+          operator: intent.operator,
+          instant: intent.instant,
+          timeZone: intent.timeZone,
+          durationSeconds: intent.durationSeconds,
+          locked: intent.locked,
+          createdAt: intent.createdAt,
+          updatedAt: intent.updatedAt,
+        })),
       })),
     })),
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),

@@ -40,8 +40,8 @@ export interface PlaceRecord {
 export interface ItineraryNodeRecord {
   readonly id: string;
   readonly tripId: string;
+  readonly dayOccurrenceId: string;
   readonly kind: TripNodeKind;
-  readonly localDate: Date;
   readonly position: number;
   readonly place: PlaceRecord | null;
   readonly note: string | null;
@@ -49,6 +49,16 @@ export interface ItineraryNodeRecord {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly timeValues: readonly TemporalValueRecord[];
+}
+
+export interface DayOccurrenceRecord {
+  readonly id: string;
+  readonly tripId: string;
+  readonly localDate: Date;
+  readonly sequence: number;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+  readonly nodes: readonly ItineraryNodeRecord[];
 }
 
 export interface TransportEdgeRecord {
@@ -95,7 +105,7 @@ export interface TripAggregateRecord {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly ownedDates: readonly Date[];
-  readonly nodes: readonly ItineraryNodeRecord[];
+  readonly dayOccurrences: readonly DayOccurrenceRecord[];
   readonly transportEdges: readonly TransportEdgeRecord[];
 }
 
@@ -112,21 +122,22 @@ export type RepositoryPlaceInput =
 export type RepositoryTripCommand =
   | {
       readonly type: 'ADD_PLACE_VISIT';
-      readonly localDate: Date;
+      readonly targetDay: RepositoryDayOccurrenceTarget;
       readonly position: number;
       readonly place: RepositoryPlaceInput;
       readonly note: string | null;
     }
   | {
       readonly type: 'ADD_FREE_ACTION';
-      readonly localDate: Date;
+      readonly targetDay: RepositoryDayOccurrenceTarget;
       readonly position: number;
       readonly note: string | null;
     }
   | { readonly type: 'DELETE_NODE'; readonly nodeId: string }
   | {
-      readonly type: 'MOVE_NODE_WITHIN_DAY';
+      readonly type: 'MOVE_NODE';
       readonly nodeId: string;
+      readonly dayOccurrenceId: string;
       readonly position: number;
     }
   | {
@@ -146,6 +157,14 @@ export type RepositoryTripCommand =
   | {
       readonly type: 'CLEAR_TRANSPORT';
       readonly transportEdgeId: string;
+    };
+
+export type RepositoryDayOccurrenceTarget =
+  | { readonly type: 'EXISTING'; readonly dayOccurrenceId: string }
+  | {
+      readonly type: 'NEW';
+      readonly localDate: Date;
+      readonly sequence: number;
     };
 
 export type RepositoryTemporalSubject =

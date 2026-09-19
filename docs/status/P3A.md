@@ -1,0 +1,43 @@
+# P3A DayOccurrence + timeline sequence foundation
+
+- 当前状态：在 `feature/p3a-day-occurrence-sequence` 实施；只创建 Draft PR，不 Ready、不合并
+- 正式基线 main：`be573533e025acc3730f44ad3dc7d4499ed55d1b`
+- 基线 main CI：Run `35366718778`，`verify` 与 `Compose verification` 均为 success
+- 推荐模型 / 强度：GPT-5.6 Sol / High
+- 备选：GPT-5.6 Sol / Medium
+- 实际使用模型与强度：未知（客户端实际配置无法从仓库证据确认）
+
+## 实现范围
+
+- 新增持久 `DayOccurrence`，以 UUID 提供稳定日期卡身份，以 Trip-scoped sequence 表达真实顺序；
+  同一 localDate 可以多次出现。
+- `ItineraryNode` 改为通过复合 FK 归属同一 Trip 的 occurrence；正式排序改为 occurrence sequence
+  加 node position，移除 node.localDate。
+- ADD command 明确区分 EXISTING 与 NEW 日期卡目标；MOVE_NODE 明确目标 dayOccurrenceId，支持同卡
+  和跨卡移动。legacy localDate-only 命令不再接受。
+- current Transport adjacency、connection projection 与结构变化失效使用新顺序；Transport 历史、
+  ACTUAL/FACT_PROTECTED、owner isolation 和一次 command 只递增一次 Trip version 的边界保持。
+- 跨 occurrence MOVE_NODE 在受锁 Trip mutation 事务内保护 Node ACTUAL：有 ACTUAL 时返回
+  FACT_PROTECTED 且不产生部分结构、Transport history、ownership 或 version 变化；同 occurrence
+  重排以及仅有 PLANNED / ESTIMATED 的跨卡移动保持允许。
+- O-01/O-02 保持：首尾空白 occurrence 收缩，中间空白 occurrence 保留；重复日期卡只共享一份
+  DateOwnership；Trip 变空时 range、ownership 与 occurrences 全部清空。
+
+## Migration
+
+- 对每个旧非空 Trip 的 effective range 使用自然日序列回填 occurrence，包含没有节点的中间日。
+- sequence 与旧 localDate 升序一致；旧 Node 通过 tripId + localDate 绑定，再删除 node.localDate。
+- 增加 populated P2B-compatible database migration integration test，验证 Node/Transport 标识与旧顺序
+  不变；clean DB 继续由标准 `prisma migrate deploy` 验证。
+
+## 明确未实现
+
+跨日 Transport 多日期卡投影、交通占用日、DST ambiguous/nonexistent 输入、完整 solver、
+UserTimeIntent、TimeConstraint、双向时间传播、RecommendationPolicy、Provider、实时监控、自动
+生命周期、回顾/分享、正式 UI 和 Production 均不在 P3A。
+
+## 验证状态
+
+- 本机无 PostgreSQL/Docker；PostgreSQL migration/integration 与 Compose 以 Draft PR 的隔离 CI 为准。
+- 本地 `prisma:validate`、lint、typecheck 与 unit tests 已通过；最终数量和 CI 证据在 PR 正文及交付
+  回复中记录，不把待运行检查写成通过。

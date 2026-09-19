@@ -1,5 +1,6 @@
 import type {
   PlaceRecord,
+  RepositoryDayOccurrenceTarget,
   RepositoryPlaceInput,
   RepositoryTemporalSubject,
   RepositoryTemporalValueInput,
@@ -17,12 +18,19 @@ import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
 const tripInclude = {
   dateOwnerships: { orderBy: { localDate: 'asc' } },
-  nodes: {
+  dayOccurrences: {
     include: {
-      place: true,
-      temporalValues: { orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }] },
+      nodes: {
+        include: {
+          place: true,
+          temporalValues: {
+            orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }],
+          },
+        },
+        orderBy: [{ position: 'asc' }, { id: 'asc' }],
+      },
     },
-    orderBy: [{ localDate: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+    orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
   },
   transportEdges: {
     include: {
@@ -55,11 +63,6 @@ type FailureStatus = Exclude<TripMutationResult['status'], 'SUCCESS'>;
 interface LockedTripRow {
   readonly id: string;
   readonly version: number;
-}
-
-interface DateBoundsRow {
-  readonly minimum: Date | null;
-  readonly maximum: Date | null;
 }
 
 interface AdvisoryLockRow {
@@ -280,7 +283,11 @@ async function applyCommand(
       await insertNode(transaction, {
         tripId: input.tripId,
         kind: 'PLACE_VISIT',
-        localDate: input.command.localDate,
+        dayOccurrenceId: await resolveTargetDayOccurrence(
+          transaction,
+          input.tripId,
+          input.command.targetDay,
+        ),
         position: input.command.position,
         placeId: place.id,
         note: input.command.note,
@@ -296,7 +303,11 @@ async function applyCommand(
       await insertNode(transaction, {
         tripId: input.tripId,
         kind: 'FREE_ACTION',
-        localDate: input.command.localDate,
+        dayOccurrenceId: await resolveTargetDayOccurrence(
+          transaction,
+          input.tripId,
+          input.command.targetDay,
+        ),
         position: input.command.position,
         placeId: null,
         note: input.command.note,
@@ -321,17 +332,8 @@ async function applyCommand(
         'NODE_DELETED',
       );
       await transaction.itineraryNode.delete({ where: { id: node.id } });
-      const remaining = await orderedNodeIds(
-        transaction,
-        input.tripId,
-        node.localDate,
-      );
-      await rewritePositions(
-        transaction,
-        input.tripId,
-        node.localDate,
-        remaining,
-      );
+      const remaining = await orderedNodeIds(transaction, node.dayOccurrenceId);
+      await rewritePositions(transaction, node.dayOccurrenceId, remaining);
       await archiveNonAdjacentTransports(
         transaction,
         input.tripId,
@@ -339,27 +341,18 @@ async function applyCommand(
       );
       return;
     }
-    case 'MOVE_NODE_WITHIN_DAY': {
+    case 'MOVE_NODE': {
       const node = await requireTripNode(
         transaction,
         input.tripId,
         input.command.nodeId,
       );
-      const ordered = await orderedNodeIds(
+      await moveNode(
         transaction,
         input.tripId,
-        node.localDate,
-      );
-      if (input.command.position >= ordered.length) {
-        throw new TripTransactionAbort('INVALID_POSITION');
-      }
-      const withoutNode = ordered.filter((id) => id !== node.id);
-      withoutNode.splice(input.command.position, 0, node.id);
-      await rewritePositions(
-        transaction,
-        input.tripId,
-        node.localDate,
-        withoutNode,
+        node,
+        input.command.dayOccurrenceId,
+        input.command.position,
       );
       await archiveNonAdjacentTransports(
         transaction,
@@ -419,7 +412,11 @@ async function setManualTransport(
   const timeline = await transaction.itineraryNode.findMany({
     where: { tripId },
     select: { id: true, kind: true },
-    orderBy: [{ localDate: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+    orderBy: [
+      { dayOccurrence: { sequence: 'asc' } },
+      { position: 'asc' },
+      { id: 'asc' },
+    ],
   });
   const fromIndex = timeline.findIndex(
     (node) => node.id === command.fromNodeId,
@@ -501,7 +498,11 @@ async function archiveNonAdjacentTransports(
   const timeline = await transaction.itineraryNode.findMany({
     where: { tripId },
     select: { id: true },
-    orderBy: [{ localDate: 'asc' }, { position: 'asc' }, { id: 'asc' }],
+    orderBy: [
+      { dayOccurrence: { sequence: 'asc' } },
+      { position: 'asc' },
+      { id: 'asc' },
+    ],
   });
   const adjacency = new Set<string>();
   for (let index = 0; index + 1 < timeline.length; index += 1) {
@@ -699,19 +700,188 @@ function adjacencyKey(fromNodeId: string, toNodeId: string): string {
   return `${fromNodeId}:${toNodeId}`;
 }
 
+async function resolveTargetDayOccurrence(
+  transaction: Transaction,
+  tripId: string,
+  target: RepositoryDayOccurrenceTarget,
+): Promise<string> {
+  if (target.type === 'EXISTING') {
+    const occurrence = await transaction.dayOccurrence.findFirst({
+      where: { id: target.dayOccurrenceId, tripId },
+      select: { id: true },
+    });
+    if (occurrence === null) {
+      throw new TripTransactionAbort('NOT_FOUND');
+    }
+    return occurrence.id;
+  }
+
+  const occurrences = await transaction.dayOccurrence.findMany({
+    where: { tripId },
+    select: { id: true, localDate: true },
+    orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
+  });
+  if (target.sequence > occurrences.length) {
+    throw new TripTransactionAbort('INVALID_POSITION');
+  }
+  const datesToCreate: Date[] = [];
+  if (occurrences.length > 0) {
+    const timestamps = occurrences.map((occurrence) =>
+      occurrence.localDate.getTime(),
+    );
+    const minimum = new Date(Math.min(...timestamps));
+    const maximum = new Date(Math.max(...timestamps));
+    if (target.localDate < minimum) {
+      for (
+        let date = addUtcDays(target.localDate, 1);
+        date < minimum;
+        date = addUtcDays(date, 1)
+      ) {
+        datesToCreate.push(date);
+      }
+    } else if (target.localDate > maximum) {
+      for (
+        let date = addUtcDays(maximum, 1);
+        date < target.localDate;
+        date = addUtcDays(date, 1)
+      ) {
+        datesToCreate.push(date);
+      }
+    }
+  }
+  const created: Array<{ readonly id: string; readonly localDate: Date }> = [];
+  for (const [index, localDate] of [
+    target.localDate,
+    ...datesToCreate,
+  ].entries()) {
+    created.push(
+      await transaction.dayOccurrence.create({
+        data: {
+          tripId,
+          localDate,
+          sequence: occurrences.length + index,
+        },
+        select: { id: true, localDate: true },
+      }),
+    );
+  }
+  const targetOccurrence = created[0];
+  if (targetOccurrence === undefined) {
+    throw new Error('Failed to create the target DayOccurrence');
+  }
+  const orderedIds = occurrences.map((occurrence) => occurrence.id);
+  const intermediateIds = created.slice(1).map((occurrence) => occurrence.id);
+  if (datesToCreate.length > 0 && target.sequence === 0) {
+    const towardExisting =
+      target.localDate < datesToCreate[0]!
+        ? intermediateIds
+        : intermediateIds.toReversed();
+    orderedIds.splice(
+      target.sequence,
+      0,
+      targetOccurrence.id,
+      ...towardExisting,
+    );
+  } else {
+    const towardTarget =
+      datesToCreate.length > 0 && target.localDate < datesToCreate[0]!
+        ? intermediateIds.toReversed()
+        : intermediateIds;
+    orderedIds.splice(target.sequence, 0, ...towardTarget, targetOccurrence.id);
+  }
+  await rewriteDayOccurrenceSequences(transaction, tripId, orderedIds);
+  return targetOccurrence.id;
+}
+
+async function rewriteDayOccurrenceSequences(
+  transaction: Transaction,
+  tripId: string,
+  orderedIds: readonly string[],
+): Promise<void> {
+  if (orderedIds.length === 0) {
+    return;
+  }
+  const offset = orderedIds.length * 2 + 1;
+  await transaction.$executeRaw(Prisma.sql`
+    UPDATE "DayOccurrence"
+    SET "sequence" = "sequence" + ${offset}
+    WHERE "tripId" = ${tripId}::uuid
+  `);
+  for (const [sequence, id] of orderedIds.entries()) {
+    await transaction.dayOccurrence.update({
+      where: { id },
+      data: { sequence },
+    });
+  }
+}
+
+async function moveNode(
+  transaction: Transaction,
+  tripId: string,
+  node: {
+    readonly id: string;
+    readonly dayOccurrenceId: string;
+  },
+  targetDayOccurrenceId: string,
+  targetPosition: number,
+): Promise<void> {
+  const targetOccurrence = await transaction.dayOccurrence.findFirst({
+    where: { id: targetDayOccurrenceId, tripId },
+    select: { id: true },
+  });
+  if (targetOccurrence === null) {
+    throw new TripTransactionAbort('NOT_FOUND');
+  }
+
+  const sourceIds = await orderedNodeIds(transaction, node.dayOccurrenceId);
+  if (node.dayOccurrenceId === targetDayOccurrenceId) {
+    if (targetPosition >= sourceIds.length) {
+      throw new TripTransactionAbort('INVALID_POSITION');
+    }
+    const reordered = sourceIds.filter((id) => id !== node.id);
+    reordered.splice(targetPosition, 0, node.id);
+    await rewritePositions(transaction, targetDayOccurrenceId, reordered);
+    return;
+  }
+
+  const targetIds = await orderedNodeIds(transaction, targetDayOccurrenceId);
+  if (targetPosition > targetIds.length) {
+    throw new TripTransactionAbort('INVALID_POSITION');
+  }
+  await assertNodeActualNotProtected(transaction, node.id);
+  const temporaryPosition = targetIds.length + sourceIds.length + 1;
+  await transaction.itineraryNode.update({
+    where: { id: node.id },
+    data: {
+      dayOccurrenceId: targetDayOccurrenceId,
+      position: temporaryPosition,
+    },
+  });
+  await rewritePositions(
+    transaction,
+    node.dayOccurrenceId,
+    sourceIds.filter((id) => id !== node.id),
+  );
+  targetIds.splice(targetPosition, 0, node.id);
+  await rewritePositions(transaction, targetDayOccurrenceId, targetIds);
+}
+
 async function insertNode(
   transaction: Transaction,
   input: {
     readonly tripId: string;
     readonly kind: 'PLACE_VISIT' | 'FREE_ACTION';
-    readonly localDate: Date;
+    readonly dayOccurrenceId: string;
     readonly position: number;
     readonly placeId: string | null;
     readonly note: string | null;
   },
 ): Promise<void> {
   const existing = await transaction.itineraryNode.findMany({
-    where: { tripId: input.tripId, localDate: input.localDate },
+    where: {
+      tripId: input.tripId,
+      dayOccurrenceId: input.dayOccurrenceId,
+    },
     select: { id: true, position: true },
     orderBy: [{ position: 'asc' }, { id: 'asc' }],
   });
@@ -723,8 +893,8 @@ async function insertNode(
   const created = await transaction.itineraryNode.create({
     data: {
       tripId: input.tripId,
+      dayOccurrenceId: input.dayOccurrenceId,
       kind: input.kind,
-      localDate: input.localDate,
       position: temporaryPosition,
       placeId: input.placeId,
       note: input.note,
@@ -734,13 +904,12 @@ async function insertNode(
   });
   const ordered = existing.map((node) => node.id);
   ordered.splice(input.position, 0, created.id);
-  await rewritePositions(transaction, input.tripId, input.localDate, ordered);
+  await rewritePositions(transaction, input.dayOccurrenceId, ordered);
 }
 
 async function rewritePositions(
   transaction: Transaction,
-  tripId: string,
-  localDate: Date,
+  dayOccurrenceId: string,
   orderedIds: readonly string[],
 ): Promise<void> {
   if (orderedIds.length === 0) {
@@ -750,8 +919,7 @@ async function rewritePositions(
   await transaction.$executeRaw(Prisma.sql`
     UPDATE "ItineraryNode"
     SET "position" = "position" + ${offset}
-    WHERE "tripId" = ${tripId}::uuid
-      AND "localDate" = ${localDate}::date
+    WHERE "dayOccurrenceId" = ${dayOccurrenceId}::uuid
   `);
   for (const [position, id] of orderedIds.entries()) {
     await transaction.itineraryNode.update({
@@ -763,12 +931,11 @@ async function rewritePositions(
 
 async function orderedNodeIds(
   transaction: Transaction,
-  tripId: string,
-  localDate: Date,
+  dayOccurrenceId: string,
 ): Promise<string[]> {
   return (
     await transaction.itineraryNode.findMany({
-      where: { tripId, localDate },
+      where: { dayOccurrenceId },
       select: { id: true },
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
     })
@@ -782,7 +949,7 @@ async function requireTripNode(
 ) {
   const node = await transaction.itineraryNode.findFirst({
     where: { id: nodeId, tripId },
-    select: { id: true, kind: true, localDate: true },
+    select: { id: true, kind: true, dayOccurrenceId: true },
   });
   if (node === null) {
     throw new TripTransactionAbort('NOT_FOUND');
@@ -821,19 +988,47 @@ async function reconcileDateOwnership(
   transaction: Transaction,
   input: { readonly ownerUserId: string; readonly tripId: string },
 ): Promise<{ readonly minimum: Date; readonly maximum: Date } | null> {
-  const rows = await transaction.$queryRaw<DateBoundsRow[]>(Prisma.sql`
-    SELECT MIN("localDate") AS minimum, MAX("localDate") AS maximum
-    FROM "ItineraryNode"
-    WHERE "tripId" = ${input.tripId}::uuid
-  `);
-  const minimum = rows[0]?.minimum ?? null;
-  const maximum = rows[0]?.maximum ?? null;
-  if (minimum === null || maximum === null) {
+  const occurrences = await transaction.dayOccurrence.findMany({
+    where: { tripId: input.tripId },
+    select: {
+      id: true,
+      localDate: true,
+      sequence: true,
+      _count: { select: { nodes: true } },
+    },
+    orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
+  });
+  const firstContentIndex = occurrences.findIndex(
+    (occurrence) => occurrence._count.nodes > 0,
+  );
+  if (firstContentIndex < 0) {
+    await transaction.dayOccurrence.deleteMany({
+      where: { tripId: input.tripId },
+    });
     await transaction.dateOwnership.deleteMany({
       where: { tripId: input.tripId },
     });
     return null;
   }
+  const lastContentIndex = occurrences.findLastIndex(
+    (occurrence) => occurrence._count.nodes > 0,
+  );
+  const retained = occurrences.slice(firstContentIndex, lastContentIndex + 1);
+  const retainedIds = retained.map((occurrence) => occurrence.id);
+  await transaction.dayOccurrence.deleteMany({
+    where: {
+      tripId: input.tripId,
+      id: { notIn: retainedIds },
+    },
+  });
+  await rewriteDayOccurrenceSequences(transaction, input.tripId, retainedIds);
+
+  const minimum = new Date(
+    Math.min(...retained.map((occurrence) => occurrence.localDate.getTime())),
+  );
+  const maximum = new Date(
+    Math.max(...retained.map((occurrence) => occurrence.localDate.getTime())),
+  );
 
   const conflict = await transaction.dateOwnership.findFirst({
     where: {
@@ -900,18 +1095,26 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
     ownedDates: trip.dateOwnerships.map((ownership) => ownership.localDate),
-    nodes: trip.nodes.map((node) => ({
-      id: node.id,
-      tripId: node.tripId,
-      kind: node.kind,
-      localDate: node.localDate,
-      position: node.position,
-      place: node.place === null ? null : toPlaceRecord(node.place),
-      note: node.note,
-      source: node.source,
-      createdAt: node.createdAt,
-      updatedAt: node.updatedAt,
-      timeValues: node.temporalValues.map(toTemporalValueRecord),
+    dayOccurrences: trip.dayOccurrences.map((occurrence) => ({
+      id: occurrence.id,
+      tripId: occurrence.tripId,
+      localDate: occurrence.localDate,
+      sequence: occurrence.sequence,
+      createdAt: occurrence.createdAt,
+      updatedAt: occurrence.updatedAt,
+      nodes: occurrence.nodes.map((node) => ({
+        id: node.id,
+        tripId: node.tripId,
+        dayOccurrenceId: node.dayOccurrenceId,
+        kind: node.kind,
+        position: node.position,
+        place: node.place === null ? null : toPlaceRecord(node.place),
+        note: node.note,
+        source: node.source,
+        createdAt: node.createdAt,
+        updatedAt: node.updatedAt,
+        timeValues: node.temporalValues.map(toTemporalValueRecord),
+      })),
     })),
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
   };
@@ -999,6 +1202,12 @@ function toPlaceRecord(place: {
 
 function utcDayDifference(minimum: Date, maximum: Date): number {
   return Math.round((maximum.getTime() - minimum.getTime()) / 86_400_000);
+}
+
+function addUtcDays(value: Date, days: number): Date {
+  const result = new Date(value.getTime());
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
 }
 
 function failureResult(error: unknown): TripMutationResult {

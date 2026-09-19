@@ -266,12 +266,28 @@ model Trip {
   updatedAt          DateTime               @updatedAt @db.Timestamptz(3)
   owner              User                   @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
   dateOwnerships     DateOwnership[]
+  dayOccurrences     DayOccurrence[]
   nodes              ItineraryNode[]
   transportEdges     TransportEdge[]
   transportHistory   TransportEdgeHistory[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
+}
+
+model DayOccurrence {
+  id        String          @id @default(uuid()) @db.Uuid
+  tripId    String          @db.Uuid
+  localDate DateTime        @db.Date
+  sequence  Int
+  createdAt DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime        @updatedAt @db.Timestamptz(3)
+  trip      Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  nodes     ItineraryNode[]
+
+  @@unique([tripId, sequence])
+  @@unique([id, tripId])
+  @@index([tripId, localDate])
 }
 
 model DateOwnership {
@@ -302,23 +318,24 @@ model Place {
 }
 
 model ItineraryNode {
-  id             String              @id @default(uuid()) @db.Uuid
-  tripId         String              @db.Uuid
-  kind           ItineraryNodeKind
-  localDate      DateTime            @db.Date
-  position       Int
-  placeId        String?             @db.Uuid
-  note           String?             @db.VarChar(2000)
-  source         ItineraryNodeSource @default(USER_PLANNED)
-  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
-  trip           Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  place          Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
-  temporalValues TemporalValue[]
+  id              String              @id @default(uuid()) @db.Uuid
+  tripId          String              @db.Uuid
+  dayOccurrenceId String              @db.Uuid
+  kind            ItineraryNodeKind
+  position        Int
+  placeId         String?             @db.Uuid
+  note            String?             @db.VarChar(2000)
+  source          ItineraryNodeSource @default(USER_PLANNED)
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime            @updatedAt @db.Timestamptz(3)
+  trip            Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  dayOccurrence   DayOccurrence       @relation(fields: [dayOccurrenceId, tripId], references: [id, tripId], onDelete: Cascade)
+  place           Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
+  temporalValues  TemporalValue[]
 
-  @@unique([tripId, localDate, position])
+  @@unique([dayOccurrenceId, position])
   @@unique([id, tripId])
-  @@index([tripId, localDate, position])
+  @@index([tripId, dayOccurrenceId, position])
   @@index([placeId])
 }
 

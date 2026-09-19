@@ -165,6 +165,99 @@ describe('P2A Trip API with PostgreSQL 17', () => {
       '2030-10-02',
       '2030-10-03',
     ]);
+    expect(trip.days.map((day) => day.sequence)).toEqual([0, 1, 2]);
+    expect(new Set(trip.days.map((day) => day.dayOccurrenceId)).size).toBe(3);
+  });
+
+  it('supports repeated local dates as distinct stable occurrences without duplicate ownership', async () => {
+    let trip = await createTrip(userA);
+    for (const [sequence, localDate] of [
+      '2030-01-09',
+      '2030-01-10',
+      '2030-01-09',
+      '2030-01-10',
+    ].entries()) {
+      trip = await executeCommand(userA, trip.id, trip.version, {
+        type: 'ADD_FREE_ACTION',
+        targetDay: newDay(localDate, sequence),
+        position: 0,
+        note: `occurrence-${sequence}`,
+      });
+    }
+
+    expect(trip.days.map((day) => [day.localDate, day.sequence])).toEqual([
+      ['2030-01-09', 0],
+      ['2030-01-10', 1],
+      ['2030-01-09', 2],
+      ['2030-01-10', 3],
+    ]);
+    expect(new Set(trip.days.map((day) => day.dayOccurrenceId)).size).toBe(4);
+    expect(await ownedDates(trip.id)).toEqual(['2030-01-09', '2030-01-10']);
+
+    const firstOccurrence = trip.days[0]!;
+    trip = await executeCommand(userA, trip.id, trip.version, {
+      type: 'ADD_FREE_ACTION',
+      targetDay: {
+        type: 'EXISTING',
+        dayOccurrenceId: firstOccurrence.dayOccurrenceId,
+      },
+      position: 1,
+      note: 'only-first-occurrence',
+    });
+    expect(trip.days[0]!.nodes).toHaveLength(2);
+    expect(trip.days[2]!.nodes).toHaveLength(1);
+  });
+
+  it('requires explicit DayOccurrence targeting and hides cross-owner occurrence IDs', async () => {
+    const tripA = await createTrip(userA);
+    let tripB = await createTrip(userB);
+    tripB = await addFreeAction(userB, tripB, '2030-10-01', 0);
+
+    const legacy = await commandResponse(userA, tripA.id, tripA.version, {
+      type: 'ADD_FREE_ACTION',
+      localDate: '2030-10-01',
+      position: 0,
+    });
+    expect(legacy.statusCode).toBe(400);
+    expect(legacy.json().error.code).toBe('DAY_OCCURRENCE_REQUIRED');
+
+    const privateTarget = await commandResponse(
+      userA,
+      tripA.id,
+      tripA.version,
+      {
+        type: 'ADD_FREE_ACTION',
+        targetDay: {
+          type: 'EXISTING',
+          dayOccurrenceId: tripB.days[0]!.dayOccurrenceId,
+        },
+        position: 0,
+      },
+    );
+    expect(privateTarget.statusCode).toBe(404);
+    expect(privateTarget.json().error.code).toBe('NOT_FOUND');
+    expect((await getTrip(userA, tripA.id)).version).toBe(tripA.version);
+  });
+
+  it('moves a node to a specific occurrence and preserves sequence-based ordering', async () => {
+    let trip = await createTrip(userA);
+    trip = await addFreeAction(userA, trip, '2030-10-01', 0, 'A');
+    trip = await addFreeAction(userA, trip, '2030-10-01', 1, 'B');
+    trip = await addFreeAction(userA, trip, '2030-10-02', 0, 'C');
+    const sourceNode = trip.days[0]!.nodes[1]!;
+    const targetOccurrence = trip.days[1]!;
+
+    trip = await executeCommand(userA, trip.id, trip.version, {
+      type: 'MOVE_NODE',
+      nodeId: sourceNode.id,
+      dayOccurrenceId: targetOccurrence.dayOccurrenceId,
+      position: 0,
+    });
+
+    expect(trip.days[0]!.nodes.map((node) => node.note)).toEqual(['A']);
+    expect(trip.days[1]!.nodes.map((node) => node.note)).toEqual(['B', 'C']);
+    expect(trip.days[1]!.nodes.map((node) => node.position)).toEqual([0, 1]);
+    expect(trip.version).toBe(5);
   });
 
   it('keeps a middle blank day owned after deleting its only node', async () => {
@@ -180,7 +273,11 @@ describe('P2A Trip API with PostgreSQL 17', () => {
     });
     expect(trip.effectiveStartDate).toBe('2030-10-01');
     expect(trip.effectiveEndDate).toBe('2030-10-03');
-    expect(trip.days[1]).toEqual({ localDate: '2030-10-02', nodes: [] });
+    expect(trip.days[1]).toMatchObject({
+      localDate: '2030-10-02',
+      sequence: 1,
+      nodes: [],
+    });
     expect(await ownedDates(trip.id)).toHaveLength(3);
   });
 
@@ -235,7 +332,7 @@ describe('P2A Trip API with PostgreSQL 17', () => {
     tripA = await addFreeAction(userA, tripA, '2030-10-02', 0);
     const response = await commandResponse(userA, tripB.id, tripB.version, {
       type: 'ADD_FREE_ACTION',
-      localDate: '2030-10-02',
+      targetDay: newDay('2030-10-02', 0),
       position: 0,
     });
     expect(response.statusCode).toBe(409);
@@ -339,8 +436,9 @@ describe('P2A Trip API with PostgreSQL 17', () => {
     ]);
     const nodeA = trip.days[0]!.nodes[2]!;
     trip = await executeCommand(userA, trip.id, trip.version, {
-      type: 'MOVE_NODE_WITHIN_DAY',
+      type: 'MOVE_NODE',
       nodeId: nodeA.id,
+      dayOccurrenceId: trip.days[0]!.dayOccurrenceId,
       position: 0,
     });
     expect(trip.days[0]!.nodes.map((node) => node.note)).toEqual([
@@ -370,7 +468,7 @@ describe('P2A Trip API with PostgreSQL 17', () => {
     const after = trip.days[0]!.nodes[0]!;
     expect(after).toMatchObject({
       id: before.id,
-      localDate: before.localDate,
+      dayOccurrenceId: before.dayOccurrenceId,
       position: before.position,
       note: null,
       place: { name: 'SYNTHETIC new' },
@@ -414,7 +512,7 @@ describe('P2A Trip API with PostgreSQL 17', () => {
     const trip = await createTrip(userA);
     const response = await commandResponse(userA, trip.id, 1, {
       type: 'ADD_PLACE_VISIT',
-      localDate: '2030-10-01',
+      targetDay: newDay('2030-10-01', 0),
       position: 0,
       place: { type: 'EXISTING', placeId: privatePlaceId },
     });
@@ -454,11 +552,12 @@ describe('P2A Trip API with PostgreSQL 17', () => {
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = 'public'
-        AND table_name IN ('Trip', 'DateOwnership', 'Place', 'ItineraryNode')
+        AND table_name IN ('Trip', 'DateOwnership', 'DayOccurrence', 'Place', 'ItineraryNode')
       ORDER BY table_name
     `;
     expect(tables.map((row) => row.table_name)).toEqual([
       'DateOwnership',
+      'DayOccurrence',
       'ItineraryNode',
       'Place',
       'Trip',
@@ -530,7 +629,7 @@ describe('P2A Trip API with PostgreSQL 17', () => {
   ): Promise<TripView> {
     return executeCommand(identity, trip.id, trip.version, {
       type: 'ADD_FREE_ACTION',
-      localDate,
+      targetDay: targetDay(trip, localDate),
       position,
       note,
     });
@@ -546,7 +645,7 @@ describe('P2A Trip API with PostgreSQL 17', () => {
   ): Promise<TripView> {
     return executeCommand(identity, trip.id, trip.version, {
       type: 'ADD_PLACE_VISIT',
-      localDate,
+      targetDay: targetDay(trip, localDate),
       position,
       place,
       note,
@@ -652,10 +751,21 @@ function customPlace(name: string) {
 function freeActionCommand(localDate: string) {
   return {
     type: 'ADD_FREE_ACTION',
-    localDate,
+    targetDay: newDay(localDate, 0),
     position: 0,
     note: 'SYNTHETIC concurrent action',
   };
+}
+
+function newDay(localDate: string, sequence: number) {
+  return { type: 'NEW', localDate, sequence };
+}
+
+function targetDay(trip: TripView, localDate: string) {
+  const existing = trip.days.find((day) => day.localDate === localDate);
+  return existing === undefined
+    ? newDay(localDate, trip.days.length)
+    : { type: 'EXISTING', dayOccurrenceId: existing.dayOccurrenceId };
 }
 
 function authConfig() {
@@ -678,6 +788,7 @@ async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
   await managed.client.temporalValue.deleteMany();
   await managed.client.transportEdge.deleteMany();
   await managed.client.itineraryNode.deleteMany();
+  await managed.client.dayOccurrence.deleteMany();
   await managed.client.dateOwnership.deleteMany();
   await managed.client.trip.deleteMany();
   await managed.client.place.deleteMany();

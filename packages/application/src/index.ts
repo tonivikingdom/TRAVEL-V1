@@ -51,9 +51,11 @@ export {
 } from './tokens.js';
 export { TripService } from './trip-service.js';
 export type {
+  DayOccurrenceRecord,
   ItineraryNodeRecord,
   PlaceRecord,
   RepositoryPlaceInput,
+  RepositoryDayOccurrenceTarget,
   RepositoryTemporalSubject,
   RepositoryTemporalValueInput,
   RepositoryTripCommand,

@@ -112,6 +112,26 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     expect(await managed.client.transportEdge.count()).toBe(0);
   });
 
+  it('uses occurrence sequence for adjacency when local dates move backward', async () => {
+    let trip = await createTrip(userA);
+    trip = await addVisit(userA, trip, 'Tokyo', 0, '2030-01-10');
+    trip = await addVisit(userA, trip, 'Los Angeles', 0, '2030-01-09');
+    expect(trip.days.map((day) => day.localDate)).toEqual([
+      '2030-01-10',
+      '2030-01-09',
+    ]);
+
+    trip = await setTransport(userA, trip, 0, 1, {
+      mode: 'FLIGHT',
+      fixedService: true,
+    });
+    expect(trip.connections).toHaveLength(1);
+    expect(connectionLabel(trip, trip.connections[0]!)).toBe(
+      'Tokyo→Los Angeles',
+    );
+    expect(trip.connections[0]!.state).toBe('ACTIVE');
+  });
+
   it('moves D locally and invalidates only the three changed adjacencies', async () => {
     let trip = await tripWithPlaces(userA, ['A', 'B', 'C', 'D', 'E', 'F']);
     for (let index = 0; index < 5; index += 1) {
@@ -129,8 +149,9 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     const nodeD = nodeNamed(trip, 'D');
 
     trip = await executeCommand(userA, trip.id, trip.version, {
-      type: 'MOVE_NODE_WITHIN_DAY',
+      type: 'MOVE_NODE',
       nodeId: nodeD.id,
+      dayOccurrenceId: trip.days[0]!.dayOccurrenceId,
       position: 2,
     });
 
@@ -501,6 +522,200 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     ).toBe(1);
   });
 
+  it('protects a Node ACTUAL from cross-occurrence movement atomically', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    trip = await addVisit(userA, trip, 'C', 0, '2030-10-02');
+    trip = await setTransport(userA, trip, 0, 1);
+    trip = await setTransport(userA, trip, 1, 2);
+    const nodeB = nodeNamed(trip, 'B');
+    trip = await setTime(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      'ACTUAL',
+      '10:12:00',
+    );
+    const sourceDay = trip.days[0]!;
+    const targetDay = trip.days[1]!;
+    const protectedVersion = trip.version;
+    const protectedSnapshot = {
+      effectiveStartDate: trip.effectiveStartDate,
+      effectiveEndDate: trip.effectiveEndDate,
+      days: trip.days,
+      connections: trip.connections,
+    };
+    const ownershipBefore = await managed.client.dateOwnership.findMany({
+      where: { tripId: trip.id },
+      orderBy: { localDate: 'asc' },
+    });
+
+    const response = await commandResponse(userA, trip.id, trip.version, {
+      type: 'MOVE_NODE',
+      nodeId: nodeB.id,
+      dayOccurrenceId: targetDay.dayOccurrenceId,
+      position: 1,
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('FACT_PROTECTED');
+    trip = await getTrip(userA, trip.id);
+    expect(trip.version).toBe(protectedVersion);
+    expect({
+      effectiveStartDate: trip.effectiveStartDate,
+      effectiveEndDate: trip.effectiveEndDate,
+      days: trip.days,
+      connections: trip.connections,
+    }).toEqual(protectedSnapshot);
+    expect(
+      await managed.client.itineraryNode.findUniqueOrThrow({
+        where: { id: nodeB.id },
+        select: { dayOccurrenceId: true, position: true },
+      }),
+    ).toEqual({ dayOccurrenceId: sourceDay.dayOccurrenceId, position: 1 });
+    expect(
+      await managed.client.temporalValue.count({
+        where: { nodeId: nodeB.id, layer: 'ACTUAL' },
+      }),
+    ).toBe(1);
+    expect(await history(userA, trip.id)).toEqual([]);
+    expect(
+      await managed.client.dateOwnership.findMany({
+        where: { tripId: trip.id },
+        orderBy: { localDate: 'asc' },
+      }),
+    ).toEqual(ownershipBefore);
+  });
+
+  it('allows PLANNED and ESTIMATED facts to move across occurrences', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    trip = await addVisit(userA, trip, 'C', 0, '2030-10-02');
+    const nodeB = nodeNamed(trip, 'B');
+    trip = await setTime(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      'PLANNED',
+      '10:00:00',
+    );
+    trip = await setTime(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      'ESTIMATED',
+      '10:15:00',
+    );
+    const targetDayOccurrenceId = trip.days[1]!.dayOccurrenceId;
+
+    trip = await executeCommand(userA, trip.id, trip.version, {
+      type: 'MOVE_NODE',
+      nodeId: nodeB.id,
+      dayOccurrenceId: targetDayOccurrenceId,
+      position: 0,
+    });
+
+    expect(trip.days[1]!.nodes.map((node) => node.place?.name)).toEqual([
+      'B',
+      'C',
+    ]);
+    const persistedLayers = await managed.client.temporalValue.findMany({
+      where: { nodeId: nodeB.id },
+      select: { layer: true },
+    });
+    expect(persistedLayers.map((value) => value.layer).sort()).toEqual([
+      'ESTIMATED',
+      'PLANNED',
+    ]);
+  });
+
+  it('allows same-occurrence reorder when the Node has an ACTUAL fact', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    const nodeB = nodeNamed(trip, 'B');
+    trip = await setTime(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      'ACTUAL',
+      '10:12:00',
+    );
+    const versionBeforeMove = trip.version;
+
+    trip = await executeCommand(userA, trip.id, trip.version, {
+      type: 'MOVE_NODE',
+      nodeId: nodeB.id,
+      dayOccurrenceId: trip.days[0]!.dayOccurrenceId,
+      position: 0,
+    });
+
+    expect(trip.version).toBe(versionBeforeMove + 1);
+    expect(nodeNames(trip)).toEqual(['B', 'A']);
+    expect(
+      await managed.client.temporalValue.count({
+        where: { nodeId: nodeB.id, layer: 'ACTUAL' },
+      }),
+    ).toBe(1);
+  });
+
+  it('serializes concurrent ACTUAL write and cross-occurrence MOVE_NODE', async () => {
+    let trip = await tripWithPlaces(userA, ['A', 'B']);
+    trip = await addVisit(userA, trip, 'C', 0, '2030-10-02');
+    const nodeB = nodeNamed(trip, 'B');
+    const sourceDayOccurrenceId = trip.days[0]!.dayOccurrenceId;
+    const targetDayOccurrenceId = trip.days[1]!.dayOccurrenceId;
+    const baseTripVersion = trip.version;
+    const actualWrite = tripService
+      .setResolvedTemporalValue(
+        userA.actor,
+        trip.id,
+        baseTripVersion,
+        { type: 'NODE', nodeId: nodeB.id },
+        {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T10:12:00+08:00',
+          timeZone: 'Asia/Shanghai',
+          sourceKind: 'PROVIDER_OBSERVATION',
+          sourceRef: 'SYNTHETIC_P3A_RACE',
+          observedAt: '2030-10-01T10:13:00+08:00',
+        },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    const moveWrite = commandResponse(userA, trip.id, baseTripVersion, {
+      type: 'MOVE_NODE',
+      nodeId: nodeB.id,
+      dayOccurrenceId: targetDayOccurrenceId,
+      position: 0,
+    });
+
+    const [actualSucceeded, moveResponse] = await Promise.all([
+      actualWrite,
+      moveWrite,
+    ]);
+    const moveSucceeded = moveResponse.statusCode === 200;
+    expect(Number(actualSucceeded) + Number(moveSucceeded)).toBe(1);
+
+    const persistedNode = await managed.client.itineraryNode.findUniqueOrThrow({
+      where: { id: nodeB.id },
+      include: { temporalValues: true },
+    });
+    if (actualSucceeded) {
+      expect(moveResponse.statusCode).toBe(409);
+      expect(['FACT_PROTECTED', 'VERSION_CONFLICT']).toContain(
+        moveResponse.json().error.code,
+      );
+      expect(persistedNode.dayOccurrenceId).toBe(sourceDayOccurrenceId);
+      expect(persistedNode.temporalValues).toHaveLength(1);
+      expect(persistedNode.temporalValues[0]!.layer).toBe('ACTUAL');
+    } else {
+      expect(moveResponse.statusCode).toBe(200);
+      expect(persistedNode.dayOccurrenceId).toBe(targetDayOccurrenceId);
+      expect(persistedNode.temporalValues).toEqual([]);
+    }
+    expect((await getTrip(userA, trip.id)).version).toBe(baseTripVersion + 1);
+  });
+
   it('rejects different ACTUAL overwrites on both Node and Transport', async () => {
     let trip = await tripWithPlaces(userA, ['A', 'B']);
     trip = await setTransport(userA, trip, 0, 1);
@@ -778,7 +993,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
   ): Promise<TripView> {
     return executeCommand(identity, trip.id, trip.version, {
       type: 'ADD_PLACE_VISIT',
-      localDate,
+      targetDay: targetDay(trip, localDate),
       position,
       place: customPlace(name),
       note: `SYNTHETIC ${name}`,
@@ -793,7 +1008,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
   ): Promise<TripView> {
     return executeCommand(identity, trip.id, trip.version, {
       type: 'ADD_FREE_ACTION',
-      localDate,
+      targetDay: targetDay(trip, localDate),
       position,
       note: 'SYNTHETIC free action',
     });
@@ -951,6 +1166,13 @@ function customPlace(name: string) {
   };
 }
 
+function targetDay(trip: TripView, localDate: string) {
+  const existing = trip.days.find((day) => day.localDate === localDate);
+  return existing === undefined
+    ? { type: 'NEW', localDate, sequence: trip.days.length }
+    : { type: 'EXISTING', dayOccurrenceId: existing.dayOccurrenceId };
+}
+
 function activeConnections(trip: TripView): readonly ConnectionView[] {
   return trip.connections.filter((connection) => connection.state === 'ACTIVE');
 }
@@ -1008,6 +1230,7 @@ async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
   await managed.client.temporalValue.deleteMany();
   await managed.client.transportEdge.deleteMany();
   await managed.client.itineraryNode.deleteMany();
+  await managed.client.dayOccurrence.deleteMany();
   await managed.client.dateOwnership.deleteMany();
   await managed.client.trip.deleteMany();
   await managed.client.place.deleteMany();

@@ -52,7 +52,7 @@ export interface PlaceView {
 export interface ItineraryNodeView {
   readonly id: string;
   readonly kind: ItineraryNodeKind;
-  readonly localDate: string;
+  readonly dayOccurrenceId: string;
   readonly position: number;
   readonly place: PlaceView | null;
   readonly note: string | null;
@@ -100,7 +100,9 @@ export interface ConnectionView {
 }
 
 export interface DayView {
+  readonly dayOccurrenceId: string;
   readonly localDate: string;
+  readonly sequence: number;
   readonly nodes: readonly ItineraryNodeView[];
 }
 
@@ -137,24 +139,36 @@ export interface CustomPlaceInput {
 
 export type PlaceInput = ExistingPlaceInput | CustomPlaceInput;
 
+export type DayOccurrenceTargetInput =
+  | {
+      readonly type: 'EXISTING';
+      readonly dayOccurrenceId: string;
+    }
+  | {
+      readonly type: 'NEW';
+      readonly localDate: string;
+      readonly sequence: number;
+    };
+
 export type TripCommandInput =
   | {
       readonly type: 'ADD_PLACE_VISIT';
-      readonly localDate: string;
+      readonly targetDay: DayOccurrenceTargetInput;
       readonly position: number;
       readonly place: PlaceInput;
       readonly note?: string | null;
     }
   | {
       readonly type: 'ADD_FREE_ACTION';
-      readonly localDate: string;
+      readonly targetDay: DayOccurrenceTargetInput;
       readonly position: number;
       readonly note?: string | null;
     }
   | { readonly type: 'DELETE_NODE'; readonly nodeId: string }
   | {
-      readonly type: 'MOVE_NODE_WITHIN_DAY';
+      readonly type: 'MOVE_NODE';
       readonly nodeId: string;
+      readonly dayOccurrenceId: string;
       readonly position: number;
     }
   | {

@@ -7,6 +7,7 @@ import {
 } from '@travel/application';
 import type {
   ApiErrorResponse,
+  DayOccurrenceTargetInput,
   LivenessResponse,
   PlaceInput,
   ReadinessResponse,
@@ -398,7 +399,7 @@ function parseTripCommand(value: unknown): TripCommandInput {
     case 'ADD_PLACE_VISIT':
       return {
         type,
-        localDate: requiredString(command, 'localDate'),
+        targetDay: parseDayOccurrenceTarget(command.targetDay),
         position: requiredNumber(command, 'position'),
         place: parsePlaceInput(command.place),
         ...(hasOwn(command, 'note')
@@ -408,7 +409,7 @@ function parseTripCommand(value: unknown): TripCommandInput {
     case 'ADD_FREE_ACTION':
       return {
         type,
-        localDate: requiredString(command, 'localDate'),
+        targetDay: parseDayOccurrenceTarget(command.targetDay),
         position: requiredNumber(command, 'position'),
         ...(hasOwn(command, 'note')
           ? { note: optionalNullableString(command, 'note') }
@@ -416,10 +417,11 @@ function parseTripCommand(value: unknown): TripCommandInput {
       };
     case 'DELETE_NODE':
       return { type, nodeId: requiredString(command, 'nodeId') };
-    case 'MOVE_NODE_WITHIN_DAY':
+    case 'MOVE_NODE':
       return {
         type,
         nodeId: requiredString(command, 'nodeId'),
+        dayOccurrenceId: requiredString(command, 'dayOccurrenceId'),
         position: requiredNumber(command, 'position'),
       };
     case 'REPLACE_PLACE':
@@ -452,6 +454,35 @@ function parseTripCommand(value: unknown): TripCommandInput {
     default:
       throw new ApplicationError('VALIDATION_ERROR', '不支持的行程命令。', 400);
   }
+}
+
+function parseDayOccurrenceTarget(value: unknown): DayOccurrenceTargetInput {
+  if (!isRecord(value)) {
+    throw new ApplicationError(
+      'DAY_OCCURRENCE_REQUIRED',
+      '必须明确指定已有日期卡或新日期卡。',
+      400,
+    );
+  }
+  const type = requiredString(value, 'type');
+  if (type === 'EXISTING') {
+    return {
+      type,
+      dayOccurrenceId: requiredString(value, 'dayOccurrenceId'),
+    };
+  }
+  if (type === 'NEW') {
+    return {
+      type,
+      localDate: requiredString(value, 'localDate'),
+      sequence: requiredNumber(value, 'sequence'),
+    };
+  }
+  throw new ApplicationError(
+    'DAY_OCCURRENCE_REQUIRED',
+    '必须明确指定已有日期卡或新日期卡。',
+    400,
+  );
 }
 
 function parseTransportMode(value: string): TransportMode {

@@ -275,6 +275,16 @@ export interface ResolvedTemporalValueInput {
   readonly observedAt?: string | null;
 }
 
+export interface SetResolvedTemporalValueRequest {
+  readonly baseTripVersion: number;
+  readonly subject: TemporalSubjectInput;
+  readonly value: ResolvedTemporalValueInput;
+}
+
+export interface TransportHistoryResponse {
+  readonly history: readonly TransportHistoryView[];
+}
+
 export interface ScheduleEffectivePointView {
   readonly value: TemporalValueView;
   readonly subjectType: 'NODE' | 'TRANSPORT' | 'FIXED_TRANSPORT';

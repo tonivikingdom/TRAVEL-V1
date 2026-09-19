@@ -526,6 +526,8 @@ async function adoptPreview(): Promise<void> {
       {
         baseTripVersion: preview.basisVersion,
         idempotencyKey: crypto.randomUUID(),
+        acceptedUserAdjustments:
+          preview.changeSummary.requiredUserAdjustments ?? [],
       },
     );
     state.currentTrip = response.trip;
@@ -883,7 +885,7 @@ function candidateView(): string {
 }
 
 function candidateCard(candidate: RouteCandidateView, index: number): string {
-  return `<article class="candidate ${candidate.provider === 'SYNTHETIC' ? 'synthetic' : ''}">${candidate.provider === 'SYNTHETIC' ? '<strong class="synthetic-label">SYNTHETIC 测试交通数据 · 不得视为真实班次</strong>' : ''}<h3>${esc(candidate.provider)} / ${esc(candidate.candidateId)}</h3><p>${esc(candidate.overall.departure.instant)} → ${esc(candidate.overall.arrival.instant)} · ${candidate.overall.durationSeconds}s</p><p>observed ${esc(candidate.observedAt)} · valid ${esc(candidate.validUntil ?? 'null')} · snapshot ${esc(candidate.snapshotExpiresAt)}</p><pre>${esc(JSON.stringify({ fare: candidate.fare, legs: candidate.legs, queryTimeCondition: candidate.queryTimeCondition }, null, 2))}</pre><button data-action="choose-candidate" data-index="${index}">选择并生成 Preview</button></article>`;
+  return `<article class="candidate ${candidate.provider === 'SYNTHETIC' ? 'synthetic' : ''}">${candidate.provider === 'SYNTHETIC' ? '<strong class="synthetic-label">SYNTHETIC 测试交通数据 · 不得视为真实班次</strong>' : ''}<h3>${esc(candidate.provider)} / ${esc(candidate.candidateId)}</h3><p>${esc(candidate.overall.departure.instant)} → ${esc(candidate.overall.arrival.instant)} · ${candidate.overall.durationSeconds}s</p><p>observed ${esc(candidate.observedAt)} · valid ${esc(candidate.validUntil ?? 'null')} · snapshot ${esc(candidate.snapshotExpiresAt)}</p><pre>${esc(JSON.stringify({ fare: candidate.fare, planningAssessment: candidate.planningAssessment, legs: candidate.legs, queryTimeCondition: candidate.queryTimeCondition }, null, 2))}</pre><button data-action="choose-candidate" data-index="${index}">选择并生成 Preview</button></article>`;
 }
 
 function previewForm(): string {

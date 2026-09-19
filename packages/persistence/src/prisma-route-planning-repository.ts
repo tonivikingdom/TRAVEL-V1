@@ -166,6 +166,12 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly baseTripVersion: number;
     readonly idempotencyKey: string;
     readonly requestHash: string;
+    readonly acceptedUserAdjustments: readonly {
+      readonly intentId: string;
+      readonly nodeId: string;
+      readonly fromDurationSeconds: number;
+      readonly toDurationSeconds: number;
+    }[];
     readonly now: Date;
     readonly undoExpiresAt: Date;
   }): Promise<AdoptRoutePreviewResult> {

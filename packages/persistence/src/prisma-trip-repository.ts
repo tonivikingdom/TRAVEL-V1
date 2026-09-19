@@ -42,6 +42,7 @@ const tripInclude = {
               { id: 'asc' },
             ],
           },
+          systemDwellSuggestion: true,
         },
         orderBy: [{ position: 'asc' }, { id: 'asc' }],
       },
@@ -217,6 +218,51 @@ export class PrismaTripRepository implements TripRepository {
         await lockOwner(transaction, input.ownerUserId);
         await requireLockedTrip(transaction, input);
         await upsertTemporalValue(transaction, input);
+        await transaction.trip.update({
+          where: { id: input.tripId },
+          data: { version: { increment: 1 } },
+        });
+        return {
+          status: 'SUCCESS',
+          trip: toTripRecord(
+            await loadTrip(transaction, input.tripId, input.ownerUserId),
+          ),
+        };
+      });
+    } catch (error) {
+      return failureResult(error);
+    }
+  }
+
+  async setSystemDwellSuggestion(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly baseTripVersion: number;
+    readonly nodeId: string;
+    readonly durationSeconds: number;
+  }): Promise<TripMutationResult> {
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        await lockOwner(transaction, input.ownerUserId);
+        await requireLockedTrip(transaction, input);
+        const node = await requireTripNode(
+          transaction,
+          input.tripId,
+          input.nodeId,
+        );
+        await transaction.systemDwellSuggestion.upsert({
+          where: { nodeId: node.id },
+          create: {
+            tripId: input.tripId,
+            nodeId: node.id,
+            durationSeconds: input.durationSeconds,
+            source: 'SYSTEM_SUGGESTION',
+          },
+          update: {
+            durationSeconds: input.durationSeconds,
+            source: 'SYSTEM_SUGGESTION',
+          },
+        });
         await transaction.trip.update({
           where: { id: input.tripId },
           data: { version: { increment: 1 } },
@@ -1365,6 +1411,7 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
           createdAt: intent.createdAt,
           updatedAt: intent.updatedAt,
         })),
+        systemDwellSuggestion: node.systemDwellSuggestion,
       })),
       transportProjections: occurrence.transportProjections,
     })),

@@ -93,6 +93,7 @@ export type AdoptRoutePreviewResult =
         | 'IDEMPOTENCY_CONFLICT'
         | 'PREVIEW_STALE'
         | 'PREVIEW_BLOCKED'
+        | 'USER_ADJUSTMENT_REQUIRED'
         | 'FACT_PROTECTED'
         | 'DATE_OWNED';
     };
@@ -153,6 +154,12 @@ export interface RoutePlanningRepository {
     readonly baseTripVersion: number;
     readonly idempotencyKey: string;
     readonly requestHash: string;
+    readonly acceptedUserAdjustments: readonly {
+      readonly intentId: string;
+      readonly nodeId: string;
+      readonly fromDurationSeconds: number;
+      readonly toDurationSeconds: number;
+    }[];
     readonly now: Date;
     readonly undoExpiresAt: Date;
   }): Promise<AdoptRoutePreviewResult>;

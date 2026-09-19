@@ -15,6 +15,7 @@ const migrationsPath = fileURLToPath(
 );
 const p4b2Migration = '20260920110000_p4b2_route_adoption';
 const p4b3Migration = '20260920150000_p4b3_route_undo';
+const p5cMigration = '20260921100000_p5c_planning_policy';
 
 describe('P4B3 route Undo migration', () => {
   it('applies every migration to a clean database', async () => {
@@ -88,6 +89,43 @@ describe('P4B3 route Undo migration', () => {
         'targetOperationReceiptId',
         'undoExpiresAt',
       ]);
+    });
+  });
+
+  it('migrates a populated P5B database without changing official facts', async () => {
+    await withDatabase('p5c_populated', async (target) => {
+      await applyMigrations(target, p5cMigration);
+      await seedP4b2Data(target);
+      const before = await officialCounts(target);
+
+      await applyMigration(target, p5cMigration);
+
+      expect(await officialCounts(target)).toEqual(before);
+      const table = await target.query<{ source: string; duration: number }>(`
+        INSERT INTO "SystemDwellSuggestion"
+          ("id", "tripId", "nodeId", "durationSeconds", "updatedAt")
+        VALUES
+          ('99000000-0000-4000-8000-000000000001',
+           '10000000-0000-4000-8000-000000000001',
+           '30000000-0000-4000-8000-000000000001', 3600,
+           CURRENT_TIMESTAMP)
+        RETURNING "source"::text AS source, "durationSeconds" AS duration
+      `);
+      expect(table.rows[0]).toEqual({
+        source: 'SYSTEM_SUGGESTION',
+        duration: 3600,
+      });
+      await expect(
+        target.query(`
+          INSERT INTO "SystemDwellSuggestion"
+            ("id", "tripId", "nodeId", "durationSeconds", "updatedAt")
+          VALUES
+            ('99000000-0000-4000-8000-000000000002',
+             '10000000-0000-4000-8000-000000000001',
+             '30000000-0000-4000-8000-000000000002', 0,
+             CURRENT_TIMESTAMP)
+        `),
+      ).rejects.toThrow();
     });
   });
 });

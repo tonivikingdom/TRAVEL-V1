@@ -57,6 +57,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   let providerResult: RouteProviderResult;
   let currentNow: Date;
   let providerHook: (() => Promise<void>) | undefined;
+  let tripRepository: PrismaTripRepository;
 
   beforeAll(() => {
     managed = createPrismaClient(databaseUrl);
@@ -77,6 +78,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       candidates: [candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z')],
     };
     const repository = new PrismaTripRepository(managed.client);
+    tripRepository = repository;
     const provider = new SyntheticRouteProvider(async (input) => {
       providerInputs.push(input);
       await providerHook?.();
@@ -474,6 +476,161 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(providerInputs[0]).toMatchObject({
       origin: { name: 'Tokyo' },
       destination: { name: 'Los Angeles' },
+    });
+  });
+
+  it('shows a 15-minute-lookback candidate, adopts one MIN_DWELL adjustment, and restores it on Undo', async () => {
+    let trip = await tripWithVisits(userA, ['Current place', 'Next place']);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    const temporal = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T10:00:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(temporal.statusCode).toBe(200);
+    trip = temporal.json() as TripView;
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: from!.id,
+      durationSeconds: 3_000,
+      locked: false,
+    });
+    const suggested = await tripRepository.setSystemDwellSuggestion({
+      ownerUserId: userA.actor.userId,
+      tripId: trip.id,
+      baseTripVersion: trip.version,
+      nodeId: from!.id,
+      durationSeconds: 3_600,
+    });
+    expect(suggested.status).toBe('SUCCESS');
+    if (suggested.status !== 'SUCCESS') throw new Error('suggestion failed');
+    trip = await new TripService(tripRepository).getTrip(userA.actor, trip.id);
+
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T10:45:00Z', '2030-10-01T11:45:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const routeResponse = await query(userA, trip, from!.id, to!.id, null);
+    expect(routeResponse.statusCode).toBe(200);
+    const route = routeResponse.json() as RouteQueryResponse;
+    expect(providerInputs[0]?.earliestDeparture?.toISOString()).toBe(
+      '2030-10-01T10:35:00.000Z',
+    );
+    expect(route.candidates[0]?.planningAssessment).toMatchObject({
+      requiresUserAdjustment: true,
+      requiredUserAdjustments: [
+        {
+          nodeId: from!.id,
+          fromDurationSeconds: 3_000,
+          toDurationSeconds: 2_700,
+        },
+      ],
+    });
+
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    const preview = previewResponse.json() as RoutePreviewView;
+    const adjustments = preview.changeSummary.requiredUserAdjustments ?? [];
+    expect(adjustments).toHaveLength(1);
+
+    const unconfirmed = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      `p5c-unconfirmed-${randomUUID()}`,
+    );
+    expect(unconfirmed.statusCode).toBe(409);
+    expect(unconfirmed.json()).toMatchObject({
+      error: { code: 'USER_ADJUSTMENT_REQUIRED' },
+    });
+
+    const adjustmentAdoptKey = `p5c-adopt-${randomUUID()}`;
+    const adoptedResponse = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      adjustmentAdoptKey,
+      adjustments,
+    );
+    expect(adoptedResponse.statusCode).toBe(200);
+    const adopted = adoptedResponse.json() as {
+      operationReceipt: { id: string; delta: { schemaVersion: string } };
+      trip: TripView;
+    };
+    expect(adopted.operationReceipt.delta.schemaVersion).toBe(
+      'route-adopt-delta-v3',
+    );
+    expect(
+      await managed.client.userTimeIntent.findFirstOrThrow({
+        where: { tripId: trip.id, kind: 'MIN_DWELL' },
+      }),
+    ).toMatchObject({ durationSeconds: 2_700 });
+
+    const replay = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      adjustmentAdoptKey,
+      adjustments,
+    );
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({
+      operationReceipt: { id: adopted.operationReceipt.id },
+      trip: { version: adopted.trip.version },
+    });
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: trip.id, operationType: 'ROUTE_ADOPT' },
+      }),
+    ).toBe(1);
+
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      `p5c-undo-${randomUUID()}`,
+    );
+    expect(undone.operationReceipt.delta).toMatchObject({
+      schemaVersion: 'route-undo-delta-v2',
+    });
+    expect(
+      await managed.client.userTimeIntent.findFirstOrThrow({
+        where: { tripId: trip.id, kind: 'MIN_DWELL' },
+      }),
+    ).toMatchObject({ durationSeconds: 3_000 });
+
+    const restoredSuggestion = await command(userA, undone.trip, {
+      type: 'REMOVE_MIN_DWELL',
+      nodeId: from!.id,
+    });
+    expect(
+      restoredSuggestion.days
+        .flatMap((day) => day.nodes)
+        .find((node) => node.id === from!.id),
+    ).toMatchObject({
+      systemDwellSuggestion: { durationSeconds: 3_600 },
+      timeIntents: [],
     });
   });
 
@@ -880,7 +1037,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       operationType: 'ROUTE_ADOPT',
       targetOperationReceiptId: null,
       undoExpiresAt: new Date(NOW.getTime() + 600_000),
-      delta: expect.objectContaining({ schemaVersion: 'route-adopt-delta-v2' }),
+      delta: expect.objectContaining({ schemaVersion: 'route-adopt-delta-v3' }),
     });
 
     const undone = await undoSuccessfully(
@@ -903,7 +1060,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       targetOperationReceiptId: adoptReceipt.id,
       baseTripVersion: adopted.trip.version,
       resultingTripVersion: adopted.trip.version + 1,
-      delta: expect.objectContaining({ schemaVersion: 'route-undo-delta-v1' }),
+      delta: expect.objectContaining({ schemaVersion: 'route-undo-delta-v2' }),
     });
     expect(
       await managed.client.adoptedRoute.findUniqueOrThrow({
@@ -1768,7 +1925,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     providerResult = transferCandidate();
     const preview = await createPreview(userA, trip, from!.id, to!.id);
     expect(preview).toMatchObject({
-      policyVersion: 'route-adoption-preview-v2',
+      policyVersion: 'route-adoption-preview-v3',
       status: 'ACTIVE',
       adoptable: true,
       changeSummary: {
@@ -2024,6 +2181,12 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     trip: TripView,
     previewId: string,
     idempotencyKey: string,
+    acceptedUserAdjustments?: readonly {
+      readonly intentId: string;
+      readonly nodeId: string;
+      readonly fromDurationSeconds: number;
+      readonly toDurationSeconds: number;
+    }[],
   ) {
     return app.inject({
       method: 'POST',
@@ -2032,6 +2195,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       payload: {
         baseTripVersion: trip.version,
         idempotencyKey,
+        ...(acceptedUserAdjustments === undefined
+          ? {}
+          : { acceptedUserAdjustments }),
       },
     });
   }

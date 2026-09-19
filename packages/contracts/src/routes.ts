@@ -54,6 +54,8 @@ export interface RouteQueryTimeConditionView {
   readonly hardLatestArrival: string | null;
   readonly earliestDeparture: string | null;
   readonly latestArrival: string | null;
+  readonly planningEarliestDeparture?: string | null;
+  readonly lookbackSeconds?: number;
   readonly preference:
     | { readonly type: 'NONE' }
     | {
@@ -62,6 +64,20 @@ export interface RouteQueryTimeConditionView {
         readonly timeZone: string;
       };
   readonly hint: RouteQueryHint | null;
+}
+
+export interface RouteUserDwellAdjustmentView {
+  readonly intentId: string;
+  readonly nodeId: string;
+  readonly fromDurationSeconds: number;
+  readonly toDurationSeconds: number;
+}
+
+export interface RouteCandidatePlanningAssessmentView {
+  readonly effectiveTotalTimeSeconds: number;
+  readonly requiresUserAdjustment: boolean;
+  readonly requiredUserAdjustments: readonly RouteUserDwellAdjustmentView[];
+  readonly softDeviations: readonly 'SYSTEM_SUGGESTED_DWELL'[];
 }
 
 export interface RouteCandidateView {
@@ -81,6 +97,7 @@ export interface RouteCandidateView {
   };
   readonly legs: readonly RouteCandidateLegView[];
   readonly fare: RouteFareView | null;
+  readonly planningAssessment?: RouteCandidatePlanningAssessmentView;
 }
 
 export interface RouteQueryResponse {
@@ -205,12 +222,29 @@ export interface RoutePreviewView {
     readonly proposedTransportDayProjections?: readonly RoutePreviewDayProjectionPlanView[];
     readonly temporalLayer: 'PLANNED';
     readonly temporalSourceKind: 'ADOPTED_TRANSPORT_FACT';
+    readonly requiredUserAdjustments?: readonly RouteUserDwellAdjustmentView[];
+    readonly downstreamImpact?: {
+      readonly nodeId: string;
+      readonly arrival: string;
+      readonly departure: string | null;
+      readonly projectedDwellSeconds: number | null;
+      readonly systemSuggestedDwellSeconds: number | null;
+      readonly userMinimumDwellSeconds: number | null;
+      readonly status:
+        | 'NORMAL'
+        | 'SOFT_DEVIATION'
+        | 'USER_REQUIREMENT_VIOLATION'
+        | 'INFEASIBLE'
+        | 'UNKNOWN';
+      readonly requiredUserAdjustments: readonly RouteUserDwellAdjustmentView[];
+    };
   };
 }
 
 export interface AdoptRoutePreviewRequest {
   readonly baseTripVersion: number;
   readonly idempotencyKey: string;
+  readonly acceptedUserAdjustments?: readonly RouteUserDwellAdjustmentView[];
 }
 
 export interface RouteAdoptDayOccurrenceSnapshot {
@@ -274,6 +308,20 @@ export interface RouteAdoptDeltaV2 {
   readonly createdDayOccurrenceIds: readonly string[];
 }
 
+export interface RouteAdoptDeltaV3 extends Omit<
+  RouteAdoptDeltaV2,
+  'schemaVersion'
+> {
+  readonly schemaVersion: 'route-adopt-delta-v3';
+  readonly userDwellAdjustments: readonly {
+    readonly intentId: string;
+    readonly nodeId: string;
+    readonly beforeDurationSeconds: number;
+    readonly afterDurationSeconds: number;
+    readonly beforeLocked: boolean;
+  }[];
+}
+
 export interface RouteUndoDeltaV1 {
   readonly schemaVersion: 'route-undo-delta-v1';
   readonly targetOperationReceiptId: string;
@@ -286,6 +334,14 @@ export interface RouteUndoDeltaV1 {
   readonly restoredDayOccurrenceIds: readonly string[];
   readonly removedAdoptCreatedDayOccurrenceIds: readonly string[];
   readonly restoredOwnedDates: readonly string[];
+}
+
+export interface RouteUndoDeltaV2 extends Omit<
+  RouteUndoDeltaV1,
+  'schemaVersion'
+> {
+  readonly schemaVersion: 'route-undo-delta-v2';
+  readonly restoredUserTimeIntentIds: readonly string[];
 }
 
 export interface UndoRouteAdoptionRequest {
@@ -305,7 +361,11 @@ export interface OperationReceiptView {
   readonly targetOperationReceiptId: string | null;
   readonly undoExpiresAt: string | null;
   readonly delta:
-    RouteAdoptDeltaV2 | RouteUndoDeltaV1 | Record<string, unknown>;
+    | RouteAdoptDeltaV2
+    | RouteAdoptDeltaV3
+    | RouteUndoDeltaV1
+    | RouteUndoDeltaV2
+    | Record<string, unknown>;
   readonly createdAt: string;
 }
 

@@ -151,8 +151,23 @@ export function hashRouteAdoptionRequest(input: {
   readonly tripId: string;
   readonly previewId: string;
   readonly baseTripVersion: number;
+  readonly acceptedUserAdjustments?: readonly {
+    readonly intentId: string;
+    readonly nodeId: string;
+    readonly fromDurationSeconds: number;
+    readonly toDurationSeconds: number;
+  }[];
 }): string {
-  return createHash('sha256').update(canonicalJson(input)).digest('hex');
+  const basis =
+    input.acceptedUserAdjustments === undefined ||
+    input.acceptedUserAdjustments.length === 0
+      ? {
+          tripId: input.tripId,
+          previewId: input.previewId,
+          baseTripVersion: input.baseTripVersion,
+        }
+      : input;
+  return createHash('sha256').update(canonicalJson(basis)).digest('hex');
 }
 
 export function hashRouteUndoRequest(input: {

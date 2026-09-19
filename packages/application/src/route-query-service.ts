@@ -6,6 +6,11 @@ import type {
   RouteTimePointView,
 } from '@travel/contracts';
 import {
+  assessDwell,
+  expandRouteQueryStart,
+  rankRouteCandidates,
+  ROUTE_QUERY_LOOKBACK_SECONDS,
+  VALUE_EFFECTIVE_TIME_BASIS_POINTS,
   validateRouteCandidate,
   type NormalizedRouteCandidate,
   type RouteLocation,
@@ -43,10 +48,12 @@ import type {
 interface NormalizedQueryTime {
   readonly hardEarliestDeparture: Date | null;
   readonly hardLatestArrival: Date | null;
+  readonly planningEarliestDeparture: Date | null;
   readonly earliestDeparture: Date | null;
   readonly latestArrival: Date | null;
   readonly preference: RouteProviderTimePreference;
   readonly hint: NormalizedHint | null;
+  readonly lookbackSeconds: number;
 }
 
 type NormalizedHint =
@@ -137,10 +144,28 @@ export class RouteQueryService {
     if (fromProjection === undefined || toProjection === undefined) {
       throw new Error('Schedule projection is missing an itinerary node');
     }
+    const userMinimum = fromNode.timeIntents.find(
+      (intent) => intent.kind === 'MIN_DWELL',
+    );
+    const arrival = fromProjection.arrival.effective?.value.instant ?? null;
+    const planningDwellSeconds =
+      userMinimum?.durationSeconds ??
+      fromNode.systemDwellSuggestion?.durationSeconds ??
+      null;
+    const propagatedEarliest =
+      fromProjection.departure.requirementWindow.earliest;
+    const planningEarliestDeparture = laterNullable(
+      propagatedEarliest,
+      arrival === null || planningDwellSeconds === null
+        ? null
+        : new Date(arrival.getTime() + planningDwellSeconds * 1_000),
+    );
     const time = combineQueryTime(
-      fromProjection.departure.requirementWindow.earliest,
+      absoluteDepartureFloor(fromProjection, arrival),
       toProjection.arrival.requirementWindow.latest,
+      planningEarliestDeparture,
       input.hint,
+      this.options.lookbackSeconds ?? ROUTE_QUERY_LOOKBACK_SECONDS,
     );
 
     const providerResult = await this.provider.queryRoutes({
@@ -206,9 +231,33 @@ export class RouteQueryService {
       throw noMatchingCandidate();
     }
 
+    const availableStart =
+      arrival ??
+      time.planningEarliestDeparture ??
+      time.earliestDeparture ??
+      accepted.reduce(
+        (minimum, candidate) =>
+          candidate.departure.instant < minimum
+            ? candidate.departure.instant
+            : minimum,
+        accepted[0]!.departure.instant,
+      );
+    const ranked = rankRouteCandidates(
+      accepted,
+      availableStart,
+      this.options.valueEffectiveTimeBasisPoints ??
+        VALUE_EFFECTIVE_TIME_BASIS_POINTS,
+    ).ordered;
     const timeCondition = toTimeConditionView(time);
-    const payloads = accepted.map((candidate) =>
-      toCandidatePayload(candidate, trip.version, timeCondition),
+    const payloads = ranked.map((candidate) =>
+      toCandidatePayload(
+        candidate,
+        trip.version,
+        timeCondition,
+        availableStart,
+        arrival,
+        fromNode,
+      ),
     );
     const saved = await this.planningRepository.saveCandidateSnapshots({
       ownerUserId: actor.userId,
@@ -216,7 +265,7 @@ export class RouteQueryService {
       basisVersion: trip.version,
       fromNodeId: fromNode.id,
       toNodeId: toNode.id,
-      snapshots: accepted.map((candidate, index) => {
+      snapshots: ranked.map((candidate, index) => {
         const candidatePayload = payloads[index];
         if (candidatePayload === undefined) {
           throw new Error('Route candidate snapshot payload is missing');
@@ -274,16 +323,24 @@ export class RouteQueryService {
 
 export interface RouteQueryServiceOptions {
   readonly candidateSnapshotTtlSeconds: number;
+  readonly lookbackSeconds?: number;
+  readonly valueEffectiveTimeBasisPoints?: number;
   readonly clock?: Clock;
 }
 
 function combineQueryTime(
   hardEarliestDeparture: Date | null,
   hardLatestArrival: Date | null,
+  planningEarliestDeparture: Date | null,
   hintInput: RouteQueryHint | null | undefined,
+  lookbackSeconds: number,
 ): NormalizedQueryTime {
   const hint = normalizeHint(hintInput);
-  let earliestDeparture = hardEarliestDeparture;
+  let earliestDeparture = expandRouteQueryStart({
+    planningEarliestDeparture,
+    absoluteEarliestDeparture: hardEarliestDeparture,
+    lookbackSeconds,
+  });
   let latestArrival = hardLatestArrival;
   if (hint?.type === 'DEPART_AT') {
     earliestDeparture = later(earliestDeparture, hint.instant);
@@ -325,10 +382,12 @@ function combineQueryTime(
   return {
     hardEarliestDeparture,
     hardLatestArrival,
+    planningEarliestDeparture,
     earliestDeparture,
     latestArrival,
     preference,
     hint,
+    lookbackSeconds,
   };
 }
 
@@ -372,6 +431,9 @@ function toTimeConditionView(
   return {
     hardEarliestDeparture: time.hardEarliestDeparture?.toISOString() ?? null,
     hardLatestArrival: time.hardLatestArrival?.toISOString() ?? null,
+    planningEarliestDeparture:
+      time.planningEarliestDeparture?.toISOString() ?? null,
+    lookbackSeconds: time.lookbackSeconds,
     earliestDeparture: time.earliestDeparture?.toISOString() ?? null,
     latestArrival: time.latestArrival?.toISOString() ?? null,
     preference:
@@ -397,7 +459,20 @@ function toCandidatePayload(
   candidate: NormalizedRouteCandidate,
   basisVersion: number,
   timeCondition: RouteQueryTimeConditionView,
+  availableStart: Date,
+  arrival: Date | null,
+  fromNode: ItineraryNodeRecord,
 ): RouteCandidatePayload {
+  const minimumIntent = fromNode.timeIntents.find(
+    (intent) => intent.kind === 'MIN_DWELL',
+  );
+  const dwell = assessDwell({
+    arrival,
+    departure: candidate.departure.instant,
+    systemSuggestedDurationSeconds:
+      fromNode.systemDwellSuggestion?.durationSeconds ?? null,
+    userMinimumDurationSeconds: minimumIntent?.durationSeconds ?? null,
+  });
   return {
     candidateId: candidate.candidateId,
     provider: candidate.provider,
@@ -419,7 +494,66 @@ function toCandidatePayload(
       arrival: leg.arrival === null ? null : toTimePointView(leg.arrival),
     })),
     fare: candidate.fare,
+    planningAssessment: {
+      effectiveTotalTimeSeconds: Math.max(
+        0,
+        Math.floor(
+          (candidate.arrival.instant.getTime() - availableStart.getTime()) /
+            1_000,
+        ),
+      ),
+      requiresUserAdjustment: dwell.requiresUserAdjustment,
+      requiredUserAdjustments:
+        dwell.requiresUserAdjustment &&
+        minimumIntent !== undefined &&
+        dwell.adjustedUserMinimumDurationSeconds !== null
+          ? [
+              {
+                intentId: minimumIntent.id,
+                nodeId: fromNode.id,
+                fromDurationSeconds: minimumIntent.durationSeconds!,
+                toDurationSeconds: dwell.adjustedUserMinimumDurationSeconds,
+              },
+            ]
+          : [],
+      softDeviations:
+        dwell.status === 'SOFT_DEVIATION'
+          ? (['SYSTEM_SUGGESTED_DWELL'] as const)
+          : [],
+    },
   };
+}
+
+function absoluteDepartureFloor(
+  projection: ReturnType<typeof evaluateTripScheduleRecord>['nodes'][number],
+  arrival: Date | null,
+): Date | null {
+  const window = projection.departure.requirementWindow;
+  const direct = window.earliestBasis.some(
+    (basis) => basis.ruleId !== 'MIN_DWELL_FORWARD',
+  )
+    ? window.earliest
+    : null;
+  const actualArrival = projection.arrival.actual?.instant ?? null;
+  return laterNullable(
+    direct,
+    actualArrival ?? arrivalIfActual(projection, arrival),
+  );
+}
+
+function arrivalIfActual(
+  projection: ReturnType<typeof evaluateTripScheduleRecord>['nodes'][number],
+  arrival: Date | null,
+): Date | null {
+  return projection.arrival.effective?.value.layer === 'ACTUAL'
+    ? arrival
+    : null;
+}
+
+function laterNullable(left: Date | null, right: Date | null): Date | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return left > right ? left : right;
 }
 
 function snapshotExpiry(

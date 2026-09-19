@@ -4,13 +4,15 @@ import type {
 } from '@travel/application';
 import type {
   RouteAdoptDeltaV2,
+  RouteAdoptDeltaV3,
   RouteAdoptGeneratedNodeSnapshot,
-  RouteUndoDeltaV1,
+  RouteUndoDeltaV2,
 } from '@travel/contracts';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
 type Transaction = Prisma.TransactionClient;
+type RouteAdoptUndoBasis = RouteAdoptDeltaV2 | RouteAdoptDeltaV3;
 
 interface UndoInput {
   readonly ownerUserId: string;
@@ -92,7 +94,7 @@ async function executeUndo(
   if (target.operationType !== 'ROUTE_ADOPT') {
     return { status: 'UNDO_UNAVAILABLE' };
   }
-  const delta = parseRouteAdoptDeltaV2(target.delta);
+  const delta = parseRouteAdoptDelta(target.delta);
   if (delta === null || target.undoExpiresAt === null) {
     return { status: 'UNDO_UNAVAILABLE' };
   }
@@ -250,6 +252,25 @@ async function executeUndo(
   }
 
   await restoreDateOwnership(transaction, input, delta);
+  const restoredUserTimeIntentIds: string[] = [];
+  if (delta.schemaVersion === 'route-adopt-delta-v3') {
+    for (const adjustment of delta.userDwellAdjustments) {
+      const restored = await transaction.userTimeIntent.updateMany({
+        where: {
+          id: adjustment.intentId,
+          tripId: input.tripId,
+          nodeId: adjustment.nodeId,
+          kind: 'MIN_DWELL',
+          operator: 'MINIMUM',
+          durationSeconds: adjustment.afterDurationSeconds,
+          locked: adjustment.beforeLocked,
+        },
+        data: { durationSeconds: adjustment.beforeDurationSeconds },
+      });
+      if (restored.count !== 1) throw new UndoAbort('UNDO_CONFLICT');
+      restoredUserTimeIntentIds.push(adjustment.intentId);
+    }
+  }
   await assertAdjacency(transaction, input.tripId);
   await transaction.trip.update({
     where: { id: input.tripId },
@@ -266,8 +287,8 @@ async function executeUndo(
     },
   });
 
-  const undoDelta: RouteUndoDeltaV1 = {
-    schemaVersion: 'route-undo-delta-v1',
+  const undoDelta: RouteUndoDeltaV2 = {
+    schemaVersion: 'route-undo-delta-v2',
     targetOperationReceiptId: target.id,
     undoneAdoptedRouteId: target.adoptedRouteId,
     restoredAdoptedRouteId: delta.previousActiveAdoptedRouteId,
@@ -278,6 +299,7 @@ async function executeUndo(
     restoredDayOccurrenceIds: restoredOccurrenceIds,
     removedAdoptCreatedDayOccurrenceIds: removedCreatedOccurrenceIds,
     restoredOwnedDates: [...delta.beforeOwnedDates],
+    restoredUserTimeIntentIds,
   };
   const undoReceipt = await transaction.operationReceipt.create({
     data: {
@@ -327,8 +349,45 @@ async function validateCurrentUndoState(
     readonly previewId: string;
     readonly adoptedRouteId: string;
   },
-  delta: RouteAdoptDeltaV2,
+  delta: RouteAdoptUndoBasis,
 ) {
+  if (delta.schemaVersion === 'route-adopt-delta-v3') {
+    const intents = await transaction.userTimeIntent.findMany({
+      where: {
+        id: { in: delta.userDwellAdjustments.map((item) => item.intentId) },
+        tripId: input.tripId,
+      },
+      select: {
+        id: true,
+        nodeId: true,
+        kind: true,
+        operator: true,
+        durationSeconds: true,
+        locked: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    const expected = [...delta.userDwellAdjustments].sort((left, right) =>
+      left.intentId.localeCompare(right.intentId),
+    );
+    if (
+      intents.length !== expected.length ||
+      intents.some((intent, index) => {
+        const adjustment = expected[index];
+        return (
+          adjustment === undefined ||
+          intent.id !== adjustment.intentId ||
+          intent.nodeId !== adjustment.nodeId ||
+          intent.kind !== 'MIN_DWELL' ||
+          intent.operator !== 'MINIMUM' ||
+          intent.durationSeconds !== adjustment.afterDurationSeconds ||
+          intent.locked !== adjustment.beforeLocked
+        );
+      })
+    ) {
+      return null;
+    }
+  }
   const targetRoute = await transaction.adoptedRoute.findFirst({
     where: {
       id: target.adoptedRouteId,
@@ -597,7 +656,7 @@ async function validateCurrentUndoState(
 async function restoreDayOccurrences(
   transaction: Transaction,
   tripId: string,
-  delta: RouteAdoptDeltaV2,
+  delta: RouteAdoptUndoBasis,
   now: Date,
 ): Promise<string[]> {
   const current = await transaction.dayOccurrence.findMany({
@@ -645,7 +704,7 @@ async function restoreDayOccurrences(
 async function restoreGeneratedNodes(
   transaction: Transaction,
   tripId: string,
-  delta: RouteAdoptDeltaV2,
+  delta: RouteAdoptUndoBasis,
 ): Promise<string[]> {
   const restored: string[] = [];
   const temporaryPositionBase =
@@ -723,7 +782,7 @@ async function restoreGeneratedNodes(
 async function restoreNodePlacements(
   transaction: Transaction,
   tripId: string,
-  delta: RouteAdoptDeltaV2,
+  delta: RouteAdoptUndoBasis,
 ): Promise<void> {
   const current = await transaction.itineraryNode.findMany({
     where: { tripId },
@@ -759,7 +818,7 @@ async function restoreNodePlacements(
 async function restoreDateOwnership(
   transaction: Transaction,
   input: UndoInput,
-  delta: RouteAdoptDeltaV2,
+  delta: RouteAdoptUndoBasis,
 ): Promise<void> {
   if (delta.beforeOwnedDates.length > 0) {
     const conflict = await transaction.dateOwnership.findFirst({
@@ -825,10 +884,14 @@ async function lockOwner(
   if (rows[0]?.locked !== true) throw new Error('Route undo owner lock failed');
 }
 
-function parseRouteAdoptDeltaV2(
+function parseRouteAdoptDelta(
   value: Prisma.JsonValue,
-): RouteAdoptDeltaV2 | null {
-  if (!isRecord(value) || value.schemaVersion !== 'route-adopt-delta-v2') {
+): RouteAdoptUndoBasis | null {
+  if (
+    !isRecord(value) ||
+    (value.schemaVersion !== 'route-adopt-delta-v2' &&
+      value.schemaVersion !== 'route-adopt-delta-v3')
+  ) {
     return null;
   }
   if (
@@ -861,7 +924,14 @@ function parseRouteAdoptDeltaV2(
   ) {
     return null;
   }
-  const delta = value as unknown as RouteAdoptDeltaV2;
+  if (
+    value.schemaVersion === 'route-adopt-delta-v3' &&
+    (!Array.isArray(value.userDwellAdjustments) ||
+      !value.userDwellAdjustments.every(isDwellAdjustment))
+  ) {
+    return null;
+  }
+  const delta = value as unknown as RouteAdoptUndoBasis;
   if (
     delta.beforeCorridorNodeIds.length < 2 ||
     delta.afterCorridorNodeIds.length < 2 ||
@@ -879,6 +949,20 @@ function parseRouteAdoptDeltaV2(
     return null;
   }
   return delta;
+}
+
+function isDwellAdjustment(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isUuid(value.intentId) &&
+    isUuid(value.nodeId) &&
+    Number.isSafeInteger(value.beforeDurationSeconds) &&
+    Number(value.beforeDurationSeconds) > 0 &&
+    Number.isSafeInteger(value.afterDurationSeconds) &&
+    Number(value.afterDurationSeconds) > 0 &&
+    Number(value.afterDurationSeconds) < Number(value.beforeDurationSeconds) &&
+    typeof value.beforeLocked === 'boolean'
+  );
 }
 
 function isDayOccurrenceSnapshot(value: unknown): boolean {

@@ -38,6 +38,9 @@ describe('TripService', () => {
       setTemporalValue: vi.fn(async (): Promise<TripMutationResult> => ({
         status: 'NOT_FOUND',
       })),
+      setSystemDwellSuggestion: vi.fn(
+        async (): Promise<TripMutationResult> => ({ status: 'NOT_FOUND' }),
+      ),
       listTransportHistoryOwned: vi.fn(async () => null),
     };
     service = new TripService(repository);
@@ -309,6 +312,55 @@ describe('TripService', () => {
         locked: false,
       }),
     ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('persists a system dwell suggestion without creating a MIN_DWELL intent', async () => {
+    const occurrenceId = randomUUID();
+    const node = placeVisit(occurrenceId, 0, 'SYNTHETIC suggestion');
+    const now = new Date('2030-01-01T00:00:00Z');
+    vi.mocked(repository.setSystemDwellSuggestion!).mockResolvedValue({
+      status: 'SUCCESS',
+      trip: {
+        ...emptyTripForId(),
+        version: 2,
+        effectiveStartDate: utcDate('2030-10-01'),
+        effectiveEndDate: utcDate('2030-10-01'),
+        ownedDates: [utcDate('2030-10-01')],
+        dayOccurrences: [
+          dayOccurrence('2030-10-01', 0, occurrenceId, [
+            {
+              ...node,
+              timeIntents: [],
+              systemDwellSuggestion: {
+                id: randomUUID(),
+                tripId,
+                nodeId: node.id,
+                durationSeconds: 3_600,
+                source: 'SYSTEM_SUGGESTION',
+                createdAt: now,
+                updatedAt: now,
+              },
+            },
+          ]),
+        ],
+      },
+    });
+
+    const result = await service.setSystemDwellSuggestion(
+      actor,
+      tripId,
+      1,
+      node.id,
+      3_600,
+    );
+
+    expect(result.days[0]?.nodes[0]).toMatchObject({
+      timeIntents: [],
+      systemDwellSuggestion: {
+        durationSeconds: 3_600,
+        source: 'SYSTEM_SUGGESTION',
+      },
+    });
   });
 
   it('evaluates a basis version read-only and keeps all time layers visible', async () => {

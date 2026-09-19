@@ -186,6 +186,35 @@ export class TripService {
     );
   }
 
+  async setSystemDwellSuggestion(
+    actor: Actor,
+    tripId: string,
+    baseTripVersion: number,
+    nodeId: string,
+    durationSeconds: number,
+  ): Promise<TripView> {
+    requireUuid(tripId, 'tripId');
+    requireUuid(nodeId, 'nodeId');
+    authorizeSelf(actor, 'WRITE_PRIVATE_RESOURCE');
+    if (this.repository.setSystemDwellSuggestion === undefined) {
+      throw new ApplicationError(
+        'SERVICE_UNAVAILABLE',
+        '系统停留建议持久化能力尚未配置。',
+        503,
+        true,
+      );
+    }
+    return mutationResultToView(
+      await this.repository.setSystemDwellSuggestion({
+        ownerUserId: actor.userId,
+        tripId,
+        baseTripVersion: positiveInteger(baseTripVersion, 'baseTripVersion'),
+        nodeId,
+        durationSeconds: positiveInteger(durationSeconds, 'durationSeconds'),
+      }),
+    );
+  }
+
   async listTransportHistory(
     actor: Actor,
     tripId: string,
@@ -535,6 +564,17 @@ function toNodeView(record: ItineraryNodeRecord): ItineraryNodeView {
     updatedAt: record.updatedAt.toISOString(),
     timeValues: record.timeValues.map(toTemporalValueView),
     timeIntents: record.timeIntents.map(toUserTimeIntentView),
+    systemDwellSuggestion:
+      record.systemDwellSuggestion === undefined ||
+      record.systemDwellSuggestion === null
+        ? null
+        : {
+            id: record.systemDwellSuggestion.id,
+            durationSeconds: record.systemDwellSuggestion.durationSeconds,
+            source: 'SYSTEM_SUGGESTION',
+            createdAt: record.systemDwellSuggestion.createdAt.toISOString(),
+            updatedAt: record.systemDwellSuggestion.updatedAt.toISOString(),
+          },
   };
 }
 

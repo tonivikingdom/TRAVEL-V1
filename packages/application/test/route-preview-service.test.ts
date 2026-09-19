@@ -82,7 +82,7 @@ describe('RoutePreviewService', () => {
       previewId,
       candidateSnapshotId: snapshotId,
       candidateHash: snapshot.candidateHash,
-      policyVersion: 'route-adoption-preview-v2',
+      policyVersion: 'route-adoption-preview-v3',
       adoptable: true,
       status: 'ACTIVE',
       currentConnection: { state: 'MISSING', transport: null },
@@ -100,6 +100,80 @@ describe('RoutePreviewService', () => {
     expect(tripRepository.executeCommand).not.toHaveBeenCalled();
     expect(tripRepository.setTemporalValue).not.toHaveBeenCalled();
     expect(trip.version).toBe(3);
+  });
+
+  it('projects the nearest downstream departure from a soft system suggestion when no anchor exists', async () => {
+    trip = withDownstreamDwell({ suggestionSeconds: 3_600 });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      nodeId: toNodeId,
+      arrival: '2030-01-01T02:00:00.000Z',
+      departure: '2030-01-01T03:00:00.000Z',
+      projectedDwellSeconds: 3_600,
+      systemSuggestedDwellSeconds: 3_600,
+      status: 'NORMAL',
+    });
+  });
+
+  it('reports system suggestion compression as a soft deviation', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      plannedDeparture: '2030-01-01T02:45:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 2_700,
+      status: 'SOFT_DEVIATION',
+      requiredUserAdjustments: [],
+    });
+  });
+
+  it('reports a structured user minimum adjustment', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      minimumSeconds: 3_000,
+      plannedDeparture: '2030-01-01T02:45:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 2_700,
+      status: 'USER_REQUIREMENT_VIOLATION',
+      requiredUserAdjustments: [
+        {
+          intentId,
+          nodeId: toNodeId,
+          fromDurationSeconds: 3_000,
+          toDurationSeconds: 2_700,
+        },
+      ],
+    });
+  });
+
+  it('marks arrival after the nearest downstream departure as infeasible', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      plannedDeparture: '2030-01-01T01:55:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(false);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: -300,
+      status: 'INFEASIBLE',
+    });
   });
 
   it('identifies a directly adjacent ACTIVE adopted route from its current edge', async () => {
@@ -685,6 +759,79 @@ function baseTrip(
           },
         ]
       : [],
+  };
+}
+
+function withDownstreamDwell(input: {
+  readonly suggestionSeconds?: number;
+  readonly minimumSeconds?: number;
+  readonly plannedDeparture?: string;
+}): TripAggregateRecord {
+  const current = baseTrip();
+  const occurrence = current.dayOccurrences[0]!;
+  const from = occurrence.nodes[0]!;
+  const to = occurrence.nodes[1]!;
+  return {
+    ...current,
+    dayOccurrences: [
+      {
+        ...occurrence,
+        nodes: [
+          from,
+          {
+            ...to,
+            systemDwellSuggestion:
+              input.suggestionSeconds === undefined
+                ? null
+                : {
+                    id: '00000000-0000-4000-8000-000000000012',
+                    tripId,
+                    nodeId: toNodeId,
+                    durationSeconds: input.suggestionSeconds,
+                    source: 'SYSTEM_SUGGESTION',
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+            timeIntents:
+              input.minimumSeconds === undefined
+                ? []
+                : [
+                    {
+                      id: intentId,
+                      tripId,
+                      nodeId: toNodeId,
+                      kind: 'MIN_DWELL',
+                      pointKind: null,
+                      operator: 'MINIMUM',
+                      instant: null,
+                      timeZone: null,
+                      durationSeconds: input.minimumSeconds,
+                      locked: false,
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                  ],
+            timeValues:
+              input.plannedDeparture === undefined
+                ? []
+                : [
+                    {
+                      id: '00000000-0000-4000-8000-000000000013',
+                      layer: 'PLANNED',
+                      pointKind: 'DEPARTURE',
+                      instant: new Date(input.plannedDeparture),
+                      timeZone: 'UTC',
+                      sourceKind: 'USER_VALUE',
+                      sourceRef: null,
+                      observedAt: null,
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                  ],
+          },
+        ],
+      },
+    ],
   };
 }
 

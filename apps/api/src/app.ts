@@ -180,6 +180,10 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request,
       );
       const body = requiredRecord(request.body);
+      const acceptedUserAdjustments = optionalUserDwellAdjustments(
+        body,
+        'acceptedUserAdjustments',
+      );
       return requireRouteAdoptionService(dependencies).adoptPreview(
         authenticated.actor,
         request.params.id,
@@ -187,6 +191,9 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         {
           baseTripVersion: requiredNumber(body, 'baseTripVersion'),
           idempotencyKey: requiredString(body, 'idempotencyKey'),
+          ...(acceptedUserAdjustments === undefined
+            ? {}
+            : { acceptedUserAdjustments }),
         },
       );
     },
@@ -583,6 +590,33 @@ function optionalIntegerArray(
     throw new ApplicationError('VALIDATION_ERROR', `${key} 无效。`, 400);
   }
   return value as number[];
+}
+
+function optionalUserDwellAdjustments(
+  value: Record<string, unknown>,
+  field: string,
+) {
+  const candidate = value[field];
+  if (candidate === undefined) return undefined;
+  if (!Array.isArray(candidate)) {
+    throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
+  }
+  return candidate.map((item, index) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new ApplicationError(
+        'VALIDATION_ERROR',
+        `${field}[${index}] 无效。`,
+        400,
+      );
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      intentId: requiredString(record, 'intentId'),
+      nodeId: requiredString(record, 'nodeId'),
+      fromDurationSeconds: requiredNumber(record, 'fromDurationSeconds'),
+      toDurationSeconds: requiredNumber(record, 'toDurationSeconds'),
+    };
+  });
 }
 
 function requiredBodyString(body: unknown, key: string): string {

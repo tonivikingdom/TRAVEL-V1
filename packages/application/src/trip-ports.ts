@@ -58,6 +58,17 @@ export interface ItineraryNodeRecord {
   readonly updatedAt: Date;
   readonly timeValues: readonly TemporalValueRecord[];
   readonly timeIntents: readonly UserTimeIntentRecord[];
+  readonly systemDwellSuggestion?: SystemDwellSuggestionRecord | null;
+}
+
+export interface SystemDwellSuggestionRecord {
+  readonly id: string;
+  readonly tripId: string;
+  readonly nodeId: string;
+  readonly durationSeconds: number;
+  readonly source: 'SYSTEM_SUGGESTION';
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 export interface UserTimeIntentRecord {
@@ -311,6 +322,13 @@ export interface TripRepository {
     readonly baseTripVersion: number;
     readonly subject: RepositoryTemporalSubject;
     readonly value: RepositoryTemporalValueInput;
+  }): Promise<TripMutationResult>;
+  setSystemDwellSuggestion?(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly baseTripVersion: number;
+    readonly nodeId: string;
+    readonly durationSeconds: number;
   }): Promise<TripMutationResult>;
   listTransportHistoryOwned(input: {
     readonly ownerUserId: string;

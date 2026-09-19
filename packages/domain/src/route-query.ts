@@ -98,6 +98,7 @@ function isValidCandidate(candidate: NormalizedRouteCandidate): boolean {
     !validTimePoint(candidate.arrival) ||
     !validDuration(candidate.durationSeconds) ||
     candidate.legs.length === 0 ||
+    !validFare(candidate.fare) ||
     candidate.arrival.instant.getTime() < candidate.departure.instant.getTime()
   ) {
     return false;
@@ -110,6 +111,14 @@ function isValidCandidate(candidate: NormalizedRouteCandidate): boolean {
     return false;
   }
   return candidate.legs.every(validLeg);
+}
+
+function validFare(fare: RouteFare | null): boolean {
+  return (
+    fare === null ||
+    (/^(0|[1-9]\d*)(?:\.\d+)?$/u.test(fare.amount) &&
+      /^[A-Z]{3}$/u.test(fare.currency))
+  );
 }
 
 function validLeg(leg: RouteCandidateLeg): boolean {

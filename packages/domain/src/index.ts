@@ -39,3 +39,15 @@ export {
   type SchedulePropagationWindowStatus,
   type ScheduleTransportAnchorKind,
 } from './schedule-propagator.js';
+export {
+  validateRouteCandidate,
+  type NormalizedRouteCandidate,
+  type RouteCandidateLeg,
+  type RouteCandidateRejectionReason,
+  type RouteCandidateValidation,
+  type RouteFare,
+  type RouteLocation,
+  type RouteMode,
+  type RouteRequirementBounds,
+  type RouteTimePoint,
+} from './route-query.js';

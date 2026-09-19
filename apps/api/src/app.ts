@@ -2,6 +2,7 @@ import {
   ApplicationError,
   AuthService,
   NotificationService,
+  RouteQueryService,
   TripService,
   isApplicationError,
 } from '@travel/application';
@@ -11,6 +12,7 @@ import type {
   LivenessResponse,
   PlaceInput,
   ReadinessResponse,
+  RouteQueryHint,
   TransportMode,
   TripCommandInput,
 } from '@travel/contracts';
@@ -26,6 +28,7 @@ export interface ApiDependencies {
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
   readonly notificationService?: NotificationService;
+  readonly routeQueryService?: RouteQueryService;
   readonly tripService?: TripService;
   readonly credentialTransport?: CredentialTransport;
 }
@@ -238,6 +241,28 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/routes/query',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireRouteQueryService(dependencies).queryRoutes(
+        authenticated.actor,
+        request.params.id,
+        {
+          basisVersion: requiredNumber(body, 'basisVersion'),
+          fromNodeId: requiredString(body, 'fromNodeId'),
+          toNodeId: requiredString(body, 'toNodeId'),
+          ...(hasOwn(body, 'hint') ? { hint: parseRouteHint(body.hint) } : {}),
+        },
+      );
+    },
+  );
+
   app.post('/admin/invitations', async (request, reply) => {
     const authenticated = await authenticate(
       dependencies,
@@ -361,6 +386,20 @@ function requireTripService(dependencies: ApiDependencies): TripService {
     );
   }
   return dependencies.tripService;
+}
+
+function requireRouteQueryService(
+  dependencies: ApiDependencies,
+): RouteQueryService {
+  if (dependencies.routeQueryService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '路线查询服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.routeQueryService;
 }
 
 function requiredBodyString(body: unknown, key: string): string {
@@ -503,6 +542,20 @@ function parseTripCommand(value: unknown): TripCommandInput {
     default:
       throw new ApplicationError('VALIDATION_ERROR', '不支持的行程命令。', 400);
   }
+}
+
+function parseRouteHint(value: unknown): RouteQueryHint | null {
+  if (value === null) return null;
+  const hint = requiredRecord(value);
+  const type = requiredString(hint, 'type');
+  if (type !== 'DEPART_AT' && type !== 'ARRIVE_BY') {
+    throw new ApplicationError('VALIDATION_ERROR', '查询时间类型无效。', 400);
+  }
+  return {
+    type,
+    instant: requiredString(hint, 'instant'),
+    timeZone: requiredString(hint, 'timeZone'),
+  };
 }
 
 function parseTemporalPointKind(value: string): 'ARRIVAL' | 'DEPARTURE' {

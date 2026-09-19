@@ -50,6 +50,9 @@ importers:
       '@travel/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@travel/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       fastify:
         specifier: 5.12.5
         version: 5.12.5
@@ -110,6 +113,19 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+
+  packages/providers:
+    dependencies:
+      '@travel/application':
+        specifier: workspace:*
+        version: link:../application
+      '@travel/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.5
+        version: 24.13.5
 
   packages/storage:
     devDependencies:

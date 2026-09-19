@@ -1,6 +1,7 @@
 import {
   AuthService,
   NotificationService,
+  RouteQueryService,
   TripService,
 } from '@travel/application';
 import {
@@ -11,6 +12,11 @@ import {
   PrismaTripRepository,
   type ManagedPrismaClient,
 } from '@travel/persistence';
+import {
+  createDevelopmentSyntheticRouteProvider,
+  readRouteProviderConfig,
+  UnconfiguredRouteProvider,
+} from '@travel/providers';
 
 import { buildApi } from './app.js';
 import { readAuthRuntimeConfig } from './auth-config.js';
@@ -22,6 +28,7 @@ const managedProbe = createPostgresReadiness(databaseUrl);
 let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
+let routeQueryService: RouteQueryService | undefined;
 let tripService: TripService | undefined;
 
 if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
@@ -34,13 +41,21 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   notificationService = new NotificationService(
     new PrismaNotificationRepository(managedPrisma.client),
   );
-  tripService = new TripService(new PrismaTripRepository(managedPrisma.client));
+  const tripRepository = new PrismaTripRepository(managedPrisma.client);
+  const routeProviderConfig = readRouteProviderConfig(process.env);
+  const routeProvider =
+    routeProviderConfig.provider === 'synthetic'
+      ? createDevelopmentSyntheticRouteProvider()
+      : new UnconfiguredRouteProvider();
+  routeQueryService = new RouteQueryService(tripRepository, routeProvider);
+  tripService = new TripService(tripRepository);
 }
 
 const app = buildApi({
   readinessProbe: managedProbe.probe,
   ...(authService === undefined ? {} : { authService }),
   ...(notificationService === undefined ? {} : { notificationService }),
+  ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(tripService === undefined ? {} : { tripService }),
 });
 let shuttingDown = false;

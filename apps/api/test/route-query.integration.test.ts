@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AuthService,
   digestOpaqueToken,
+  RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
   TripService,
@@ -10,7 +11,11 @@ import {
   type RouteProviderQueryInput,
   type RouteProviderResult,
 } from '@travel/application';
-import type { RouteQueryResponse, TripView } from '@travel/contracts';
+import type {
+  RoutePreviewView,
+  RouteQueryResponse,
+  TripView,
+} from '@travel/contracts';
 import {
   createPrismaClient,
   PrismaAuthRepository,
@@ -104,6 +109,11 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           previewTtlSeconds: 600,
           clock: { now: () => currentNow },
         },
+      ),
+      routeAdoptionService: new RouteAdoptionService(
+        routePlanningRepository,
+        new TripService(repository),
+        { now: () => currentNow },
       ),
     });
   });
@@ -459,6 +469,323 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   });
 
+  it('adopts a single leg atomically, archives the old transport, and replays one receipt', async () => {
+    let trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    trip = await command(userA, trip, {
+      type: 'SET_MANUAL_TRANSPORT',
+      fromNodeId: from!.id,
+      toNodeId: to!.id,
+      mode: 'TAXI',
+      fixedService: false,
+      serviceLabel: 'SYNTHETIC old taxi',
+    });
+    const oldEdge = await managed.client.transportEdge.findFirstOrThrow({
+      where: { tripId: trip.id },
+    });
+    await managed.client.temporalValue.create({
+      data: {
+        transportEdgeId: oldEdge.id,
+        layer: 'PLANNED',
+        pointKind: 'DEPARTURE',
+        instant: new Date('2030-10-01T09:30:00Z'),
+        timeZone: 'UTC',
+        sourceKind: 'USER_VALUE',
+      },
+    });
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const beforeVersion = trip.version;
+    const first = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-key-0001',
+    );
+
+    expect(first.statusCode).toBe(200);
+    const adopted = first.json() as {
+      operationReceipt: {
+        id: string;
+        resultingTripVersion: number;
+        adoptedRouteId: string;
+      };
+      trip: TripView;
+    };
+    expect(adopted.operationReceipt.resultingTripVersion).toBe(
+      beforeVersion + 1,
+    );
+    expect(adopted.trip.version).toBe(beforeVersion + 1);
+    expect(adopted.trip.connections[0]).toMatchObject({
+      state: 'ACTIVE',
+      transport: {
+        source: 'ADOPTED_ROUTE',
+        provider: 'SYNTHETIC',
+        adoptedRouteId: adopted.operationReceipt.adoptedRouteId,
+      },
+    });
+
+    const [
+      edges,
+      values,
+      nodeValues,
+      history,
+      historyValues,
+      receipts,
+      outbox,
+    ] = await Promise.all([
+      managed.client.transportEdge.findMany({ where: { tripId: trip.id } }),
+      managed.client.temporalValue.findMany({
+        where: { transportEdge: { tripId: trip.id } },
+        orderBy: { pointKind: 'asc' },
+      }),
+      managed.client.temporalValue.count({
+        where: { node: { tripId: trip.id } },
+      }),
+      managed.client.transportEdgeHistory.findMany({
+        where: { tripId: trip.id },
+      }),
+      managed.client.transportEdgeHistoryTimeValue.findMany({
+        where: { history: { tripId: trip.id } },
+      }),
+      managed.client.operationReceipt.findMany({
+        where: { tripId: trip.id },
+      }),
+      managed.client.outboxEvent.findMany({ where: { tripId: trip.id } }),
+    ]);
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({
+      source: 'ADOPTED_ROUTE',
+      adoptedRouteId: adopted.operationReceipt.adoptedRouteId,
+      provider: 'SYNTHETIC',
+    });
+    expect(values).toHaveLength(2);
+    expect(values.every((value) => value.layer === 'PLANNED')).toBe(true);
+    expect(
+      values.every((value) => value.sourceKind === 'ADOPTED_TRANSPORT_FACT'),
+    ).toBe(true);
+    expect(values.some((value) => value.layer === 'ACTUAL')).toBe(false);
+    expect(nodeValues).toBe(0);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      originalTransportEdgeId: oldEdge.id,
+      invalidationReason: 'USER_REPLACED',
+      source: 'MANUAL',
+    });
+    expect(historyValues).toHaveLength(1);
+    expect(historyValues[0]).toMatchObject({
+      layer: 'PLANNED',
+      pointKind: 'DEPARTURE',
+      sourceKind: 'USER_VALUE',
+    });
+    expect(receipts).toHaveLength(1);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]).toMatchObject({
+      type: 'ROUTE_ADOPTED',
+      operationReceiptId: adopted.operationReceipt.id,
+    });
+
+    const replay = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-key-0001',
+    );
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({
+      operationReceipt: { id: adopted.operationReceipt.id },
+      trip: { version: beforeVersion + 1 },
+    });
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.outboxEvent.count({ where: { tripId: trip.id } }),
+    ).toBe(1);
+
+    const conflict = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews/${preview.previewId}/adopt`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: beforeVersion + 1,
+        idempotencyKey: 'synthetic-key-0001',
+      },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({
+      error: { code: 'IDEMPOTENCY_CONFLICT' },
+    });
+  });
+
+  it('allows only one concurrent adoption for two previews at the same Trip version', async () => {
+    const trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    const [left, right] = await Promise.all([
+      createPreview(userA, trip, from!.id, to!.id),
+      createPreview(userA, trip, from!.id, to!.id),
+    ]);
+
+    const responses = await Promise.all([
+      adopt(userA, trip, left.previewId, 'synthetic-concurrent-a'),
+      adopt(userA, trip, right.previewId, 'synthetic-concurrent-b'),
+    ]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([
+      200, 409,
+    ]);
+    expect(
+      responses.find((response) => response.statusCode === 409)!.json(),
+    ).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.adoptedRoute.count({ where: { tripId: trip.id } }),
+    ).toBe(1);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({ version: trip.version + 1 });
+  });
+
+  it('creates one generated transfer node for a multi-leg route and keeps ordinary walking formal', async () => {
+    const trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    providerResult = transferCandidate();
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    expect(preview).toMatchObject({
+      policyVersion: 'route-adoption-preview-v2',
+      status: 'ACTIVE',
+      adoptable: true,
+      changeSummary: {
+        nodesToCreate: [{ providerPlaceRef: 'transfer-station' }],
+        proposedSegments: [{ mode: 'RAIL' }, { mode: 'WALKING' }],
+      },
+    });
+
+    const response = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-transfer-01',
+    );
+    expect(response.statusCode).toBe(200);
+    const adopted = response.json() as { trip: TripView };
+    const generated = adopted.trip.days
+      .flatMap((day) => day.nodes)
+      .filter((node) => node.source === 'ROUTE_GENERATED');
+    expect(generated).toHaveLength(1);
+    expect(generated[0]).toMatchObject({
+      provider: 'SYNTHETIC',
+      providerPlaceRef: 'transfer-station',
+      autoReplaceable: true,
+    });
+    expect(adopted.trip.connections).toHaveLength(2);
+    expect(
+      adopted.trip.connections.map((connection) => connection.transport?.mode),
+    ).toEqual(['RAIL', 'WALKING']);
+    expect(
+      await managed.client.transportEdge.count({ where: { tripId: trip.id } }),
+    ).toBe(2);
+    const requery = await query(
+      userA,
+      adopted.trip,
+      from!.id,
+      to!.id,
+      departHint(),
+    );
+    expect(requery.statusCode).toBe(200);
+  });
+
+  it('projects one cross-day edge across START/OCCUPIED/END and rejects ordinary content in the occupied day', async () => {
+    let trip = await createTrip(userA);
+    trip = await addVisit(userA, trip, 'Day 1', '2030-10-01');
+    trip = await addVisit(userA, trip, 'Day 3', '2030-10-03');
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T20:00:00Z', '2030-10-03T08:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const response = await adopt(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-cross-day',
+    );
+    expect(response.statusCode).toBe(200);
+    const adopted = response.json() as { trip: TripView };
+    const projections = adopted.trip.days.map((day) => ({
+      localDate: day.localDate,
+      projections: day.transportProjections,
+    }));
+    expect(projections.map((item) => item.localDate)).toEqual([
+      '2030-10-01',
+      '2030-10-02',
+      '2030-10-03',
+    ]);
+    expect(projections.map((item) => item.projections[0]?.role)).toEqual([
+      'START',
+      'OCCUPIED',
+      'END',
+    ]);
+    expect(
+      new Set(
+        projections.flatMap((item) =>
+          item.projections.map((projection) => projection.transportEdgeId),
+        ),
+      ).size,
+    ).toBe(1);
+
+    let editableTrip = await command(userA, adopted.trip, {
+      type: 'ADD_FREE_ACTION',
+      targetDay: {
+        type: 'EXISTING',
+        dayOccurrenceId: adopted.trip.days[0]!.dayOccurrenceId,
+      },
+      position: 0,
+      note: 'SYNTHETIC start-day content',
+    });
+    editableTrip = await command(userA, editableTrip, {
+      type: 'ADD_FREE_ACTION',
+      targetDay: {
+        type: 'EXISTING',
+        dayOccurrenceId: editableTrip.days[2]!.dayOccurrenceId,
+      },
+      position: 1,
+      note: 'SYNTHETIC end-day content',
+    });
+    const occupied = editableTrip.days[1]!;
+    const rejected = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/commands`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: editableTrip.version,
+        command: {
+          type: 'ADD_FREE_ACTION',
+          targetDay: {
+            type: 'EXISTING',
+            dayOccurrenceId: occupied.dayOccurrenceId,
+          },
+          position: 0,
+          note: 'SYNTHETIC overlap attempt',
+        },
+      },
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json()).toMatchObject({
+      error: { code: 'TRANSPORT_OCCUPIED_DAY' },
+    });
+    expect(
+      await managed.client.dateOwnership.count({ where: { tripId: trip.id } }),
+    ).toBe(3);
+  });
+
   async function createTrip(identity: SyntheticIdentity): Promise<TripView> {
     const response = await app.inject({
       method: 'POST',
@@ -544,6 +871,51 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   }
 
+  async function createPreview(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    fromNodeId: string,
+    toNodeId: string,
+  ): Promise<RoutePreviewView> {
+    const routeResponse = await query(
+      identity,
+      trip,
+      fromNodeId,
+      toNodeId,
+      departHint(),
+    );
+    expect(routeResponse.statusCode).toBe(200);
+    const route = routeResponse.json() as RouteQueryResponse;
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(identity),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    return previewResponse.json() as RoutePreviewView;
+  }
+
+  function adopt(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    previewId: string,
+    idempotencyKey: string,
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews/${previewId}/adopt`,
+      headers: bearer(identity),
+      payload: {
+        baseTripVersion: trip.version,
+        idempotencyKey,
+      },
+    });
+  }
+
   async function databaseFacts(tripId: string) {
     const [trip, timeValues, intents, transports] = await Promise.all([
       managed.client.trip.findUniqueOrThrow({ where: { id: tripId } }),
@@ -571,6 +943,8 @@ function departHint() {
 function candidate(
   departure: string,
   arrival: string,
+  departureTimeZone = 'Asia/Tokyo',
+  arrivalTimeZone = 'America/Los_Angeles',
 ): Extract<RouteProviderResult, { status: 'SUCCESS' }>['candidates'][number] {
   const durationSeconds =
     (new Date(arrival).getTime() - new Date(departure).getTime()) / 1_000;
@@ -592,18 +966,21 @@ function candidate(
     providerCandidateRef: 'SYNTHETIC_REF',
     observedAt: NOW,
     validUntil: null,
-    departure: { instant: new Date(departure), timeZone: 'Asia/Tokyo' },
-    arrival: { instant: new Date(arrival), timeZone: 'America/Los_Angeles' },
+    departure: { instant: new Date(departure), timeZone: departureTimeZone },
+    arrival: { instant: new Date(arrival), timeZone: arrivalTimeZone },
     durationSeconds,
     legs: [
       {
         mode: 'FLIGHT',
         from: origin,
         to: destination,
-        departure: { instant: new Date(departure), timeZone: 'Asia/Tokyo' },
+        departure: {
+          instant: new Date(departure),
+          timeZone: departureTimeZone,
+        },
         arrival: {
           instant: new Date(arrival),
-          timeZone: 'America/Los_Angeles',
+          timeZone: arrivalTimeZone,
         },
         durationSeconds,
         fixedService: true,
@@ -612,6 +989,76 @@ function candidate(
       },
     ],
     fare: null,
+  };
+}
+
+function transferCandidate(): Extract<
+  RouteProviderResult,
+  { status: 'SUCCESS' }
+> {
+  const origin = {
+    name: 'Origin',
+    latitude: 35.6762,
+    longitude: 139.6503,
+    providerPlaceRef: 'origin',
+    providerHubRef: null,
+  };
+  const transfer = {
+    name: 'Transfer Station',
+    latitude: 35.68,
+    longitude: 139.66,
+    providerPlaceRef: 'transfer-station',
+    providerHubRef: 'hub-transfer',
+  };
+  const destination = {
+    name: 'Destination',
+    latitude: 35.69,
+    longitude: 139.67,
+    providerPlaceRef: 'destination',
+    providerHubRef: null,
+  };
+  const departure = new Date('2030-10-01T10:00:00Z');
+  const transferAt = new Date('2030-10-01T10:30:00Z');
+  const arrival = new Date('2030-10-01T11:00:00Z');
+  return {
+    status: 'SUCCESS',
+    candidates: [
+      {
+        candidateId: 'candidate-transfer',
+        provider: 'SYNTHETIC',
+        providerCandidateRef: 'SYNTHETIC_TRANSFER',
+        observedAt: NOW,
+        validUntil: null,
+        departure: { instant: departure, timeZone: 'UTC' },
+        arrival: { instant: arrival, timeZone: 'UTC' },
+        durationSeconds: 3600,
+        legs: [
+          {
+            mode: 'RAIL',
+            from: origin,
+            to: transfer,
+            departure: { instant: departure, timeZone: 'UTC' },
+            arrival: { instant: transferAt, timeZone: 'UTC' },
+            durationSeconds: 1800,
+            fixedService: true,
+            serviceLabel: 'SYNTHETIC-R1',
+            providerRef: 'SYNTHETIC-R1',
+          },
+          {
+            mode: 'WALKING',
+            from: transfer,
+            to: destination,
+            departure: { instant: transferAt, timeZone: 'UTC' },
+            arrival: { instant: arrival, timeZone: 'UTC' },
+            durationSeconds: 1800,
+            fixedService: false,
+            serviceLabel: null,
+            providerRef: 'SYNTHETIC-W1',
+          },
+        ],
+        fare: null,
+      },
+    ],
   };
 }
 
@@ -660,11 +1107,18 @@ function authConfig() {
 }
 
 async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
+  await managed.client.outboxEvent.deleteMany();
+  await managed.client.operationReceipt.deleteMany();
   await managed.client.userTimeIntent.deleteMany();
   await managed.client.transportEdgeHistoryTimeValue.deleteMany();
   await managed.client.transportEdgeHistory.deleteMany();
   await managed.client.temporalValue.deleteMany();
+  await managed.client.transportDayProjection.deleteMany();
   await managed.client.transportEdge.deleteMany();
+  await managed.client.itineraryNode.deleteMany({
+    where: { source: 'ROUTE_GENERATED' },
+  });
+  await managed.client.adoptedRoute.deleteMany();
   await managed.client.itineraryNode.deleteMany();
   await managed.client.dayOccurrence.deleteMany();
   await managed.client.dateOwnership.deleteMany();

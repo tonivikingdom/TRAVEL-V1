@@ -80,7 +80,7 @@ describe('RoutePreviewService', () => {
       previewId,
       candidateSnapshotId: snapshotId,
       candidateHash: snapshot.candidateHash,
-      policyVersion: 'route-adoption-preview-v1',
+      policyVersion: 'route-adoption-preview-v2',
       adoptable: true,
       status: 'ACTIVE',
       currentConnection: { state: 'MISSING', transport: null },
@@ -262,6 +262,177 @@ describe('RoutePreviewService', () => {
 
     const fetched = await service().getPreview(actor, tripId, active.previewId);
     expect(fetched).toMatchObject({ status: 'EXPIRED', adoptable: false });
+  });
+
+  it('keeps a v1 preview readable but marks it SUPERSEDED_POLICY', async () => {
+    const active = await service().createPreview(actor, tripId, request());
+    const persisted = await vi.mocked(planningRepository.createPreview).mock
+      .results[0]!.value;
+    if (persisted.status !== 'SUCCESS') throw new Error('expected preview');
+    vi.mocked(planningRepository.findPreviewOwned).mockResolvedValue({
+      ...persisted.preview,
+      policyVersion: 'route-adoption-preview-v1',
+      previewPayload: {
+        ...persisted.preview.previewPayload,
+        policyVersion: 'route-adoption-preview-v1',
+      },
+    });
+
+    await expect(
+      service().getPreview(actor, tripId, active.previewId),
+    ).resolves.toMatchObject({
+      status: 'SUPERSEDED_POLICY',
+      adoptable: false,
+    });
+  });
+
+  it('collapses a structured same-hub walking transfer without creating a formal segment', async () => {
+    const from = location('From', 35, 139, 'from');
+    const railStation = {
+      ...location('Rail Station', 35.1, 139.1, 'rail-station'),
+      providerHubRef: 'hub-station',
+    };
+    const busStop = {
+      ...location('Bus Stop', 35.11, 139.11, 'bus-stop'),
+      providerHubRef: 'hub-station',
+    };
+    const to = location('To', 36, 140, 'to');
+    snapshot = candidateSnapshot(
+      payload([
+        leg(
+          'RAIL',
+          from,
+          railStation,
+          '2030-01-01T01:00:00.000Z',
+          '2030-01-01T01:20:00.000Z',
+          true,
+        ),
+        leg(
+          'WALKING',
+          railStation,
+          busStop,
+          '2030-01-01T01:20:00.000Z',
+          '2030-01-01T01:30:00.000Z',
+          false,
+        ),
+        leg(
+          'BUS',
+          busStop,
+          to,
+          '2030-01-01T01:40:00.000Z',
+          '2030-01-01T02:00:00.000Z',
+          true,
+        ),
+      ]),
+    );
+    vi.mocked(planningRepository.findSnapshotOwned).mockResolvedValue(snapshot);
+
+    const preview = await service().createPreview(actor, tripId, request());
+    expect(preview.changeSummary.generatedTransferPoints).toHaveLength(1);
+    expect(preview.changeSummary.proposedSegments).toHaveLength(2);
+    expect(preview.changeSummary.internalTransferDetails).toEqual([
+      expect.objectContaining({
+        legIndex: 1,
+        mode: 'WALKING',
+        evidence: 'SYSTEM_STRUCTURED',
+      }),
+    ]);
+  });
+
+  it('accepts typed user same-hub confirmation but never rewrites candidate facts', async () => {
+    const from = location('From', 35, 139, 'from');
+    const station = location('Station', 35.1, 139.1, 'station');
+    const stop = location('Stop', 35.11, 139.11, 'stop');
+    const to = location('To', 36, 140, 'to');
+    snapshot = candidateSnapshot(
+      payload([
+        leg(
+          'RAIL',
+          from,
+          station,
+          '2030-01-01T01:00:00.000Z',
+          '2030-01-01T01:20:00.000Z',
+          true,
+        ),
+        leg(
+          'WALKING',
+          station,
+          stop,
+          '2030-01-01T01:20:00.000Z',
+          '2030-01-01T01:30:00.000Z',
+          false,
+        ),
+        leg(
+          'BUS',
+          stop,
+          to,
+          '2030-01-01T01:40:00.000Z',
+          '2030-01-01T02:00:00.000Z',
+          true,
+        ),
+      ]),
+    );
+    vi.mocked(planningRepository.findSnapshotOwned).mockResolvedValue(snapshot);
+
+    const preview = await service().createPreview(actor, tripId, {
+      ...request(),
+      sameHubWalkingLegIndexes: [1],
+    });
+    expect(preview.changeSummary.internalTransferDetails?.[0]).toMatchObject({
+      evidence: 'USER_CONFIRMED',
+      durationSeconds: 600,
+    });
+    expect(preview.candidate.legs[1]).toMatchObject({
+      mode: 'WALKING',
+      providerRef: 'walking-1',
+      durationSeconds: 600,
+    });
+  });
+
+  it('does not infer same-hub grouping from similar names or nearby coordinates', async () => {
+    const from = location('From', 35, 139, 'from');
+    const station = location('Central Station', 35.1, 139.1, 'station');
+    const stop = location(
+      'Central Station Bus Stop',
+      35.10001,
+      139.10001,
+      'bus-stop',
+    );
+    const to = location('To', 36, 140, 'to');
+    snapshot = candidateSnapshot(
+      payload([
+        leg(
+          'RAIL',
+          from,
+          station,
+          '2030-01-01T01:00:00.000Z',
+          '2030-01-01T01:20:00.000Z',
+          true,
+        ),
+        leg(
+          'WALKING',
+          station,
+          stop,
+          '2030-01-01T01:20:00.000Z',
+          '2030-01-01T01:30:00.000Z',
+          false,
+        ),
+        leg(
+          'BUS',
+          stop,
+          to,
+          '2030-01-01T01:40:00.000Z',
+          '2030-01-01T02:00:00.000Z',
+          true,
+        ),
+      ]),
+    );
+    vi.mocked(planningRepository.findSnapshotOwned).mockResolvedValue(snapshot);
+
+    const preview = await service().createPreview(actor, tripId, request());
+    expect(preview.changeSummary.generatedTransferPoints).toHaveLength(2);
+    expect(preview.changeSummary.proposedSegments).toHaveLength(3);
+    expect(preview.changeSummary.internalTransferDetails).toEqual([]);
   });
 
   function service(): RoutePreviewService {

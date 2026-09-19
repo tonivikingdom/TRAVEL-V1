@@ -299,6 +299,119 @@ async function verifyCompose(compose, composeQuiet, env) {
   if (consumeResponse.status !== 200) {
     throw new Error('Worker-delivered synthetic Magic Link was not consumable');
   }
+  const session = await consumeResponse.json();
+  if (typeof session.credential !== 'string') {
+    throw new Error('Synthetic session did not return a bearer credential');
+  }
+
+  const apiJson = async (pathname, method, body) => {
+    const response = await fetch(`http://127.0.0.1:${apiPort}${pathname}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${session.credential}`,
+        'content-type': 'application/json',
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(
+        `Synthetic P4B2 API ${method} ${pathname} failed with ${response.status}: ${payload?.error?.code ?? 'UNKNOWN'}`,
+      );
+    }
+    return payload;
+  };
+  let routeTrip = await apiJson('/trips', 'POST', {
+    name: 'SYNTHETIC Compose route adoption',
+    planningAnchorDate: '2030-10-01',
+    defaultPeopleCount: 1,
+  });
+  routeTrip = await apiJson(`/trips/${routeTrip.id}/commands`, 'POST', {
+    baseTripVersion: routeTrip.version,
+    command: {
+      type: 'ADD_PLACE_VISIT',
+      targetDay: { type: 'NEW', localDate: '2030-10-01', sequence: 0 },
+      position: 0,
+      place: {
+        type: 'CUSTOM',
+        name: 'SYNTHETIC Origin',
+        latitude: 35.6762,
+        longitude: 139.6503,
+      },
+    },
+  });
+  routeTrip = await apiJson(`/trips/${routeTrip.id}/commands`, 'POST', {
+    baseTripVersion: routeTrip.version,
+    command: {
+      type: 'ADD_PLACE_VISIT',
+      targetDay: {
+        type: 'EXISTING',
+        dayOccurrenceId: routeTrip.days[0].dayOccurrenceId,
+      },
+      position: 1,
+      place: {
+        type: 'CUSTOM',
+        name: 'SYNTHETIC Destination',
+        latitude: 35.6895,
+        longitude: 139.6917,
+      },
+    },
+  });
+  const [routeFrom, routeTo] = routeTrip.days[0].nodes;
+  const queryResult = await apiJson(
+    `/trips/${routeTrip.id}/routes/query`,
+    'POST',
+    {
+      basisVersion: routeTrip.version,
+      fromNodeId: routeFrom.id,
+      toNodeId: routeTo.id,
+      hint: {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:00:00Z',
+        timeZone: 'UTC',
+      },
+    },
+  );
+  const routePreview = await apiJson(
+    `/trips/${routeTrip.id}/previews`,
+    'POST',
+    {
+      basisVersion: routeTrip.version,
+      candidateSnapshotId: queryResult.candidates[0].candidateSnapshotId,
+    },
+  );
+  const adoption = await apiJson(
+    `/trips/${routeTrip.id}/previews/${routePreview.previewId}/adopt`,
+    'POST',
+    {
+      baseTripVersion: routeTrip.version,
+      idempotencyKey: `synthetic-compose-route-${Date.now()}`,
+    },
+  );
+  if (
+    adoption.trip.version !== routeTrip.version + 1 ||
+    adoption.trip.connections[0]?.transport?.source !== 'ADOPTED_ROUTE'
+  ) {
+    throw new Error('Synthetic P4B2 adoption did not create an official route');
+  }
+  const adoptionEvidence = await composeQuiet(
+    'exec',
+    '--no-TTY',
+    'postgres',
+    'psql',
+    '-tA',
+    '-U',
+    databaseUser,
+    '-d',
+    databaseName,
+    '-c',
+    `SELECT (SELECT count(*) FROM "OperationReceipt" WHERE "tripId" = '${routeTrip.id}') || ':' || (SELECT count(*) FROM "OutboxEvent" WHERE "tripId" = '${routeTrip.id}');`,
+  );
+  if (adoptionEvidence.trim() !== '1:1') {
+    throw new Error(
+      'Synthetic P4B2 receipt/outbox transaction evidence is missing',
+    );
+  }
 
   const storageOwnerEnvironment = `SYNTHETIC_STORAGE_OWNER_EMAIL=${adminEmail}`;
   const storageWrite = parseLastJsonLine(
@@ -521,7 +634,7 @@ async function verifyCompose(compose, composeQuiet, env) {
   );
 
   process.stdout.write(
-    'Compose verification passed: live/ready, async Job delivery, lease recovery, outage/recovery, worker SIGTERM, PostgreSQL persistence, and private object-volume write/restart/delete.\n',
+    'Compose verification passed: live/ready, async Job delivery, route adoption receipt/outbox, lease recovery, outage/recovery, worker SIGTERM, PostgreSQL persistence, and private object-volume write/restart/delete.\n',
   );
 }
 

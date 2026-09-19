@@ -1,8 +1,11 @@
 # P5C Planning Policy
 
-- 当前状态：在 `feature/p5c-planning-policy` 实施，等待 Draft PR 验证与人工审查
+- 当前状态：Draft PR #18 已创建并保持 Draft，等待人工审查
 - 正式基线 main：`49a76517ef7917678c8d2133977435a1854edd07`
 - 基线 main CI：Run `35439640209`，三个核心 job 均为 success
+- 实现验证 CI：Run `35453749282`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
+- 自动化结果：Unit 28 files / 232 tests；PostgreSQL integration 15 files / 163 tests；clean migration、
+  populated P5B → P5C migration、Compose 与 5-user P5B acceptance regression 均通过
 - 推荐模型 / 强度：Sol / High；实际使用模型与强度：未知（仓库无法确认客户端配置）
 
 ## 停留时间

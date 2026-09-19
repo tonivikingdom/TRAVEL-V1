@@ -1672,6 +1672,13 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       'synthetic-adopt-rollback-1',
     );
 
+    providerResult = dateRollbackTransferCandidate();
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
     let otherTrip = await createTrip(userA);
     otherTrip = await addVisit(
       userA,
@@ -1680,13 +1687,6 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       '2030-10-02',
     );
     expect(otherTrip.days[0]!.localDate).toBe('2030-10-02');
-    providerResult = dateRollbackTransferCandidate();
-    const secondPreview = await createPreview(
-      userA,
-      first.trip,
-      from!.id,
-      to!.id,
-    );
     const rejected = await adopt(
       userA,
       first.trip,

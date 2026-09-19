@@ -76,8 +76,8 @@ describe('P3B1 populated P3A database migration', () => {
           ORDER BY "kind"
         `);
         expect(intents.rows.map((row) => row.kind)).toEqual([
-          'POINT_TIME',
           'MIN_DWELL',
+          'POINT_TIME',
         ]);
 
         await expect(

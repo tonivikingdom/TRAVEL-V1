@@ -4,8 +4,10 @@
 - 正式基线 main：`49a76517ef7917678c8d2133977435a1854edd07`
 - 基线 main CI：Run `35439640209`，三个核心 job 均为 success
 - 实现验证 CI：Run `35453749282`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
-- 自动化结果：Unit 28 files / 232 tests；PostgreSQL integration 15 files / 163 tests；clean migration、
-  populated P5B → P5C migration、Compose 与 5-user P5B acceptance regression 均通过
+- Hardening 验证 CI：Run `35456782636`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
+- 自动化结果：Unit 28 files / 246 tests；PostgreSQL integration 15 files / 169 tests；clean migration、
+  populated P5B → P5C migration、Compose 与新增 P5C cross-layer flow 均通过。5-user P5B regression
+  为 200/200 observed requests、0 isolation failure、0 unexpected 5xx、0 network failure
 - 推荐模型 / 强度：Sol / High；实际使用模型与强度：未知（仓库无法确认客户端配置）
 
 ## 停留时间

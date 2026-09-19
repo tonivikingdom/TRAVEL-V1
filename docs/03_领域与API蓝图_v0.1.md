@@ -229,7 +229,15 @@ window，并允许一次性的 DEPART_AT/ARRIVE_BY hint。hint 不持久化且�
 返回 `ROUTE_QUERY_TIME_REQUIRED`。Provider 结果由 Application 再次校验，越界候选不会作为可行路线
 返回。当前只有明确标记的 SYNTHETIC 开发/测试 adapter，尚无真实 Provider。
 
-**Preview**：以baseTripVersion、用户动作、provider snapshot和policyVersion计算变更。可保存临时候选，但不得修改正式节点/交通/通知。
+P4B1 在 accepted candidate 后建立服务器拥有的短期 `RouteCandidateSnapshot`：Provider 调用结束后用
+短事务重新锁定 Trip，并复核版本和 adjacency；只保存 normalized payload、provider provenance、query
+condition、candidateHash 和 expiry，不保存第三方 raw response。Query 响应返回
+`candidateSnapshotId` 与 `snapshotExpiresAt`，未来 Preview/Adopt 不信任客户端回传的 candidate JSON。
+
+**Preview**：`POST /trips/:id/previews` 只接收 `basisVersion + candidateSnapshotId`，重新校验 owner、版本、
+expiry、hash、adjacency、domain 与 P3B2 hard window，并以明确 policyVersion 持久化 immutable 变更预览。
+Preview 可重新读取；过期时 `adoptable=false`。它只描述 CREATE/REPLACE、transfer points 和 proposed
+segments，不创建 Place/Node/Transport，不复制时间到 Node，不修改正式 Trip 或版本。
 
 **Adopt**：服务端重新校验权限、Trip版本、预览过期和Provider适用性；有效则一次事务落地节点、交通、来源与相关结果，并产生outbox事件。
 

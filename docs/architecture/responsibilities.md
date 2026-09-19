@@ -248,6 +248,21 @@ Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后�
   candidateId 唯一性；Provider success 但全部越界时返回 `NO_MATCHING_CANDIDATE`。
 - RouteCandidate 与 TransportEdge 完全分离；多 leg、walking、fixedService、fare 与 provider
   provenance 都只是本次查询事实。P4A1 不持久化 candidate，也不创建节点、交通或版本写入。
+
+### P4B1 Candidate Snapshot / Preview foundation
+
+- Query 完成 Provider I/O、归一化和 hard-window 二次校验后，才开启短事务；事务重新锁定 Trip、核对
+  `basisVersion` 与当前 adjacency，再保存 immutable `RouteCandidateSnapshot`。Provider I/O 不进入事务。
+- Snapshot 是短期服务器证据，保存 normalized candidate、query condition、provider provenance、稳定
+  SHA-256 candidateHash 与 expiry；不保存第三方 raw JSON，也不允许客户端回传完整 candidate 充当依据。
+- `POST /trips/:id/previews` 仅接收 `basisVersion + candidateSnapshotId`。创建时重查 owner、版本、相邻
+  PLACE_VISIT、expiry、hash/domain integrity 和当前 P3B2 hard window；不重新调用 Provider。
+- immutable `RoutePreview` 使用 `route-adoption-preview-v1`，描述 CREATE/REPLACE、潜在 transfer points 和
+  proposed segments。多 leg continuity 必须由 providerPlaceRef 或完全一致坐标证明；必需 transfer 缺少坐标
+  时拒绝 Preview。walking 与 fixedService 原样保留，不能按 mode 推断。
+- Snapshot/Preview 只写各自临时表；不增加 Trip version，不写正式 Place、Node、Transport、TemporalValue、
+  History 或 Notification。过期 Preview 可读取但 `status=EXPIRED`、`adoptable=false`。
+- P4B1 不实现 Adopt、idempotency、OperationReceipt、outbox 或 Undo；这些分别属于 P4B2/P4B3 后续闸门。
 - Development/Test 只有显式 `ROUTE_PROVIDER=synthetic` 才启用 SYNTHETIC adapter；
   Staging/Production 禁止 synthetic，真实 adapter 未配置时明确返回
   `ROUTE_PROVIDER_UNCONFIGURED`，绝不静默回退。

@@ -1,0 +1,17 @@
+{
+  "name": "@travel/debug-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@travel/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "7.1.7"
+  }
+}

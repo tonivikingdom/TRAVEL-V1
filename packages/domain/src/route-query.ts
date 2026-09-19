@@ -38,6 +38,11 @@ export interface RouteFare {
   readonly currency: string;
 }
 
+// Parser-safety limits, not currency precision rules. They bound
+// provider-controlled decimal work while retaining high-precision fares.
+export const MAX_ROUTE_FARE_INTEGER_DIGITS = 64;
+export const MAX_ROUTE_FARE_FRACTION_DIGITS = 32;
+
 export interface NormalizedRouteCandidate {
   readonly candidateId: string;
   readonly provider: string;
@@ -98,6 +103,7 @@ function isValidCandidate(candidate: NormalizedRouteCandidate): boolean {
     !validTimePoint(candidate.arrival) ||
     !validDuration(candidate.durationSeconds) ||
     candidate.legs.length === 0 ||
+    !validFare(candidate.fare) ||
     candidate.arrival.instant.getTime() < candidate.departure.instant.getTime()
   ) {
     return false;
@@ -110,6 +116,23 @@ function isValidCandidate(candidate: NormalizedRouteCandidate): boolean {
     return false;
   }
   return candidate.legs.every(validLeg);
+}
+
+function validFare(fare: RouteFare | null): boolean {
+  return (
+    fare === null ||
+    (isCanonicalRouteFareAmount(fare.amount) &&
+      /^[A-Z]{3}$/u.test(fare.currency))
+  );
+}
+
+export function isCanonicalRouteFareAmount(value: string): boolean {
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/u.exec(value);
+  return (
+    match !== null &&
+    match[1]!.length <= MAX_ROUTE_FARE_INTEGER_DIGITS &&
+    (match[2]?.length ?? 0) <= MAX_ROUTE_FARE_FRACTION_DIGITS
+  );
 }
 
 function validLeg(leg: RouteCandidateLeg): boolean {

@@ -51,3 +51,19 @@ export {
   type RouteRequirementBounds,
   type RouteTimePoint,
 } from './route-query.js';
+export {
+  assessDwell,
+  evaluateBuffer,
+  expandRouteQueryStart,
+  rankRouteCandidates,
+  ROUTE_QUERY_LOOKBACK_SECONDS,
+  suggestedExternalBoardingBufferSeconds,
+  VALUE_EFFECTIVE_TIME_BASIS_POINTS,
+  type BufferEvaluation,
+  type BufferRiskDisposition,
+  type BufferRiskKind,
+  type DwellPlanningAssessment,
+  type DwellPlanningStatus,
+  type ExternalBoardingScenario,
+  type RouteRecommendationResult,
+} from './planning-policy.js';

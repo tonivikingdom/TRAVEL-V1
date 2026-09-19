@@ -75,6 +75,23 @@ describe('route candidate hard-bound validation', () => {
       }),
     ).toEqual({ accepted: false, reason: 'INVALID_CANDIDATE' });
   });
+
+  it('rejects malformed or non-canonical fare data before policy ranking', () => {
+    for (const fare of [
+      { amount: '-1.00', currency: 'CNY' },
+      { amount: '1e3', currency: 'CNY' },
+      { amount: '1.00', currency: 'cny' },
+      { amount: `1.${'0'.repeat(33)}`, currency: 'CNY' },
+      { amount: '9'.repeat(65), currency: 'CNY' },
+    ]) {
+      expect(
+        validateRouteCandidate(routeCandidate({ fare }), {
+          earliestDeparture: null,
+          latestArrival: null,
+        }),
+      ).toEqual({ accepted: false, reason: 'INVALID_CANDIDATE' });
+    }
+  });
 });
 
 function routeCandidate(

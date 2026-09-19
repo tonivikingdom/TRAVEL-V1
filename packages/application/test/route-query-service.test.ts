@@ -91,6 +91,8 @@ describe('RouteQueryService', () => {
       snapshotExpiresAt: '2030-01-01T00:15:00.000Z',
     });
     expect(findOwnedById).toHaveBeenCalledWith({ ownerUserId, tripId });
+    expect(JSON.stringify(result)).not.toContain('fastestCandidateId');
+    expect(JSON.stringify(result)).not.toContain('valueCandidateId');
   });
 
   it('caps snapshot expiry at provider validity before the internal TTL', async () => {

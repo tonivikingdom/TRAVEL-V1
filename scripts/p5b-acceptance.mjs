@@ -342,6 +342,177 @@ async function initializeTrip(baseUrl, session, index) {
   return { trip, fromNode, toNode, preview, route };
 }
 
+async function verifyP5cPlanningFlow(baseUrl, compose, env, owner, attacker) {
+  const scenario = await initializeTrip(baseUrl, owner, 5);
+  const day = '2035-02-06';
+  let trip = await requireApi(
+    baseUrl,
+    `/trips/${scenario.trip.id}/temporal-values`,
+    {
+      method: 'POST',
+      credential: owner.credential,
+      body: {
+        baseTripVersion: scenario.trip.version,
+        subject: { type: 'NODE', nodeId: scenario.fromNode.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: `${day}T10:00:00Z`,
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    },
+  );
+  trip = await requireApi(baseUrl, `/trips/${trip.id}/commands`, {
+    method: 'POST',
+    credential: owner.credential,
+    body: {
+      baseTripVersion: trip.version,
+      command: {
+        type: 'SET_MIN_DWELL',
+        nodeId: scenario.fromNode.id,
+        durationSeconds: 3_000,
+        locked: false,
+      },
+    },
+  });
+  await sql(
+    compose,
+    env,
+    `BEGIN; INSERT INTO "SystemDwellSuggestion" ("id", "tripId", "nodeId", "durationSeconds", "updatedAt") VALUES (gen_random_uuid(), '${trip.id}', '${scenario.fromNode.id}', 3600, CURRENT_TIMESTAMP); UPDATE "Trip" SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = '${trip.id}'; COMMIT;`,
+  );
+  trip = await requireApi(baseUrl, `/trips/${trip.id}`, {
+    credential: owner.credential,
+  });
+  const route = await requireApi(baseUrl, `/trips/${trip.id}/routes/query`, {
+    method: 'POST',
+    credential: owner.credential,
+    body: {
+      basisVersion: trip.version,
+      fromNodeId: scenario.fromNode.id,
+      toNodeId: scenario.toNode.id,
+      hint: null,
+    },
+  });
+  const candidate = route.candidates[0];
+  if (
+    route.timeCondition.lookbackSeconds !== 900 ||
+    route.timeCondition.planningEarliestDeparture !== `${day}T10:50:00.000Z` ||
+    candidate.overall.departure.instant !== `${day}T10:35:00.000Z`
+  ) {
+    throw new Error('P5C acceptance did not expose the 15-minute lookback');
+  }
+  const preview = await requireApi(baseUrl, `/trips/${trip.id}/previews`, {
+    method: 'POST',
+    credential: owner.credential,
+    body: {
+      basisVersion: trip.version,
+      candidateSnapshotId: candidate.candidateSnapshotId,
+    },
+  });
+  const adjustments = preview.changeSummary.requiredUserAdjustments ?? [];
+  if (
+    adjustments.length !== 1 ||
+    adjustments[0].fromDurationSeconds !== 3_000 ||
+    adjustments[0].toDurationSeconds !== 2_100
+  ) {
+    throw new Error(
+      'P5C acceptance did not require the expected dwell adjustment',
+    );
+  }
+  const adoptKey = 'synthetic-p5b-p5c-adopt';
+  const adopted = await requireApi(
+    baseUrl,
+    `/trips/${trip.id}/previews/${preview.previewId}/adopt`,
+    {
+      method: 'POST',
+      credential: owner.credential,
+      body: {
+        baseTripVersion: preview.basisVersion,
+        idempotencyKey: adoptKey,
+        acceptedUserAdjustments: adjustments,
+      },
+    },
+  );
+  const adjustedIntent = adopted.trip.days
+    .flatMap((item) => item.nodes)
+    .find((node) => node.id === scenario.fromNode.id)
+    ?.timeIntents.find((intent) => intent.kind === 'MIN_DWELL');
+  if (
+    adjustedIntent?.durationSeconds !== 2_100 ||
+    adopted.trip.connections[0]?.transport?.source !== 'ADOPTED_ROUTE'
+  ) {
+    throw new Error(
+      'P5C acceptance did not atomically adopt and adjust MIN_DWELL',
+    );
+  }
+  const replay = await requireApi(
+    baseUrl,
+    `/trips/${trip.id}/previews/${preview.previewId}/adopt`,
+    {
+      method: 'POST',
+      credential: owner.credential,
+      body: {
+        baseTripVersion: preview.basisVersion,
+        idempotencyKey: adoptKey,
+        acceptedUserAdjustments: adjustments,
+      },
+    },
+  );
+  if (
+    replay.operationReceipt.id !== adopted.operationReceipt.id ||
+    replay.trip.version !== adopted.trip.version
+  ) {
+    throw new Error('P5C adjusted Adopt replay was not idempotent');
+  }
+  const undoKey = 'synthetic-p5b-p5c-undo';
+  const undone = await requireApi(
+    baseUrl,
+    `/trips/${trip.id}/operations/${adopted.operationReceipt.id}/undo`,
+    {
+      method: 'POST',
+      credential: owner.credential,
+      body: {
+        baseTripVersion: adopted.trip.version,
+        idempotencyKey: undoKey,
+      },
+    },
+  );
+  const restoredIntent = undone.trip.days
+    .flatMap((item) => item.nodes)
+    .find((node) => node.id === scenario.fromNode.id)
+    ?.timeIntents.find((intent) => intent.kind === 'MIN_DWELL');
+  if (
+    restoredIntent?.durationSeconds !== 3_000 ||
+    undone.trip.connections[0]?.state !== 'MISSING'
+  ) {
+    throw new Error('P5C Undo did not restore route and MIN_DWELL');
+  }
+  const undoReplay = await requireApi(
+    baseUrl,
+    `/trips/${trip.id}/operations/${adopted.operationReceipt.id}/undo`,
+    {
+      method: 'POST',
+      credential: owner.credential,
+      body: {
+        baseTripVersion: adopted.trip.version,
+        idempotencyKey: undoKey,
+      },
+    },
+  );
+  if (
+    undoReplay.operationReceipt.id !== undone.operationReceipt.id ||
+    undoReplay.trip.version !== undone.trip.version
+  ) {
+    throw new Error('P5C Undo replay was not idempotent');
+  }
+  await expectPrivateNotFound(baseUrl, `/trips/${trip.id}`, {
+    credential: attacker.credential,
+  });
+  return 'PASS';
+}
+
 async function verifyIsolation(baseUrl, admin, users, scenarios) {
   const attacker = users[0];
   const victimScenario = scenarios[1];
@@ -560,6 +731,13 @@ async function runAcceptance(compose, unavailableCompose, env, baseUrl) {
   for (let index = 0; index < users.length; index += 1) {
     scenarios.push(await initializeTrip(baseUrl, users[index], index));
   }
+  const p5cFlow = await verifyP5cPlanningFlow(
+    baseUrl,
+    compose,
+    env,
+    users[4],
+    users[0],
+  );
 
   for (const index of [0, 1]) {
     const scenario = scenarios[index];
@@ -753,6 +931,7 @@ async function runAcceptance(compose, unavailableCompose, env, baseUrl) {
     users: users.length,
     ...aggregate,
     isolationFailures,
+    p5cFlow,
   };
 }
 

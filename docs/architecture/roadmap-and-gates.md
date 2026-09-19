@@ -1,24 +1,25 @@
 # 阶段计划、闸门与未决项
 
-| 阶段 | 计划交付                                            | 当前状态                                                                                                           | 进入条件 / 关联未决项                                                                |
-| ---- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| P0   | 蓝图、workspace、API/Worker 健康、Compose、CI       | 已合并 main；main CI Run `35294938746` 通过                                                                        | 已完成                                                                               |
-| P1A  | 邀请、Magic Link、可撤销多设备 Session、集中授权    | 已 Squash Merge；main CI Run `35309420185` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                   |
-| P1B1 | 持久 Job、Worker 执行框架、Magic Link 异步邮件      | 已 Squash Merge；main CI Run `35322043421` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                   |
-| P1B2 | NotificationEvent、ObjectStorage 边界               | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过            | 只含站内通知基础与私有本地测试存储，不进入 P2                                        |
-| P2A  | Trip/DateOwnership/Place/Visit/FreeAction、版本     | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过            | 已完成；O-03/O-07 不阻塞当前基础自然日能力                                           |
-| P2B  | Transport、失效历史、resolved 三层时间基础          | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过            | 已完成；O-03/O-07 不阻塞已交付的基础边界                                             |
-| P3A  | DayOccurrence identity、sequence 与节点日期卡归属   | 已 Squash Merge；main commit `330f9f2d469f5ff1eda7a98d45457f9c21c7265f`；main CI Run `35409984734` 通过            | 已完成 foundation；solver、跨日 Transport 投影与 DST 输入 UI 仍后置                  |
-| P3B1 | UserTimeIntent、最低停留、lock 与只读约束评估       | 已 Squash Merge；main commit `d4fb0f59b9bd0775bc0f35e801acde262cec0d8d`；main CI Run `35415523541` 通过            | 已完成当前状态评估基础；不自动改时间或推荐                                           |
-| P3B2 | 确定性时间上下界传播、来源与客观冲突                | 已 Squash Merge；main commit `0c5fcbdfe09b049c5fbbf77abe20ec296ded4383`；main CI Run `35418153790` 通过            | 已完成只读传播；不写 PLANNED、不查询 Provider、不生成推荐                            |
-| P3B+ | 完整路线求解、候选与推荐衔接                        | 未授权、未实现                                                                                                     | P3B2 只产出要求窗口；P4 路线候选、Preview/Adopt 与 RecommendationPolicy 仍须单独授权 |
-| P4A1 | Provider-neutral Route Query、候选归一化与二次校验  | 已通过 PR #12 Squash Merge；main commit `4a50beb711e2c56679b9b846ca6a4d9ff56403cb`；main CI Run `35420894762` 通过 | 仅 SYNTHETIC 测试适配器；真实/付费 Provider 未接入                                   |
-| P4B1 | 服务端 Candidate Snapshot 与持久 Preview foundation | 已通过 PR #13 Squash Merge；main commit `9ec780d010257f0c98dba58928a68920bfa4308c`；main CI Run `35423819550` 通过 | immutable snapshot/preview foundation 已完成；真实/付费 Provider 仍未接入            |
-| P4B2 | Adopt、事务/幂等、正式节点与交通写入                | 已通过 PR #14 Squash Merge；main commit `66ffaed90acaa08798dd3afe6ff62c13d80cb667`；main CI Run `35430697966` 通过 | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox 已完成                |
-| P4B3 | Route Adopt 单步 Undo                               | 已通过 PR #15 Squash Merge；main `d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`；CI `35434086597` 通过                 | 已完成短时单步前向补偿；不包含 Undo stack 或 Redo                                    |
-| P5A  | Dev/Test Debug Web 薄测试台                         | 已通过 PR #16 合并；main `cbf9fe2a727011e4708585ef259c3324c05b4362`；CI `35435976817` 通过                         | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、监控、Push 或离线编辑     |
-| P5B  | Development/Test 内部验收与环境闸门                 | 已授权，在 `feature/p5b-internal-acceptance` 实施                                                                  | ≤5 synthetic 用户跨层验收；不是性能容量认证、Staging 许可或 Production readiness     |
-| P5C+ | 后续执行/提醒/正式客户端能力                        | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
+| 阶段 | 计划交付                                             | 当前状态                                                                                                           | 进入条件 / 关联未决项                                                                |
+| ---- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| P0   | 蓝图、workspace、API/Worker 健康、Compose、CI        | 已合并 main；main CI Run `35294938746` 通过                                                                        | 已完成                                                                               |
+| P1A  | 邀请、Magic Link、可撤销多设备 Session、集中授权     | 已 Squash Merge；main CI Run `35309420185` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                   |
+| P1B1 | 持久 Job、Worker 执行框架、Magic Link 异步邮件       | 已 Squash Merge；main CI Run `35322043421` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                   |
+| P1B2 | NotificationEvent、ObjectStorage 边界                | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过            | 只含站内通知基础与私有本地测试存储，不进入 P2                                        |
+| P2A  | Trip/DateOwnership/Place/Visit/FreeAction、版本      | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过            | 已完成；O-03/O-07 不阻塞当前基础自然日能力                                           |
+| P2B  | Transport、失效历史、resolved 三层时间基础           | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过            | 已完成；O-03/O-07 不阻塞已交付的基础边界                                             |
+| P3A  | DayOccurrence identity、sequence 与节点日期卡归属    | 已 Squash Merge；main commit `330f9f2d469f5ff1eda7a98d45457f9c21c7265f`；main CI Run `35409984734` 通过            | 已完成 foundation；solver、跨日 Transport 投影与 DST 输入 UI 仍后置                  |
+| P3B1 | UserTimeIntent、最低停留、lock 与只读约束评估        | 已 Squash Merge；main commit `d4fb0f59b9bd0775bc0f35e801acde262cec0d8d`；main CI Run `35415523541` 通过            | 已完成当前状态评估基础；不自动改时间或推荐                                           |
+| P3B2 | 确定性时间上下界传播、来源与客观冲突                 | 已 Squash Merge；main commit `0c5fcbdfe09b049c5fbbf77abe20ec296ded4383`；main CI Run `35418153790` 通过            | 已完成只读传播；不写 PLANNED、不查询 Provider、不生成推荐                            |
+| P3B+ | 完整路线求解、候选与推荐衔接                         | 未授权、未实现                                                                                                     | P3B2 只产出要求窗口；P4 路线候选、Preview/Adopt 与 RecommendationPolicy 仍须单独授权 |
+| P4A1 | Provider-neutral Route Query、候选归一化与二次校验   | 已通过 PR #12 Squash Merge；main commit `4a50beb711e2c56679b9b846ca6a4d9ff56403cb`；main CI Run `35420894762` 通过 | 仅 SYNTHETIC 测试适配器；真实/付费 Provider 未接入                                   |
+| P4B1 | 服务端 Candidate Snapshot 与持久 Preview foundation  | 已通过 PR #13 Squash Merge；main commit `9ec780d010257f0c98dba58928a68920bfa4308c`；main CI Run `35423819550` 通过 | immutable snapshot/preview foundation 已完成；真实/付费 Provider 仍未接入            |
+| P4B2 | Adopt、事务/幂等、正式节点与交通写入                 | 已通过 PR #14 Squash Merge；main commit `66ffaed90acaa08798dd3afe6ff62c13d80cb667`；main CI Run `35430697966` 通过 | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox 已完成                |
+| P4B3 | Route Adopt 单步 Undo                                | 已通过 PR #15 Squash Merge；main `d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`；CI `35434086597` 通过                 | 已完成短时单步前向补偿；不包含 Undo stack 或 Redo                                    |
+| P5A  | Dev/Test Debug Web 薄测试台                          | 已通过 PR #16 合并；main `cbf9fe2a727011e4708585ef259c3324c05b4362`；CI `35435976817` 通过                         | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、监控、Push 或离线编辑     |
+| P5B  | Development/Test 内部验收与环境闸门                  | 已通过 PR #17 合并；main `49a76517ef7917678c8d2133977435a1854edd07`；CI `35439640209` 三个核心 job 通过            | ≤5 synthetic 用户跨层验收完成；不是性能容量认证、Staging 许可或 Production readiness |
+| P5C  | 停留/Buffer 策略、Route lookback、候选排序与可逆调整 | 已授权，在 `feature/p5c-planning-policy` 实施                                                                      | 只实现确定性 planning policy；真实 Provider、实时监控、Push 与 Production 仍未授权   |
+| P5D+ | 后续执行/提醒/正式客户端能力                         | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。
@@ -70,7 +71,10 @@ O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI
   `9ec780d010257f0c98dba58928a68920bfa4308c`，main CI Run `35423819550` 通过。P4B2 已通过
   PR #14 合并到 main `66ffaed90acaa08798dd3afe6ff62c13d80cb667`，main CI Run `35430697966`
   通过。P4B3 随后获得单独授权，只实现最近一次 Route Adopt 的短时安全补偿；真实 Provider、推荐、
-  多级 Undo/Redo 与 Production 仍未授权。
+  多级 Undo/Redo 与 Production 仍未授权。P5A 已通过 PR #16 合并，P5B 已通过 PR #17 Squash Merge
+  到 main `49a76517ef7917678c8d2133977435a1854edd07`，main CI Run `35439640209` 的
+  `verify`、`Compose verification` 与 `P5B acceptance` 均为 success。P5C 只在独立 feature 分支实施
+  planning policy，不解除真实 Provider、实时监控、正式客户端或 Production 闸门。
 
 ## P1A → P1B 邮件安全闸门
 

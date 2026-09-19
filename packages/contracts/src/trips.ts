@@ -75,6 +75,15 @@ export interface ItineraryNodeView {
   readonly updatedAt: string;
   readonly timeValues: readonly TemporalValueView[];
   readonly timeIntents: readonly UserTimeIntentView[];
+  readonly systemDwellSuggestion?: SystemDwellSuggestionView | null;
+}
+
+export interface SystemDwellSuggestionView {
+  readonly id: string;
+  readonly durationSeconds: number;
+  readonly source: 'SYSTEM_SUGGESTION';
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface UserTimeIntentView {

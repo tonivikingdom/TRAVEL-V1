@@ -137,6 +137,10 @@ enum UserTimeIntentOperator {
   MINIMUM
 }
 
+enum DwellSuggestionSource {
+  SYSTEM_SUGGESTION
+}
+
 model User {
   id                      String                   @id @default(uuid()) @db.Uuid
   email                   String
@@ -311,6 +315,7 @@ model Trip {
   transportEdges          TransportEdge[]
   transportHistory        TransportEdgeHistory[]
   timeIntents             UserTimeIntent[]
+  dwellSuggestions        SystemDwellSuggestion[]
   routeCandidateSnapshots RouteCandidateSnapshot[]
   routePreviews           RoutePreview[]
   adoptedRoutes           AdoptedRoute[]
@@ -388,6 +393,7 @@ model ItineraryNode {
   place                  Place?                   @relation(fields: [placeId], references: [id], onDelete: Restrict)
   temporalValues         TemporalValue[]
   timeIntents            UserTimeIntent[]
+  systemDwellSuggestion  SystemDwellSuggestion?
   routeSnapshotsFrom     RouteCandidateSnapshot[] @relation("RouteSnapshotFromNode")
   routeSnapshotsTo       RouteCandidateSnapshot[] @relation("RouteSnapshotToNode")
   adoptedRoute           AdoptedRoute?            @relation("GeneratedRouteNodes", fields: [adoptedRouteId], references: [id], onDelete: SetNull)
@@ -473,6 +479,21 @@ model UserTimeIntent {
 
   @@index([tripId, nodeId])
   @@index([nodeId, kind, pointKind, operator])
+}
+
+model SystemDwellSuggestion {
+  id              String                @id @default(uuid()) @db.Uuid
+  tripId          String                @db.Uuid
+  nodeId          String                @unique @db.Uuid
+  durationSeconds Int
+  source          DwellSuggestionSource @default(SYSTEM_SUGGESTION)
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
+  trip            Trip                  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  node            ItineraryNode         @relation(fields: [nodeId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@unique([nodeId, tripId])
+  @@index([tripId, nodeId])
 }
 
 model TransportEdge {

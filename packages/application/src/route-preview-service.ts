@@ -7,6 +7,7 @@ import type {
   RoutePreviewView,
 } from '@travel/contracts';
 import {
+  assessDwell,
   validateRouteCandidate,
   type NormalizedRouteCandidate,
 } from '@travel/domain';
@@ -33,7 +34,7 @@ import { resolveCurrentRouteCorridor } from './route-corridor.js';
 import { validateIanaTimeZoneInput } from './time-input.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
 
-export const ROUTE_PREVIEW_POLICY_VERSION = 'route-adoption-preview-v2';
+export const ROUTE_PREVIEW_POLICY_VERSION = 'route-adoption-preview-v3';
 
 export interface RoutePreviewServiceOptions {
   readonly previewTtlSeconds: number;
@@ -88,14 +89,22 @@ export class RoutePreviewService {
       throw stalePreview();
     }
     const bounds = {
-      earliestDeparture:
-        fromProjection.departure.requirementWindow.earliest === null
+      earliestDeparture: laterNullable(
+        snapshot.queryTimeCondition.hardEarliestDeparture === null
           ? null
-          : new Date(fromProjection.departure.requirementWindow.earliest),
-      latestArrival:
-        toProjection.arrival.requirementWindow.latest === null
+          : new Date(snapshot.queryTimeCondition.hardEarliestDeparture),
+        fromProjection.departure.requirementWindow.earliestBasis.some(
+          (basis) => basis.ruleId !== 'MIN_DWELL_FORWARD',
+        )
+          ? fromProjection.departure.requirementWindow.earliest
+          : null,
+      ),
+      latestArrival: earlierNullable(
+        snapshot.queryTimeCondition.hardLatestArrival === null
           ? null
-          : new Date(toProjection.arrival.requirementWindow.latest),
+          : new Date(snapshot.queryTimeCondition.hardLatestArrival),
+        toProjection.arrival.requirementWindow.latest,
+      ),
     };
     if (!validateRouteCandidate(candidate, bounds).accepted) {
       throw stalePreview();
@@ -111,6 +120,7 @@ export class RoutePreviewService {
         input.sameHubWalkingLegIndexes,
         candidate.legs.length,
       ),
+      toProjection,
     );
     const expiresAt = earlier(
       snapshot.expiresAt,
@@ -259,6 +269,7 @@ function buildChangeSummary(
   trip: TripAggregateRecord,
   corridor: ReturnType<typeof requireCurrentCorridor>,
   userConfirmedSameHub: ReadonlySet<number>,
+  toProjection: ReturnType<typeof evaluateTripScheduleRecord>['nodes'][number],
 ): RoutePreviewView['changeSummary'] {
   const boundaries: RouteLocationView[] = [];
   for (let index = 0; index + 1 < candidate.legs.length; index += 1) {
@@ -362,6 +373,48 @@ function buildChangeSummary(
       durationSeconds: leg.durationSeconds,
     });
   }
+  const downstreamNode = corridor.toNode;
+  const userMinimum = downstreamNode.timeIntents.find(
+    (intent) => intent.kind === 'MIN_DWELL',
+  );
+  const downstreamDeparture =
+    toProjection.departure.effective?.value.instant ?? null;
+  const planningDuration =
+    userMinimum?.durationSeconds ??
+    downstreamNode.systemDwellSuggestion?.durationSeconds ??
+    null;
+  const projectedDeparture =
+    downstreamDeparture ??
+    (planningDuration === null
+      ? null
+      : new Date(
+          candidate.arrival.instant.getTime() + planningDuration * 1_000,
+        ));
+  const dwell = assessDwell({
+    arrival: candidate.arrival.instant,
+    departure: projectedDeparture,
+    systemSuggestedDurationSeconds:
+      downstreamNode.systemDwellSuggestion?.durationSeconds ?? null,
+    userMinimumDurationSeconds: userMinimum?.durationSeconds ?? null,
+  });
+  const downstreamAdjustments =
+    dwell.requiresUserAdjustment &&
+    userMinimum !== undefined &&
+    dwell.adjustedUserMinimumDurationSeconds !== null
+      ? [
+          {
+            intentId: userMinimum.id,
+            nodeId: downstreamNode.id,
+            fromDurationSeconds: userMinimum.durationSeconds!,
+            toDurationSeconds: dwell.adjustedUserMinimumDurationSeconds,
+          },
+        ]
+      : [];
+  const requiredUserAdjustments = uniqueAdjustments([
+    ...(snapshot.candidatePayload.planningAssessment?.requiredUserAdjustments ??
+      []),
+    ...downstreamAdjustments,
+  ]);
   return {
     transportAction:
       corridor.currentTransports.length === 0 ? 'CREATE' : 'REPLACE',
@@ -411,7 +464,29 @@ function buildChangeSummary(
     })),
     temporalLayer: 'PLANNED',
     temporalSourceKind: 'ADOPTED_TRANSPORT_FACT',
+    requiredUserAdjustments,
+    downstreamImpact: {
+      nodeId: downstreamNode.id,
+      arrival: candidate.arrival.instant.toISOString(),
+      departure: projectedDeparture?.toISOString() ?? null,
+      projectedDwellSeconds: dwell.projectedDwellSeconds,
+      systemSuggestedDwellSeconds: dwell.systemSuggestedDurationSeconds,
+      userMinimumDwellSeconds: dwell.userMinimumDurationSeconds,
+      status: dwell.status,
+      requiredUserAdjustments,
+    },
   };
+}
+
+function uniqueAdjustments(
+  values: readonly {
+    readonly intentId: string;
+    readonly nodeId: string;
+    readonly fromDurationSeconds: number;
+    readonly toDurationSeconds: number;
+  }[],
+) {
+  return [...new Map(values.map((value) => [value.intentId, value])).values()];
 }
 
 function sameTransferLocation(
@@ -730,7 +805,9 @@ function toPreviewView(
   const expired = preview.expiresAt <= now;
   const blocked =
     (preview.previewPayload.changeSummary.protectedBlockingNodes?.length ?? 0) >
-    0;
+      0 ||
+    preview.previewPayload.changeSummary.downstreamImpact?.status ===
+      'INFEASIBLE';
   const status = superseded
     ? ('SUPERSEDED_POLICY' as const)
     : expired
@@ -749,6 +826,18 @@ function toPreviewView(
 }
 
 function earlier(left: Date, right: Date): Date {
+  return left < right ? left : right;
+}
+
+function laterNullable(left: Date | null, right: Date | null): Date | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return left > right ? left : right;
+}
+
+function earlierNullable(left: Date | null, right: Date | null): Date | null {
+  if (left === null) return right;
+  if (right === null) return left;
   return left < right ? left : right;
 }
 

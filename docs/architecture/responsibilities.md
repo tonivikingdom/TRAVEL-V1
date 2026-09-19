@@ -126,16 +126,30 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   也不把“保护”解释为永远禁止修改。
 - Provider/Booking 如何产生可靠结构化确认属于后续 adapter/use case，不再是产品规则未决项。
 
-## 推荐策略（O-05 产品规则已确认，仅规格）
+## Planning Policy（O-05 产品规则已确认，P5C 基础实现）
 
 - domain/application 不定义跨场景全局体验最低值；只有用户对具体活动明确设置的最低时长才是
   硬约束。
-- RecommendationPolicy 将先过滤违反事实、受保护安排和用户硬约束的候选，再以保护固定内容与
+- domain 的确定性 policy 将系统建议停留与用户 `MIN_DWELL` 分开；projected dwell 始终由
+  `departure - arrival` 得出。系统建议不足是软偏离，用户最低值不足必须要求显式调整。
+- Route Query 可从 planning earliest 向前扩展 15 分钟，但不得突破 ACTUAL、EXACT、NOT_BEFORE、
+  fixed-service 等绝对硬事实。application 将需要压缩用户最低停留的候选标记为需要调整。
+- 内部排序先按最早到达，再在其 effective total time 的 140% 内选同币种最低已知票价；跨币种不比较
+  金额，未知票价不能赢得 value 顺位。排序不向产品界面泄露“最快/最优惠”标签。
+- 更完整的 RecommendationPolicy 仍将先过滤违反事实、受保护安排和用户硬约束的候选，再以保护固定内容与
   最小改动为基线，比较成本、体验、时间、风险和影响范围，并输出解释。
 - 偏好只能影响可行候选之间的排序，不能覆盖事实和硬约束；禁止全局固定权重、永久最便宜/最快
   优先级或为凑数生成候选。
 - application 契约为 1 个主推荐和最多 2 个可靠备选；无可靠解时明确返回没有可确认方案。
-- RecommendationPolicy 与相关 UI 尚未实现，本节不授权 P3/P4 代码。
+- 完整综合 RecommendationPolicy 与正式 UI 尚未实现；P5C 只提供确定性的首版排序和策略基础。
+
+### Buffer policy boundary
+
+- `SYSTEM_SUGGESTED_BUFFER`、`USER_PREFERRED_BUFFER` 与 `SYSTEM_MINIMUM_CONNECTION` 必须分开。
+  前两者是可确认的软偏离；系统最低换乘值来自可靠 Provider/operator/hub 规则，用户接受风险不能
+  删除或降低该值，违反时继续输出执行风险。
+- 国家/场景外部到场默认值由 domain policy 集中维护，只是可调整产品默认。内部换乘禁止套用外部
+  到场默认；缺少可靠结构化规则时保持 unknown。邮轮首次登船必须使用订单/预订窗口或 unknown。
 
 ## 外部预约调整（O-06 产品规则已确认，仅规格）
 

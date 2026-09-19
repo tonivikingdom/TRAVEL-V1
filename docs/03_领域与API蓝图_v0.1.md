@@ -223,7 +223,11 @@ Transport 与日期卡的显示关系依赖实际 timeline/sequence，不能只�
 
 ## 7. Query / Preview / Adopt的事务规则
 
-**Query**：传起終点、最早出发/最晚到达、日期时区、已有方案参考；返回候选与来源/有效期。不得写当前Trip。
+**Query**：传起终点、最早出发/最晚到达、日期时区、已有方案参考；返回候选与来源/有效期。不得写当前Trip。
+P4A1 已实现其中的 provider-neutral 基础：只查询当前相邻 PLACE_VISIT，复用 P3B2 hard requirement
+window，并允许一次性的 DEPART_AT/ARRIVE_BY hint。hint 不持久化且不能放宽 hard window；没有时间依据时
+返回 `ROUTE_QUERY_TIME_REQUIRED`。Provider 结果由 Application 再次校验，越界候选不会作为可行路线
+返回。当前只有明确标记的 SYNTHETIC 开发/测试 adapter，尚无真实 Provider。
 
 **Preview**：以baseTripVersion、用户动作、provider snapshot和policyVersion计算变更。可保存临时候选，但不得修改正式节点/交通/通知。
 

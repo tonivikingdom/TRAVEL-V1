@@ -175,7 +175,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     };
     const response = await query(userA, trip, from!.id, to!.id, null);
     expect(response.statusCode).toBe(404);
-    expect(response.json()).toMatchObject({ code: 'NO_MATCHING_CANDIDATE' });
+    expect(response.json()).toMatchObject({
+      error: { code: 'NO_MATCHING_CANDIDATE' },
+    });
   });
 
   it('rejects missing time, stale version, non-adjacent nodes, and FreeAction endpoints', async () => {
@@ -185,7 +187,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     let response = await query(userA, trip, a!.id, b!.id, null);
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
-      code: 'ROUTE_QUERY_TIME_REQUIRED',
+      error: { code: 'ROUTE_QUERY_TIME_REQUIRED' },
     });
 
     response = await app.inject({
@@ -200,11 +202,15 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       },
     });
     expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({ code: 'VERSION_CONFLICT' });
+    expect(response.json()).toMatchObject({
+      error: { code: 'VERSION_CONFLICT' },
+    });
 
     response = await query(userA, trip, a!.id, c!.id, departHint());
     expect(response.statusCode).toBe(422);
-    expect(response.json()).toMatchObject({ code: 'ROUTE_QUERY_UNSUPPORTED' });
+    expect(response.json()).toMatchObject({
+      error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+    });
 
     trip = await command(userA, trip, {
       type: 'ADD_FREE_ACTION',
@@ -238,7 +244,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         departHint(),
       );
       expect(response.statusCode).toBe(404);
-      expect(response.json()).toMatchObject({ code: 'NOT_FOUND' });
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
     }
     expect(providerInputs).toHaveLength(0);
   });

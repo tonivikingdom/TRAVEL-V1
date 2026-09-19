@@ -6,6 +6,7 @@ import {
   RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
+  RouteUndoService,
   TripService,
   type Actor,
   type RouteProviderQueryInput,
@@ -111,6 +112,11 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         },
       ),
       routeAdoptionService: new RouteAdoptionService(
+        routePlanningRepository,
+        new TripService(repository),
+        { undoWindowSeconds: 600, clock: { now: () => currentNow } },
+      ),
+      routeUndoService: new RouteUndoService(
         routePlanningRepository,
         new TripService(repository),
         { now: () => currentNow },
@@ -833,6 +839,877 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     ).toBe(3);
   });
 
+  it('undoes an adoption as a new versioned transaction and replays one receipt', async () => {
+    let trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    trip = await command(userA, trip, {
+      type: 'SET_MANUAL_TRANSPORT',
+      fromNodeId: from!.id,
+      toNodeId: to!.id,
+      mode: 'TAXI',
+      fixedService: false,
+      serviceLabel: 'SYNTHETIC pre-adoption taxi',
+    });
+    const oldEdge = await managed.client.transportEdge.findFirstOrThrow({
+      where: { tripId: trip.id },
+    });
+    await managed.client.temporalValue.create({
+      data: {
+        transportEdgeId: oldEdge.id,
+        layer: 'PLANNED',
+        pointKind: 'DEPARTURE',
+        instant: new Date('2030-10-01T09:30:00Z'),
+        timeZone: 'UTC',
+        sourceKind: 'USER_VALUE',
+      },
+    });
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-undo-adopt-01',
+    );
+    const adoptReceipt =
+      await managed.client.operationReceipt.findUniqueOrThrow({
+        where: { id: adopted.operationReceipt.id },
+      });
+    expect(adoptReceipt).toMatchObject({
+      operationType: 'ROUTE_ADOPT',
+      targetOperationReceiptId: null,
+      undoExpiresAt: new Date(NOW.getTime() + 600_000),
+      delta: expect.objectContaining({ schemaVersion: 'route-adopt-delta-v2' }),
+    });
+
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adoptReceipt.id,
+      'synthetic-undo-request-01',
+    );
+    expect(undone.trip.version).toBe(adopted.trip.version + 1);
+    expect(undone.trip.connections[0]).toMatchObject({
+      state: 'ACTIVE',
+      transport: {
+        id: oldEdge.id,
+        source: 'MANUAL',
+        serviceLabel: 'SYNTHETIC pre-adoption taxi',
+      },
+    });
+    expect(undone.operationReceipt).toMatchObject({
+      operationType: 'ROUTE_UNDO',
+      targetOperationReceiptId: adoptReceipt.id,
+      baseTripVersion: adopted.trip.version,
+      resultingTripVersion: adopted.trip.version + 1,
+      delta: expect.objectContaining({ schemaVersion: 'route-undo-delta-v1' }),
+    });
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: adopted.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'UNDONE', undoneAt: currentNow });
+    expect(
+      await managed.client.temporalValue.findMany({
+        where: { transportEdgeId: oldEdge.id },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        layer: 'PLANNED',
+        pointKind: 'DEPARTURE',
+        sourceKind: 'USER_VALUE',
+      }),
+    ]);
+    expect(
+      await managed.client.transportEdgeHistory.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.operationReceipt.findMany({
+        where: { tripId: trip.id },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ).toHaveLength(2);
+    expect(
+      await managed.client.outboxEvent.findMany({
+        where: { tripId: trip.id },
+        orderBy: { type: 'asc' },
+      }),
+    ).toEqual([
+      expect.objectContaining({ type: 'ROUTE_ADOPTED' }),
+      expect.objectContaining({ type: 'ROUTE_UNDONE' }),
+    ]);
+
+    const replay = await undo(
+      userA,
+      adopted.trip,
+      adoptReceipt.id,
+      'synthetic-undo-request-01',
+    );
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({
+      operationReceipt: { id: undone.operationReceipt.id },
+      trip: { version: adopted.trip.version + 1 },
+    });
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: trip.id, operationType: 'ROUTE_UNDO' },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.outboxEvent.count({
+        where: { tripId: trip.id, type: 'ROUTE_UNDONE' },
+      }),
+    ).toBe(1);
+  });
+
+  it('restores a missing connection and rejects reuse of an Undo idempotency key', async () => {
+    const trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-empty-adopt',
+    );
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      'synthetic-empty-undo',
+    );
+    expect(undone.trip.connections[0]).toMatchObject({
+      state: 'MISSING',
+      transport: null,
+    });
+
+    const conflict = await undo(
+      userA,
+      { ...adopted.trip, version: adopted.trip.version + 1 },
+      adopted.operationReceipt.id,
+      'synthetic-empty-undo',
+    );
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({
+      error: { code: 'IDEMPOTENCY_CONFLICT' },
+    });
+  });
+
+  it('undoes single-to-single and single-to-multi replacements with one active route', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-undo-lifecycle-1',
+    );
+    const originalEdgeId = first.trip.connections[0]!.transport!.id;
+
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [replacementSingleCandidate('undo-lifecycle-2')],
+    };
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-undo-lifecycle-2',
+    );
+    const staleFirstUndo = await undo(
+      userA,
+      second.trip,
+      first.operationReceipt.id,
+      'synthetic-undo-stale-first',
+    );
+    expect(staleFirstUndo.statusCode).toBe(409);
+    expect(staleFirstUndo.json()).toMatchObject({
+      error: { code: 'UNDO_CONFLICT' },
+    });
+    const restoredSingle = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-undo-lifecycle-2-request',
+    );
+    expect(restoredSingle.trip.connections[0]!.transport!.id).toBe(
+      originalEdgeId,
+    );
+    expect(
+      await managed.client.adoptedRoute.findMany({
+        where: { tripId: initial.id },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: first.operationReceipt.adoptedRouteId,
+        status: 'ACTIVE',
+        replacedAt: null,
+      }),
+      expect.objectContaining({
+        id: second.operationReceipt.adoptedRouteId,
+        status: 'UNDONE',
+      }),
+    ]);
+
+    providerResult = transferCandidate();
+    const multiPreview = await createPreview(
+      userA,
+      restoredSingle.trip,
+      from!.id,
+      to!.id,
+    );
+    const multi = await adoptSuccessfully(
+      userA,
+      restoredSingle.trip,
+      multiPreview.previewId,
+      'synthetic-undo-lifecycle-3',
+    );
+    const generated = multi.trip.days
+      .flatMap((day) => day.nodes)
+      .find((node) => node.source === 'ROUTE_GENERATED')!;
+    const generatedPlaceId = generated.place!.id;
+    const restoredAgain = await undoSuccessfully(
+      userA,
+      multi.trip,
+      multi.operationReceipt.id,
+      'synthetic-undo-lifecycle-3-request',
+    );
+    expect(
+      restoredAgain.trip.days
+        .flatMap((day) => day.nodes)
+        .some((node) => node.id === generated.id),
+    ).toBe(false);
+    expect(
+      await managed.client.place.findUnique({
+        where: { id: generatedPlaceId },
+      }),
+    ).toBeNull();
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: initial.id, status: 'ACTIVE' },
+      }),
+    ).toBe(1);
+  });
+
+  it('restores a multi-leg corridor with original generated identity after single-leg replacement', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    providerResult = transferCandidate();
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-undo-multi-1',
+    );
+    const generatedBefore = await managed.client.itineraryNode.findFirstOrThrow(
+      {
+        where: { tripId: initial.id, source: 'ROUTE_GENERATED' },
+      },
+    );
+
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [replacementSingleCandidate('undo-multi-2')],
+    };
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-undo-multi-2',
+    );
+    expect(
+      await managed.client.itineraryNode.findUnique({
+        where: { id: generatedBefore.id },
+      }),
+    ).toBeNull();
+
+    const undone = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-undo-multi-2-request',
+    );
+    const generatedAfter = await managed.client.itineraryNode.findUniqueOrThrow(
+      {
+        where: { id: generatedBefore.id },
+      },
+    );
+    expect(generatedAfter).toMatchObject({
+      id: generatedBefore.id,
+      dayOccurrenceId: generatedBefore.dayOccurrenceId,
+      position: generatedBefore.position,
+      adoptedRouteId: first.operationReceipt.adoptedRouteId,
+      sourceOperationId: generatedBefore.sourceOperationId,
+      providerPlaceRef: generatedBefore.providerPlaceRef,
+    });
+    expect(undone.trip.connections).toHaveLength(2);
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: first.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'ACTIVE', replacedAt: null });
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: second.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'UNDONE' });
+  });
+
+  it('restores a reused generated node route identity after another multi-leg adoption', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    providerResult = transferCandidate();
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-undo-reuse-1',
+    );
+    const generatedBefore = await managed.client.itineraryNode.findFirstOrThrow(
+      {
+        where: { tripId: initial.id, source: 'ROUTE_GENERATED' },
+      },
+    );
+
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    expect(secondPreview.changeSummary.nodesToReuse).toEqual([
+      expect.objectContaining({ nodeId: generatedBefore.id, action: 'REUSE' }),
+    ]);
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-undo-reuse-2',
+    );
+    expect(
+      await managed.client.itineraryNode.findUniqueOrThrow({
+        where: { id: generatedBefore.id },
+      }),
+    ).toMatchObject({
+      adoptedRouteId: second.operationReceipt.adoptedRouteId,
+      sourceOperationId: second.operationReceipt.id,
+    });
+
+    await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-undo-reuse-request',
+    );
+    expect(
+      await managed.client.itineraryNode.findUniqueOrThrow({
+        where: { id: generatedBefore.id },
+      }),
+    ).toMatchObject({
+      id: generatedBefore.id,
+      dayOccurrenceId: generatedBefore.dayOccurrenceId,
+      position: generatedBefore.position,
+      adoptedRouteId: generatedBefore.adoptedRouteId,
+      sourceOperationId: generatedBefore.sourceOperationId,
+      providerPlaceRef: generatedBefore.providerPlaceRef,
+    });
+  });
+
+  it('restores repeated-date occurrence sequence, ownership, and effective range exactly', async () => {
+    let trip = await createTrip(userA);
+    trip = await addVisit(userA, trip, 'First occurrence', '2030-10-01');
+    trip = await command(userA, trip, {
+      type: 'ADD_PLACE_VISIT',
+      targetDay: { type: 'NEW', localDate: '2030-10-01', sequence: 1 },
+      position: 0,
+      place: {
+        type: 'CUSTOM',
+        name: 'Repeated occurrence',
+        latitude: 34.0522,
+        longitude: -118.2437,
+      },
+    });
+    const beforeDays = trip.days.map((day) => ({
+      id: day.dayOccurrenceId,
+      localDate: day.localDate,
+      sequence: day.sequence,
+    }));
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    providerResult = dateRollbackTransferCandidate();
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-undo-occurrence-adopt',
+    );
+    expect(adopted.trip.days.map((day) => day.localDate)).toEqual([
+      '2030-10-01',
+      '2030-10-02',
+      '2030-10-01',
+    ]);
+    expect(
+      await managed.client.dateOwnership.findMany({
+        where: { tripId: trip.id },
+      }),
+    ).toHaveLength(2);
+
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      'synthetic-undo-occurrence-request',
+    );
+    expect(
+      undone.trip.days.map((day) => ({
+        id: day.dayOccurrenceId,
+        localDate: day.localDate,
+        sequence: day.sequence,
+      })),
+    ).toEqual(beforeDays);
+    expect(
+      await managed.client.dateOwnership.findMany({
+        where: { tripId: trip.id },
+      }),
+    ).toEqual([
+      expect.objectContaining({ localDate: new Date('2030-10-01T00:00:00Z') }),
+    ]);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({
+      effectiveStartDate: new Date('2030-10-01T00:00:00Z'),
+      effectiveEndDate: new Date('2030-10-01T00:00:00Z'),
+    });
+  });
+
+  it('protects target-created generated nodes with ACTUAL or new user content', async () => {
+    const actualTrip = await tripWithVisits(userA, [
+      'Actual From',
+      'Actual To',
+    ]);
+    const [actualFrom, actualTo] = actualTrip.days[0]!.nodes;
+    providerResult = transferCandidate();
+    const actualPreview = await createPreview(
+      userA,
+      actualTrip,
+      actualFrom!.id,
+      actualTo!.id,
+    );
+    const actualAdopt = await adoptSuccessfully(
+      userA,
+      actualTrip,
+      actualPreview.previewId,
+      'synthetic-node-actual-adopt',
+    );
+    const actualNode = await managed.client.itineraryNode.findFirstOrThrow({
+      where: { tripId: actualTrip.id, source: 'ROUTE_GENERATED' },
+    });
+    await managed.client.temporalValue.create({
+      data: {
+        nodeId: actualNode.id,
+        layer: 'ACTUAL',
+        pointKind: 'ARRIVAL',
+        instant: new Date('2030-10-01T10:30:00Z'),
+        timeZone: 'UTC',
+        sourceKind: 'PROVIDER_OBSERVATION',
+      },
+    });
+    const actualRejected = await undo(
+      userA,
+      actualAdopt.trip,
+      actualAdopt.operationReceipt.id,
+      'synthetic-node-actual-undo',
+    );
+    expect(actualRejected.statusCode).toBe(409);
+    expect(actualRejected.json()).toMatchObject({
+      error: { code: 'UNDO_CONFLICT' },
+    });
+    expect(
+      await managed.client.itineraryNode.findUnique({
+        where: { id: actualNode.id },
+      }),
+    ).not.toBeNull();
+
+    const noteTrip = await tripWithVisits(userB, ['Note From', 'Note To']);
+    const [noteFrom, noteTo] = noteTrip.days[0]!.nodes;
+    const notePreview = await createPreview(
+      userB,
+      noteTrip,
+      noteFrom!.id,
+      noteTo!.id,
+    );
+    const noteAdopt = await adoptSuccessfully(
+      userB,
+      noteTrip,
+      notePreview.previewId,
+      'synthetic-node-note-adopt',
+    );
+    const noteNode = await managed.client.itineraryNode.findFirstOrThrow({
+      where: { tripId: noteTrip.id, source: 'ROUTE_GENERATED' },
+    });
+    await managed.client.itineraryNode.update({
+      where: { id: noteNode.id },
+      data: { note: 'User-kept fact', userModifiedAt: currentNow },
+    });
+    const noteRejected = await undo(
+      userB,
+      noteAdopt.trip,
+      noteAdopt.operationReceipt.id,
+      'synthetic-node-note-undo',
+    );
+    expect(noteRejected.statusCode).toBe(409);
+    expect(noteRejected.json()).toMatchObject({
+      error: { code: 'UNDO_CONFLICT' },
+    });
+    expect(
+      await managed.client.itineraryNode.findUniqueOrThrow({
+        where: { id: noteNode.id },
+      }),
+    ).toMatchObject({ note: 'User-kept fact' });
+  });
+
+  it('rejects unsafe, expired, legacy, and post-version Undo attempts without partial changes', async () => {
+    const actualTrip = await tripWithVisits(userA, [
+      'Actual From',
+      'Actual To',
+    ]);
+    const [actualFrom, actualTo] = actualTrip.days[0]!.nodes;
+    const actualPreview = await createPreview(
+      userA,
+      actualTrip,
+      actualFrom!.id,
+      actualTo!.id,
+    );
+    const actualAdopt = await adoptSuccessfully(
+      userA,
+      actualTrip,
+      actualPreview.previewId,
+      'synthetic-unsafe-adopt',
+    );
+    const activeEdge = await managed.client.transportEdge.findFirstOrThrow({
+      where: { tripId: actualTrip.id },
+    });
+    await managed.client.temporalValue.create({
+      data: {
+        transportEdgeId: activeEdge.id,
+        layer: 'ACTUAL',
+        pointKind: 'DEPARTURE',
+        instant: new Date('2030-10-01T10:01:00Z'),
+        timeZone: 'UTC',
+        sourceKind: 'PROVIDER_OBSERVATION',
+      },
+    });
+    const actualRejected = await undo(
+      userA,
+      actualAdopt.trip,
+      actualAdopt.operationReceipt.id,
+      'synthetic-unsafe-undo',
+    );
+    expect(actualRejected.statusCode).toBe(409);
+    expect(actualRejected.json()).toMatchObject({
+      error: { code: 'UNDO_CONFLICT' },
+    });
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: actualAdopt.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'ACTIVE' });
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: actualTrip.id, operationType: 'ROUTE_UNDO' },
+      }),
+    ).toBe(0);
+
+    const expiredTrip = await tripWithVisitsOnDate(
+      userA,
+      ['Expired From', 'Expired To'],
+      '2030-10-02',
+    );
+    const [expiredFrom, expiredTo] = expiredTrip.days[0]!.nodes;
+    const expiredPreview = await createPreview(
+      userA,
+      expiredTrip,
+      expiredFrom!.id,
+      expiredTo!.id,
+    );
+    const expiredAdopt = await adoptSuccessfully(
+      userA,
+      expiredTrip,
+      expiredPreview.previewId,
+      'synthetic-expired-adopt',
+    );
+    currentNow = new Date(NOW.getTime() + 600_000);
+    const expired = await undo(
+      userA,
+      expiredAdopt.trip,
+      expiredAdopt.operationReceipt.id,
+      'synthetic-expired-undo',
+    );
+    expect(expired.statusCode).toBe(409);
+    expect(expired.json()).toMatchObject({ error: { code: 'UNDO_EXPIRED' } });
+
+    currentNow = NOW;
+    const legacyTrip = await tripWithVisitsOnDate(
+      userA,
+      ['Legacy From', 'Legacy To'],
+      '2030-10-03',
+    );
+    const [legacyFrom, legacyTo] = legacyTrip.days[0]!.nodes;
+    const legacyPreview = await createPreview(
+      userA,
+      legacyTrip,
+      legacyFrom!.id,
+      legacyTo!.id,
+    );
+    const legacyAdopt = await adoptSuccessfully(
+      userA,
+      legacyTrip,
+      legacyPreview.previewId,
+      'synthetic-legacy-adopt',
+    );
+    await managed.client.operationReceipt.update({
+      where: { id: legacyAdopt.operationReceipt.id },
+      data: { undoExpiresAt: null },
+    });
+    const legacy = await undo(
+      userA,
+      legacyAdopt.trip,
+      legacyAdopt.operationReceipt.id,
+      'synthetic-legacy-undo',
+    );
+    expect(legacy.statusCode).toBe(409);
+    expect(legacy.json()).toMatchObject({
+      error: { code: 'UNDO_UNAVAILABLE' },
+    });
+
+    const changedTrip = await tripWithVisitsOnDate(
+      userA,
+      ['Changed From', 'Changed To'],
+      '2030-10-04',
+    );
+    const [changedFrom, changedTo] = changedTrip.days[0]!.nodes;
+    const changedPreview = await createPreview(
+      userA,
+      changedTrip,
+      changedFrom!.id,
+      changedTo!.id,
+    );
+    const changedAdopt = await adoptSuccessfully(
+      userA,
+      changedTrip,
+      changedPreview.previewId,
+      'synthetic-changed-adopt',
+    );
+    await managed.client.trip.update({
+      where: { id: changedTrip.id },
+      data: { version: { increment: 1 } },
+    });
+    const changed = await undo(
+      userA,
+      changedAdopt.trip,
+      changedAdopt.operationReceipt.id,
+      'synthetic-changed-undo',
+    );
+    expect(changed.statusCode).toBe(409);
+    expect(changed.json()).toMatchObject({
+      error: { code: 'UNDO_CONFLICT' },
+    });
+  });
+
+  it('serializes concurrent Undo and rolls back when a prior owned date is no longer available', async () => {
+    const initial = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = initial.days[0]!.nodes;
+    const preview = await createPreview(userA, initial, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      initial,
+      preview.previewId,
+      'synthetic-concurrent-undo-adopt',
+    );
+    const concurrent = await Promise.all([
+      undo(
+        userA,
+        adopted.trip,
+        adopted.operationReceipt.id,
+        'synthetic-concurrent-undo-a',
+      ),
+      undo(
+        userA,
+        adopted.trip,
+        adopted.operationReceipt.id,
+        'synthetic-concurrent-undo-b',
+      ),
+    ]);
+    expect(concurrent.map((response) => response.statusCode).sort()).toEqual([
+      200, 409,
+    ]);
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: initial.id, operationType: 'ROUTE_UNDO' },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.outboxEvent.count({
+        where: { tripId: initial.id, type: 'ROUTE_UNDONE' },
+      }),
+    ).toBe(1);
+
+    const conflictTrip = await tripWithVisitsOnDate(
+      userA,
+      ['Conflict From', 'Conflict To'],
+      '2030-10-02',
+    );
+    const [conflictFrom, conflictTo] = conflictTrip.days[0]!.nodes;
+    const conflictPreview = await createPreview(
+      userA,
+      conflictTrip,
+      conflictFrom!.id,
+      conflictTo!.id,
+    );
+    const conflictAdopt = await adoptSuccessfully(
+      userA,
+      conflictTrip,
+      conflictPreview.previewId,
+      'synthetic-date-conflict-adopt',
+    );
+    const otherTrip = await createTrip(userA);
+    await managed.client.dateOwnership.deleteMany({
+      where: { tripId: conflictTrip.id },
+    });
+    await managed.client.dateOwnership.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: otherTrip.id,
+        localDate: new Date('2030-10-02T00:00:00.000Z'),
+      },
+    });
+    const routeBefore = await managed.client.adoptedRoute.findUniqueOrThrow({
+      where: { id: conflictAdopt.operationReceipt.adoptedRouteId },
+    });
+    const edgeBefore = await managed.client.transportEdge.findMany({
+      where: { tripId: conflictTrip.id },
+    });
+    const conflict = await undo(
+      userA,
+      conflictAdopt.trip,
+      conflictAdopt.operationReceipt.id,
+      'synthetic-date-conflict-undo',
+    );
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({
+      error: { code: 'UNDO_CONFLICT' },
+    });
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: conflictAdopt.operationReceipt.adoptedRouteId },
+      }),
+    ).toEqual(routeBefore);
+    expect(
+      await managed.client.transportEdge.findMany({
+        where: { tripId: conflictTrip.id },
+      }),
+    ).toEqual(edgeBefore);
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: conflictTrip.id, operationType: 'ROUTE_UNDO' },
+      }),
+    ).toBe(0);
+  });
+
+  it('rolls back prior route replacement when a later adoption fails after lifecycle transition', async () => {
+    let initial = await createTrip(userA);
+    initial = await addVisit(userA, initial, 'First occurrence', '2030-10-01');
+    initial = await command(userA, initial, {
+      type: 'ADD_PLACE_VISIT',
+      targetDay: { type: 'NEW', localDate: '2030-10-01', sequence: 1 },
+      position: 0,
+      place: {
+        type: 'CUSTOM',
+        name: 'Repeated occurrence',
+        latitude: 34.0522,
+        longitude: -118.2437,
+      },
+    });
+    const [from, to] = initial.days.flatMap((day) => day.nodes);
+    const firstPreview = await createPreview(userA, initial, from!.id, to!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-adopt-rollback-1',
+    );
+
+    let otherTrip = await createTrip(userA);
+    otherTrip = await addVisit(
+      userA,
+      otherTrip,
+      'Ownership blocker',
+      '2030-10-02',
+    );
+    expect(otherTrip.days[0]!.localDate).toBe('2030-10-02');
+    providerResult = dateRollbackTransferCandidate();
+    const secondPreview = await createPreview(
+      userA,
+      first.trip,
+      from!.id,
+      to!.id,
+    );
+    const rejected = await adopt(
+      userA,
+      first.trip,
+      secondPreview.previewId,
+      'synthetic-adopt-rollback-2',
+    );
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json()).toMatchObject({ error: { code: 'DATE_OWNED' } });
+    expect(
+      await managed.client.adoptedRoute.findMany({
+        where: { tripId: initial.id },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: first.operationReceipt.adoptedRouteId,
+        status: 'ACTIVE',
+        replacedAt: null,
+      }),
+    ]);
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: initial.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.outboxEvent.count({ where: { tripId: initial.id } }),
+    ).toBe(1);
+    expect(
+      await managed.client.itineraryNode.count({
+        where: { tripId: initial.id, source: 'ROUTE_GENERATED' },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({
+        where: { id: initial.id },
+      }),
+    ).toMatchObject({ version: first.trip.version });
+  });
+
   it('allows only one concurrent adoption for two previews at the same Trip version', async () => {
     const trip = await tripWithVisits(userA, ['From', 'To']);
     const [from, to] = trip.days[0]!.nodes;
@@ -1019,9 +1896,17 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     identity: SyntheticIdentity,
     names: readonly string[],
   ): Promise<TripView> {
+    return tripWithVisitsOnDate(identity, names, '2030-10-01');
+  }
+
+  async function tripWithVisitsOnDate(
+    identity: SyntheticIdentity,
+    names: readonly string[],
+    localDate: string,
+  ): Promise<TripView> {
     let trip = await createTrip(identity);
     for (const name of names)
-      trip = await addVisit(identity, trip, name, '2030-10-01');
+      trip = await addVisit(identity, trip, name, localDate);
     return trip;
   }
 
@@ -1150,6 +2035,59 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         id: string;
         adoptedRouteId: string;
         resultingTripVersion: number;
+      };
+      trip: TripView;
+    };
+  }
+
+  function undo(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    operationReceiptId: string,
+    idempotencyKey: string,
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/operations/${operationReceiptId}/undo`,
+      headers: bearer(identity),
+      payload: {
+        baseTripVersion: trip.version,
+        idempotencyKey,
+      },
+    });
+  }
+
+  async function undoSuccessfully(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    operationReceiptId: string,
+    idempotencyKey: string,
+  ): Promise<{
+    operationReceipt: {
+      id: string;
+      operationType: 'ROUTE_UNDO';
+      targetOperationReceiptId: string;
+      baseTripVersion: number;
+      resultingTripVersion: number;
+      delta: Record<string, unknown>;
+    };
+    trip: TripView;
+  }> {
+    const response = await undo(
+      identity,
+      trip,
+      operationReceiptId,
+      idempotencyKey,
+    );
+    expect(response.statusCode).toBe(200);
+    return response.json() as {
+      operationReceipt: {
+        id: string;
+        operationType: 'ROUTE_UNDO';
+        targetOperationReceiptId: string;
+        baseTripVersion: number;
+        resultingTripVersion: number;
+        delta: Record<string, unknown>;
       };
       trip: TripView;
     };
@@ -1319,6 +2257,45 @@ function transferCandidate(): Extract<
           },
         ],
         fare: null,
+      },
+    ],
+  };
+}
+
+function dateRollbackTransferCandidate(): Extract<
+  RouteProviderResult,
+  { status: 'SUCCESS' }
+> {
+  const result = transferCandidate();
+  const candidate = result.candidates[0]!;
+  const first = candidate.legs[0]!;
+  const second = candidate.legs[1]!;
+  const departure = new Date('2030-10-01T23:30:00Z');
+  const transferAt = new Date('2030-10-02T00:10:00Z');
+  const arrival = new Date('2030-10-02T01:00:00Z');
+  return {
+    status: 'SUCCESS',
+    candidates: [
+      {
+        ...candidate,
+        candidateId: 'candidate-date-rollback-transfer',
+        departure: { instant: departure, timeZone: 'UTC' },
+        arrival: { instant: arrival, timeZone: 'UTC' },
+        durationSeconds: 5_400,
+        legs: [
+          {
+            ...first,
+            departure: { instant: departure, timeZone: 'UTC' },
+            arrival: { instant: transferAt, timeZone: 'UTC' },
+            durationSeconds: 2_400,
+          },
+          {
+            ...second,
+            departure: { instant: transferAt, timeZone: 'UTC' },
+            arrival: { instant: arrival, timeZone: 'UTC' },
+            durationSeconds: 3_000,
+          },
+        ],
       },
     ],
   };

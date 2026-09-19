@@ -251,6 +251,137 @@ describe('TripService', () => {
     },
   );
 
+  it('validates and persists a POINT_TIME intent separately from TemporalValue', async () => {
+    let received: RepositoryTripCommand | undefined;
+    vi.mocked(repository.executeCommand).mockImplementation(async (input) => {
+      received = input.command;
+      return { status: 'SUCCESS', trip: emptyTripForId() };
+    });
+    await service.executeCommand(actor, tripId, 1, {
+      type: 'SET_TIME_INTENT',
+      nodeId: randomUUID(),
+      pointKind: 'ARRIVAL',
+      operator: 'NOT_AFTER',
+      instant: '2030-10-01T20:00:00+08:00',
+      timeZone: 'Asia/Shanghai',
+      locked: true,
+    });
+    expect(received).toMatchObject({
+      type: 'SET_TIME_INTENT',
+      operator: 'NOT_AFTER',
+      instant: new Date('2030-10-01T12:00:00.000Z'),
+      locked: true,
+    });
+    expect(repository.setTemporalValue).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unresolved time intent before persistence', async () => {
+    await expect(
+      service.executeCommand(actor, tripId, 1, {
+        type: 'SET_TIME_INTENT',
+        nodeId: randomUUID(),
+        pointKind: 'ARRIVAL',
+        operator: 'EXACT',
+        instant: '2030-10-01T20:00:00',
+        timeZone: 'Asia/Shanghai',
+        locked: false,
+      }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_SCENARIO' });
+    expect(repository.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('validates a positive minimum dwell and lock metadata', async () => {
+    vi.mocked(repository.executeCommand).mockResolvedValue({
+      status: 'SUCCESS',
+      trip: emptyTripForId(),
+    });
+    await service.executeCommand(actor, tripId, 1, {
+      type: 'SET_MIN_DWELL',
+      nodeId: randomUUID(),
+      durationSeconds: 2_400,
+      locked: false,
+    });
+    await expect(
+      service.executeCommand(actor, tripId, 1, {
+        type: 'SET_MIN_DWELL',
+        nodeId: randomUUID(),
+        durationSeconds: 0,
+        locked: false,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('evaluates a basis version read-only and keeps all time layers visible', async () => {
+    const occurrenceId = randomUUID();
+    const node = placeVisit(occurrenceId, 0, 'SYNTHETIC evaluation');
+    const now = new Date('2030-01-01T00:00:00.000Z');
+    const trip = {
+      ...emptyTripForId(),
+      version: 4,
+      effectiveStartDate: utcDate('2030-10-01'),
+      effectiveEndDate: utcDate('2030-10-01'),
+      ownedDates: [utcDate('2030-10-01')],
+      dayOccurrences: [
+        dayOccurrence('2030-10-01', 0, occurrenceId, [
+          {
+            ...node,
+            timeValues: [
+              temporalValue('planned', 'PLANNED', '10:00'),
+              temporalValue('estimated', 'ESTIMATED', '10:10'),
+            ],
+            timeIntents: [
+              {
+                id: randomUUID(),
+                tripId,
+                nodeId: node.id,
+                kind: 'POINT_TIME' as const,
+                pointKind: 'ARRIVAL' as const,
+                operator: 'NOT_AFTER' as const,
+                instant: new Date('2030-10-01T10:05:00.000Z'),
+                timeZone: 'UTC',
+                durationSeconds: null,
+                locked: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    vi.mocked(repository.findOwnedById).mockResolvedValue(trip);
+
+    const projection = await service.evaluateSchedule(actor, tripId, 4);
+    expect(projection).toMatchObject({
+      tripId,
+      basisVersion: 4,
+      nodes: [
+        {
+          status: 'VIOLATED',
+          arrival: {
+            planned: { id: 'planned' },
+            estimated: { id: 'estimated' },
+            effective: { value: { id: 'estimated', layer: 'ESTIMATED' } },
+          },
+        },
+      ],
+    });
+    expect(repository.executeCommand).not.toHaveBeenCalled();
+    expect(repository.setTemporalValue).not.toHaveBeenCalled();
+  });
+
+  it('rejects schedule evaluation against a stale basis version', async () => {
+    vi.mocked(repository.findOwnedById).mockResolvedValue({
+      ...emptyTripForId(),
+      version: 2,
+    });
+    await expect(
+      service.evaluateSchedule(actor, tripId, 1),
+    ).rejects.toMatchObject({
+      code: 'VERSION_CONFLICT',
+    });
+  });
+
   it('uses the same strict parser for observedAt', async () => {
     await expect(
       service.setResolvedTemporalValue(
@@ -452,6 +583,7 @@ function freeAction(dayOccurrenceId: string, position: number) {
     createdAt: timestamp,
     updatedAt: timestamp,
     timeValues: [],
+    timeIntents: [],
   };
 }
 
@@ -477,6 +609,7 @@ function placeVisit(dayOccurrenceId: string, position: number, name: string) {
     createdAt: timestamp,
     updatedAt: timestamp,
     timeValues: [],
+    timeIntents: [],
   };
 }
 
@@ -495,6 +628,26 @@ function manualTransport(fromNodeId: string, toNodeId: string) {
     createdAt: timestamp,
     updatedAt: timestamp,
     timeValues: [],
+  };
+}
+
+function temporalValue(
+  id: string,
+  layer: 'PLANNED' | 'ESTIMATED' | 'ACTUAL',
+  time: string,
+) {
+  const now = new Date('2030-01-01T00:00:00.000Z');
+  return {
+    id,
+    layer,
+    pointKind: 'ARRIVAL' as const,
+    instant: new Date(`2030-10-01T${time}:00.000Z`),
+    timeZone: 'UTC',
+    sourceKind: 'USER_VALUE' as const,
+    sourceRef: null,
+    observedAt: null,
+    createdAt: now,
+    updatedAt: now,
   };
 }
 

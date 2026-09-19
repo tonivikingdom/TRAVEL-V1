@@ -64,6 +64,8 @@ export interface RouteQueryTimeConditionView {
 }
 
 export interface RouteCandidateView {
+  readonly candidateSnapshotId: string;
+  readonly snapshotExpiresAt: string;
   readonly candidateId: string;
   readonly provider: string;
   readonly providerCandidateRef: string | null;
@@ -87,4 +89,59 @@ export interface RouteQueryResponse {
   readonly toNodeId: string;
   readonly timeCondition: RouteQueryTimeConditionView;
   readonly candidates: readonly RouteCandidateView[];
+}
+
+export interface CreateRoutePreviewRequest {
+  readonly basisVersion: number;
+  readonly candidateSnapshotId: string;
+}
+
+export interface RoutePreviewLocationView extends RouteLocationView {
+  readonly ref: string;
+}
+
+export interface RoutePreviewSegmentView {
+  readonly fromRef: string;
+  readonly toRef: string;
+  readonly mode: TransportMode;
+  readonly fixedService: boolean;
+  readonly serviceLabel: string | null;
+  readonly providerRef: string | null;
+  readonly departure: RouteTimePointView | null;
+  readonly arrival: RouteTimePointView | null;
+  readonly durationSeconds: number | null;
+}
+
+export interface RoutePreviewView {
+  readonly previewId: string;
+  readonly tripId: string;
+  readonly basisVersion: number;
+  readonly candidateSnapshotId: string;
+  readonly candidateHash: string;
+  readonly policyVersion: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly adoptable: boolean;
+  readonly status: 'ACTIVE' | 'EXPIRED';
+  readonly currentConnection: {
+    readonly fromNodeId: string;
+    readonly toNodeId: string;
+    readonly state: 'ACTIVE' | 'MISSING';
+    readonly transport: {
+      readonly id: string;
+      readonly mode: TransportMode;
+      readonly fixedService: boolean;
+      readonly serviceLabel: string | null;
+    } | null;
+  };
+  readonly candidate: RouteCandidateView;
+  readonly changeSummary: {
+    readonly transportAction: 'CREATE' | 'REPLACE';
+    readonly willReplaceTransportEdgeId: string | null;
+    readonly requiresGeneratedNodes: boolean;
+    readonly generatedTransferPoints: readonly RoutePreviewLocationView[];
+    readonly proposedSegments: readonly RoutePreviewSegmentView[];
+    readonly temporalLayer: 'PLANNED';
+    readonly temporalSourceKind: 'ADOPTED_TRANSPORT_FACT';
+  };
 }

@@ -2,6 +2,7 @@ import {
   ApplicationError,
   AuthService,
   NotificationService,
+  RoutePreviewService,
   RouteQueryService,
   TripService,
   isApplicationError,
@@ -29,6 +30,7 @@ export interface ApiDependencies {
   readonly authService?: AuthService;
   readonly notificationService?: NotificationService;
   readonly routeQueryService?: RouteQueryService;
+  readonly routePreviewService?: RoutePreviewService;
   readonly tripService?: TripService;
   readonly credentialTransport?: CredentialTransport;
 }
@@ -132,6 +134,41 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       return requireNotificationService(dependencies).dismissNotification(
         authenticated.actor,
         request.params.id,
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/previews',
+    async (request, reply) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      const preview = await requireRoutePreviewService(
+        dependencies,
+      ).createPreview(authenticated.actor, request.params.id, {
+        basisVersion: requiredNumber(body, 'basisVersion'),
+        candidateSnapshotId: requiredString(body, 'candidateSnapshotId'),
+      });
+      return reply.code(201).send(preview);
+    },
+  );
+
+  app.get<{ Params: { id: string; previewId: string } }>(
+    '/trips/:id/previews/:previewId',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireRoutePreviewService(dependencies).getPreview(
+        authenticated.actor,
+        request.params.id,
+        request.params.previewId,
       );
     },
   );
@@ -400,6 +437,20 @@ function requireRouteQueryService(
     );
   }
   return dependencies.routeQueryService;
+}
+
+function requireRoutePreviewService(
+  dependencies: ApiDependencies,
+): RoutePreviewService {
+  if (dependencies.routePreviewService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '路线预览服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.routePreviewService;
 }
 
 function requiredBodyString(body: unknown, key: string): string {

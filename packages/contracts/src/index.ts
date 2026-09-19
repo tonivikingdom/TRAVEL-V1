@@ -22,6 +22,7 @@ export type {
   NotificationView,
 } from './notifications.js';
 export type {
+  CreateRoutePreviewRequest,
   RouteCandidateLegView,
   RouteCandidateView,
   RouteFareView,
@@ -30,6 +31,9 @@ export type {
   RouteQueryRequest,
   RouteQueryResponse,
   RouteQueryTimeConditionView,
+  RoutePreviewLocationView,
+  RoutePreviewSegmentView,
+  RoutePreviewView,
   RouteTimePointView,
 } from './routes.js';
 export type {

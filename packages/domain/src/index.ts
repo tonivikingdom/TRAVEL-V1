@@ -26,3 +26,16 @@ export {
   type ScheduleTemporalValue,
   type ScheduleUserTimeIntent,
 } from './schedule-evaluator.js';
+export {
+  propagateScheduleBounds,
+  type ScheduleBoundBasis,
+  type ScheduleNodePropagation,
+  type SchedulePropagationConflict,
+  type SchedulePropagationInput,
+  type SchedulePropagationResult,
+  type SchedulePropagationRuleId,
+  type SchedulePropagationTransportAnchor,
+  type SchedulePropagationWindow,
+  type SchedulePropagationWindowStatus,
+  type ScheduleTransportAnchorKind,
+} from './schedule-propagator.js';

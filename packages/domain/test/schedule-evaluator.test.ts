@@ -111,6 +111,7 @@ describe('evaluateScheduleConstraints', () => {
       intentIds: ['lower', 'upper'],
       rule: 'USER_CONSTRAINT_CONFLICT',
     });
+    expect(result.conflicts).toHaveLength(1);
   });
 
   it('detects an EXACT intent outside its user bounds', () => {
@@ -121,7 +122,9 @@ describe('evaluateScheduleConstraints', () => {
       ],
       [],
     );
-    expect(result.conflicts[0]?.intentIds).toEqual(['exact', 'upper']);
+    expect(result.conflicts[0]).toMatchObject({
+      intentIds: ['exact', 'upper'],
+    });
   });
 
   it('uses a fixed transport planned anchor without copying it into Node layers', () => {
@@ -141,6 +144,15 @@ describe('evaluateScheduleConstraints', () => {
           value: anchor,
         },
       ],
+      propagationTransportAnchors: [
+        {
+          transportEdgeId: 'edge-1',
+          nodeId: 'node-1',
+          pointKind: 'DEPARTURE',
+          anchorKind: 'FIXED_TRANSPORT_PLANNED',
+          value: anchor,
+        },
+      ],
     });
     expect(result.nodes[0]?.departure.planned).toBeNull();
     expect(result.nodes[0]?.departure.effective).toMatchObject({
@@ -149,6 +161,80 @@ describe('evaluateScheduleConstraints', () => {
       anchor: 'FIXED_TRANSPORT',
     });
     expect(result.nodes[0]?.evaluations[0]?.status).toBe('SATISFIED');
+  });
+
+  it('uses Transport ACTUAL before Node ESTIMATED as current evidence without copying it', () => {
+    const transportActual = timeValue(
+      'transport-actual',
+      'ACTUAL',
+      'DEPARTURE',
+      '20:21',
+    );
+    const result = evaluateScheduleConstraints({
+      nodes: [
+        node(
+          [pointIntent('intent', 'EXACT', '20:21', 'DEPARTURE')],
+          [timeValue('estimated', 'ESTIMATED', 'DEPARTURE', '20:15')],
+        ),
+      ],
+      fixedTransportAnchors: [],
+      propagationTransportAnchors: [
+        {
+          transportEdgeId: 'edge-1',
+          nodeId: 'node-1',
+          pointKind: 'DEPARTURE',
+          anchorKind: 'TRANSPORT_ACTUAL',
+          value: transportActual,
+        },
+      ],
+    });
+    expect(result.nodes[0]?.departure.actual).toBeNull();
+    expect(result.nodes[0]?.departure.effective).toMatchObject({
+      value: { id: 'transport-actual', layer: 'ACTUAL' },
+      subjectType: 'TRANSPORT',
+      subjectId: 'edge-1',
+      anchor: 'TRANSPORT_ACTUAL',
+    });
+    expect(result.nodes[0]?.evaluations[0]?.status).toBe('SATISFIED');
+  });
+
+  it('C02 keeps current-plan evaluation separate from the propagated requirement window', () => {
+    const anchor = timeValue(
+      'train-departure',
+      'PLANNED',
+      'DEPARTURE',
+      '20:21',
+    );
+    const result = evaluateScheduleConstraints({
+      nodes: [
+        node(
+          [dwellIntent(2_400)],
+          [timeValue('planned-arrival', 'PLANNED', 'ARRIVAL', '19:56')],
+        ),
+      ],
+      fixedTransportAnchors: [
+        {
+          transportEdgeId: 'edge-1',
+          nodeId: 'node-1',
+          pointKind: 'DEPARTURE',
+          value: anchor,
+        },
+      ],
+      propagationTransportAnchors: [
+        {
+          transportEdgeId: 'edge-1',
+          nodeId: 'node-1',
+          pointKind: 'DEPARTURE',
+          anchorKind: 'FIXED_TRANSPORT_PLANNED',
+          value: anchor,
+        },
+      ],
+    });
+    expect(result.nodes[0]?.arrival.planned?.instant).toEqual(clock('19:56'));
+    expect(result.nodes[0]?.arrival.requirementWindow.latest).toEqual(
+      clock('19:41'),
+    );
+    expect(result.nodes[0]?.evaluations[0]?.status).toBe('VIOLATED');
   });
 
   it('preserves caller sequence even when occurrence local dates would go backward', () => {
@@ -162,6 +248,7 @@ describe('evaluateScheduleConstraints', () => {
         },
       ],
       fixedTransportAnchors: [],
+      propagationTransportAnchors: [],
     });
     expect(result.nodes.map((entry) => entry.nodeId)).toEqual([
       'tokyo',
@@ -177,6 +264,7 @@ function evaluate(
   return evaluateScheduleConstraints({
     nodes: [node(intents, timeValues)],
     fixedTransportAnchors: [],
+    propagationTransportAnchors: [],
   });
 }
 

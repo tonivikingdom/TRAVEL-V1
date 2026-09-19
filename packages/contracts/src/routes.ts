@@ -1,4 +1,4 @@
-import type { TransportMode } from './trips.js';
+import type { TransportMode, TripView } from './trips.js';
 
 export type RouteQueryHint =
   | {
@@ -24,6 +24,7 @@ export interface RouteLocationView {
   readonly latitude: number | null;
   readonly longitude: number | null;
   readonly providerPlaceRef: string | null;
+  readonly providerHubRef?: string | null;
 }
 
 export interface RouteTimePointView {
@@ -94,13 +95,20 @@ export interface RouteQueryResponse {
 export interface CreateRoutePreviewRequest {
   readonly basisVersion: number;
   readonly candidateSnapshotId: string;
+  readonly sameHubWalkingLegIndexes?: readonly number[];
 }
+
+export type RoutePreviewStatus =
+  'ACTIVE' | 'BLOCKED' | 'EXPIRED' | 'SUPERSEDED_POLICY';
+
+export type RouteGroupingEvidence = 'SYSTEM_STRUCTURED' | 'USER_CONFIRMED';
 
 export interface RoutePreviewLocationView extends RouteLocationView {
   readonly ref: string;
 }
 
 export interface RoutePreviewSegmentView {
+  readonly legIndex?: number;
   readonly fromRef: string;
   readonly toRef: string;
   readonly mode: TransportMode;
@@ -110,6 +118,42 @@ export interface RoutePreviewSegmentView {
   readonly departure: RouteTimePointView | null;
   readonly arrival: RouteTimePointView | null;
   readonly durationSeconds: number | null;
+}
+
+export interface RoutePreviewGeneratedNodePlanView {
+  readonly ref: string;
+  readonly action: 'CREATE' | 'REUSE';
+  readonly nodeId: string | null;
+  readonly location: RoutePreviewLocationView;
+  readonly localDate: string;
+  readonly dayOccurrenceId: string | null;
+  readonly provider: string;
+  readonly providerPlaceRef: string | null;
+  readonly providerHubRef: string | null;
+  readonly evidence: RouteGroupingEvidence;
+}
+
+export interface RoutePreviewRemovedNodeView {
+  readonly nodeId: string;
+  readonly dayOccurrenceId: string;
+  readonly protected: boolean;
+  readonly protectionReasons: readonly string[];
+}
+
+export interface RoutePreviewInternalTransferView {
+  readonly legIndex: number;
+  readonly mode: 'WALKING';
+  readonly from: RouteLocationView;
+  readonly to: RouteLocationView;
+  readonly durationSeconds: number | null;
+  readonly evidence: RouteGroupingEvidence;
+}
+
+export interface RoutePreviewDayProjectionPlanView {
+  readonly segmentIndex: number;
+  readonly fromRef: string;
+  readonly toRef: string;
+  readonly roles: readonly ('SAME_DAY' | 'START' | 'OCCUPIED' | 'END')[];
 }
 
 export interface RoutePreviewView {
@@ -122,7 +166,7 @@ export interface RoutePreviewView {
   readonly createdAt: string;
   readonly expiresAt: string;
   readonly adoptable: boolean;
-  readonly status: 'ACTIVE' | 'EXPIRED';
+  readonly status: RoutePreviewStatus;
   readonly currentConnection: {
     readonly fromNodeId: string;
     readonly toNodeId: string;
@@ -138,10 +182,62 @@ export interface RoutePreviewView {
   readonly changeSummary: {
     readonly transportAction: 'CREATE' | 'REPLACE';
     readonly willReplaceTransportEdgeId: string | null;
+    readonly willReplaceTransportEdgeIds?: readonly string[];
     readonly requiresGeneratedNodes: boolean;
     readonly generatedTransferPoints: readonly RoutePreviewLocationView[];
     readonly proposedSegments: readonly RoutePreviewSegmentView[];
+    readonly routeCorridor?: {
+      readonly anchorFromNodeId: string;
+      readonly anchorToNodeId: string;
+      readonly currentNodeIds: readonly string[];
+      readonly currentAdoptedRouteId: string | null;
+    };
+    readonly nodesToCreate?: readonly RoutePreviewGeneratedNodePlanView[];
+    readonly nodesToReuse?: readonly RoutePreviewGeneratedNodePlanView[];
+    readonly nodesToRemove?: readonly RoutePreviewRemovedNodeView[];
+    readonly protectedBlockingNodes?: readonly RoutePreviewRemovedNodeView[];
+    readonly internalTransferDetails?: readonly RoutePreviewInternalTransferView[];
+    readonly proposedDayAssignments?: readonly {
+      readonly nodeRef: string;
+      readonly localDate: string;
+      readonly dayOccurrenceId: string | null;
+    }[];
+    readonly proposedTransportDayProjections?: readonly RoutePreviewDayProjectionPlanView[];
     readonly temporalLayer: 'PLANNED';
     readonly temporalSourceKind: 'ADOPTED_TRANSPORT_FACT';
   };
+}
+
+export interface AdoptRoutePreviewRequest {
+  readonly baseTripVersion: number;
+  readonly idempotencyKey: string;
+}
+
+export interface OperationReceiptView {
+  readonly id: string;
+  readonly operationType: 'ROUTE_ADOPT';
+  readonly idempotencyKey: string;
+  readonly requestHash: string;
+  readonly baseTripVersion: number;
+  readonly resultingTripVersion: number;
+  readonly previewId: string;
+  readonly adoptedRouteId: string;
+  readonly delta: {
+    readonly createdNodeIds: readonly string[];
+    readonly reusedNodeIds: readonly string[];
+    readonly removedGeneratedNodes: readonly unknown[];
+    readonly createdTransportEdgeIds: readonly string[];
+    readonly archivedTransportHistoryIds: readonly string[];
+    readonly createdDayProjections: readonly unknown[];
+    readonly removedDayProjections: readonly unknown[];
+    readonly affectedDayOccurrenceIds: readonly string[];
+    readonly beforeCorridorNodeIds: readonly string[];
+    readonly afterCorridorNodeIds: readonly string[];
+  };
+  readonly createdAt: string;
+}
+
+export interface AdoptRoutePreviewResponse {
+  readonly operationReceipt: OperationReceiptView;
+  readonly trip: TripView;
 }

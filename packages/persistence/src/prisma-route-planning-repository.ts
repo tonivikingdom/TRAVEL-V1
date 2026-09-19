@@ -1,5 +1,6 @@
 import type {
   CreateRoutePreviewResult,
+  AdoptRoutePreviewResult,
   RouteCandidatePayload,
   RouteCandidateSnapshotDraft,
   RouteCandidateSnapshotRecord,
@@ -10,6 +11,7 @@ import type {
 } from '@travel/application';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
+import { adoptRoutePreview } from './prisma-route-adoption.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -91,6 +93,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly toNodeId: string;
     readonly policyVersion: string;
     readonly previewPayload: StoredRoutePreviewPayload;
+    readonly previewHash: string;
     readonly now: Date;
     readonly createdAt: Date;
     readonly expiresAt: Date;
@@ -130,6 +133,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
           candidateHash: input.expectedCandidateHash,
           policyVersion: input.policyVersion,
           previewPayload: toJson(input.previewPayload),
+          previewHash: input.previewHash,
           createdAt: input.createdAt,
           expiresAt: input.expiresAt,
         },
@@ -151,6 +155,18 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       },
     });
     return preview === null ? null : toPreviewRecord(preview);
+  }
+
+  async adoptPreview(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly previewId: string;
+    readonly baseTripVersion: number;
+    readonly idempotencyKey: string;
+    readonly requestHash: string;
+    readonly now: Date;
+  }): Promise<AdoptRoutePreviewResult> {
+    return adoptRoutePreview(this.client, input);
   }
 }
 
@@ -197,7 +213,7 @@ async function isAdjacentPlacePair(
 ): Promise<boolean> {
   const nodes = await transaction.itineraryNode.findMany({
     where: { tripId: input.tripId },
-    select: { id: true, kind: true },
+    select: { id: true, kind: true, source: true, adoptedRouteId: true },
     orderBy: [
       { dayOccurrence: { sequence: 'asc' } },
       { position: 'asc' },
@@ -206,12 +222,34 @@ async function isAdjacentPlacePair(
   });
   const fromIndex = nodes.findIndex((node) => node.id === input.fromNodeId);
   const from = nodes[fromIndex];
-  const to = nodes[fromIndex + 1];
-  return (
+  const toIndex = nodes.findIndex((node) => node.id === input.toNodeId);
+  const to = nodes[toIndex];
+  const endpointsValid =
     fromIndex >= 0 &&
     from?.kind === 'PLACE_VISIT' &&
-    to?.id === input.toNodeId &&
-    to.kind === 'PLACE_VISIT'
+    toIndex > fromIndex &&
+    to?.kind === 'PLACE_VISIT';
+  if (!endpointsValid) return false;
+  if (toIndex === fromIndex + 1) return true;
+  const route = await transaction.adoptedRoute.findFirst({
+    where: {
+      tripId: input.tripId,
+      anchorFromNodeId: input.fromNodeId,
+      anchorToNodeId: input.toNodeId,
+      status: 'ACTIVE',
+    },
+    select: { id: true },
+  });
+  return (
+    route !== null &&
+    nodes
+      .slice(fromIndex + 1, toIndex)
+      .every(
+        (node) =>
+          node.kind === 'PLACE_VISIT' &&
+          node.source === 'ROUTE_GENERATED' &&
+          node.adoptedRouteId === route.id,
+      )
   );
 }
 
@@ -250,6 +288,7 @@ function toPreviewRecord(preview: {
   readonly candidateHash: string;
   readonly policyVersion: string;
   readonly previewPayload: Prisma.JsonValue;
+  readonly previewHash: string | null;
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }): RoutePreviewRecord {

@@ -20,6 +20,14 @@ const tripInclude = {
   dateOwnerships: { orderBy: { localDate: 'asc' } },
   dayOccurrences: {
     include: {
+      transportProjections: {
+        select: {
+          transportEdgeId: true,
+          dayOccurrenceId: true,
+          role: true,
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      },
       nodes: {
         include: {
           place: true,
@@ -44,6 +52,9 @@ const tripInclude = {
     include: {
       temporalValues: { orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }] },
     },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  },
+  adoptedRoutes: {
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   },
 } satisfies Prisma.TripInclude;
@@ -398,7 +409,13 @@ async function applyCommand(
       );
       await transaction.itineraryNode.update({
         where: { id: node.id },
-        data: { placeId: place.id, note: null },
+        data: {
+          placeId: place.id,
+          note: null,
+          ...(node.source === 'ROUTE_GENERATED'
+            ? { autoReplaceable: false, userModifiedAt: new Date() }
+            : {}),
+        },
       });
       return;
     }
@@ -717,6 +734,9 @@ async function archiveTransports(
         serviceLabel: edge.serviceLabel,
         note: edge.note,
         source: edge.source,
+        adoptedRouteId: edge.adoptedRouteId,
+        provider: edge.provider,
+        providerRef: edge.providerRef,
         originalCreatedAt: edge.createdAt,
         invalidatedAt,
         invalidationReason: reason,
@@ -882,10 +902,20 @@ async function resolveTargetDayOccurrence(
   if (target.type === 'EXISTING') {
     const occurrence = await transaction.dayOccurrence.findFirst({
       where: { id: target.dayOccurrenceId, tripId },
-      select: { id: true },
+      select: {
+        id: true,
+        transportProjections: {
+          where: { role: 'OCCUPIED' },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
     if (occurrence === null) {
       throw new TripTransactionAbort('NOT_FOUND');
+    }
+    if (occurrence.transportProjections.length > 0) {
+      throw new TripTransactionAbort('TRANSPORT_OCCUPIED_DAY');
     }
     return occurrence.id;
   }
@@ -995,16 +1025,27 @@ async function moveNode(
   node: {
     readonly id: string;
     readonly dayOccurrenceId: string;
+    readonly source: 'USER_PLANNED' | 'ROUTE_GENERATED';
   },
   targetDayOccurrenceId: string,
   targetPosition: number,
 ): Promise<void> {
   const targetOccurrence = await transaction.dayOccurrence.findFirst({
     where: { id: targetDayOccurrenceId, tripId },
-    select: { id: true },
+    select: {
+      id: true,
+      transportProjections: {
+        where: { role: 'OCCUPIED' },
+        select: { id: true },
+        take: 1,
+      },
+    },
   });
   if (targetOccurrence === null) {
     throw new TripTransactionAbort('NOT_FOUND');
+  }
+  if (targetOccurrence.transportProjections.length > 0) {
+    throw new TripTransactionAbort('TRANSPORT_OCCUPIED_DAY');
   }
 
   const sourceIds = await orderedNodeIds(transaction, node.dayOccurrenceId);
@@ -1014,6 +1055,12 @@ async function moveNode(
     }
     const reordered = sourceIds.filter((id) => id !== node.id);
     reordered.splice(targetPosition, 0, node.id);
+    if (node.source === 'ROUTE_GENERATED') {
+      await transaction.itineraryNode.update({
+        where: { id: node.id },
+        data: { autoReplaceable: false, userModifiedAt: new Date() },
+      });
+    }
     await rewritePositions(transaction, targetDayOccurrenceId, reordered);
     return;
   }
@@ -1029,6 +1076,9 @@ async function moveNode(
     data: {
       dayOccurrenceId: targetDayOccurrenceId,
       position: temporaryPosition,
+      ...(node.source === 'ROUTE_GENERATED'
+        ? { autoReplaceable: false, userModifiedAt: new Date() }
+        : {}),
     },
   });
   await rewritePositions(
@@ -1123,7 +1173,7 @@ async function requireTripNode(
 ) {
   const node = await transaction.itineraryNode.findFirst({
     where: { id: nodeId, tripId },
-    select: { id: true, kind: true, dayOccurrenceId: true },
+    select: { id: true, kind: true, dayOccurrenceId: true, source: true },
   });
   if (node === null) {
     throw new TripTransactionAbort('NOT_FOUND');
@@ -1169,11 +1219,16 @@ async function reconcileDateOwnership(
       localDate: true,
       sequence: true,
       _count: { select: { nodes: true } },
+      transportProjections: {
+        select: { id: true },
+        take: 1,
+      },
     },
     orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
   });
   const firstContentIndex = occurrences.findIndex(
-    (occurrence) => occurrence._count.nodes > 0,
+    (occurrence) =>
+      occurrence._count.nodes > 0 || occurrence.transportProjections.length > 0,
   );
   if (firstContentIndex < 0) {
     await transaction.dayOccurrence.deleteMany({
@@ -1185,7 +1240,8 @@ async function reconcileDateOwnership(
     return null;
   }
   const lastContentIndex = occurrences.findLastIndex(
-    (occurrence) => occurrence._count.nodes > 0,
+    (occurrence) =>
+      occurrence._count.nodes > 0 || occurrence.transportProjections.length > 0,
   );
   const retained = occurrences.slice(firstContentIndex, lastContentIndex + 1);
   const retainedIds = retained.map((occurrence) => occurrence.id);
@@ -1285,6 +1341,13 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
         place: node.place === null ? null : toPlaceRecord(node.place),
         note: node.note,
         source: node.source,
+        adoptedRouteId: node.adoptedRouteId,
+        provider: node.provider,
+        providerPlaceRef: node.providerPlaceRef,
+        providerHubRef: node.providerHubRef,
+        sourceOperationId: node.sourceOperationId,
+        autoReplaceable: node.autoReplaceable,
+        userModifiedAt: node.userModifiedAt,
         createdAt: node.createdAt,
         updatedAt: node.updatedAt,
         timeValues: node.temporalValues.map(toTemporalValueRecord),
@@ -1303,8 +1366,10 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
           updatedAt: intent.updatedAt,
         })),
       })),
+      transportProjections: occurrence.transportProjections,
     })),
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
+    adoptedRoutes: trip.adoptedRoutes,
   };
 }
 
@@ -1319,6 +1384,9 @@ function toTransportEdgeRecord(edge: TransportWithTimes): TransportEdgeRecord {
     serviceLabel: edge.serviceLabel,
     note: edge.note,
     source: edge.source,
+    adoptedRouteId: edge.adoptedRouteId,
+    provider: edge.provider,
+    providerRef: edge.providerRef,
     createdAt: edge.createdAt,
     updatedAt: edge.updatedAt,
     timeValues: edge.temporalValues.map(toTemporalValueRecord),
@@ -1339,6 +1407,9 @@ function toTransportHistoryRecord(
     serviceLabel: record.serviceLabel,
     note: record.note,
     source: record.source,
+    adoptedRouteId: record.adoptedRouteId,
+    provider: record.provider,
+    providerRef: record.providerRef,
     originalCreatedAt: record.originalCreatedAt,
     invalidatedAt: record.invalidatedAt,
     invalidationReason: record.invalidationReason,

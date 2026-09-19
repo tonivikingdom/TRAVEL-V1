@@ -12,7 +12,10 @@ import type {
   RouteTimePoint,
 } from '@travel/domain';
 
-import type { RouteCandidatePayload } from './route-planning-ports.js';
+import type {
+  RouteCandidatePayload,
+  StoredRoutePreviewPayload,
+} from './route-planning-ports.js';
 import { parseAbsoluteInstantInput } from './time-input.js';
 
 export interface CandidateHashBasis {
@@ -95,11 +98,12 @@ function restoreLocation(value: RouteLocationView): RouteLocation {
     typeof value.name !== 'string' ||
     !nullableFiniteNumber(value.latitude) ||
     !nullableFiniteNumber(value.longitude) ||
-    !nullableString(value.providerPlaceRef)
+    !nullableString(value.providerPlaceRef) ||
+    !nullableOptionalString(value.providerHubRef)
   ) {
     throw new Error('Invalid route location payload');
   }
-  return value;
+  return { ...value, providerHubRef: value.providerHubRef ?? null };
 }
 
 function restoreTimePoint(value: RouteTimePointView): RouteTimePoint {
@@ -135,6 +139,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+export function hashRoutePreviewPayload(
+  payload: StoredRoutePreviewPayload,
+): string {
+  return createHash('sha256').update(canonicalJson(payload)).digest('hex');
+}
+
+export function hashRouteAdoptionRequest(input: {
+  readonly tripId: string;
+  readonly previewId: string;
+  readonly baseTripVersion: number;
+}): string {
+  return createHash('sha256').update(canonicalJson(input)).digest('hex');
+}
+
+function nullableOptionalString(
+  value: unknown,
+): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === 'string';
 }
 
 function nullableFiniteNumber(value: unknown): value is number | null {

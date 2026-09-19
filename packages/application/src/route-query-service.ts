@@ -35,6 +35,7 @@ import {
 import type {
   ItineraryNodeRecord,
   PlaceRecord,
+  TripAggregateRecord,
   TripRepository,
 } from './trip-ports.js';
 
@@ -103,10 +104,10 @@ export class RouteQueryService {
     if (fromIndex < 0 || toIndex < 0) {
       throw new ApplicationError('NOT_FOUND', '行程节点不存在。', 404);
     }
-    if (toIndex !== fromIndex + 1) {
+    if (!isQueryableRouteCorridor(trip, nodes, fromIndex, toIndex)) {
       throw new ApplicationError(
         'ROUTE_QUERY_UNSUPPORTED',
-        '路线查询只支持当前 timeline 中相邻的两个节点。',
+        '路线查询只能连接相邻节点或同一当前已采用路线的两个锚点。',
         422,
       );
     }
@@ -445,7 +446,37 @@ function toTimePointView(point: {
 }
 
 function toLocationView(location: RouteLocation) {
-  return location;
+  return { ...location, providerHubRef: location.providerHubRef ?? null };
+}
+
+function isQueryableRouteCorridor(
+  trip: TripAggregateRecord,
+  nodes: readonly ItineraryNodeRecord[],
+  fromIndex: number,
+  toIndex: number,
+): boolean {
+  if (toIndex === fromIndex + 1) return true;
+  if (fromIndex < 0 || toIndex <= fromIndex + 1) return false;
+  const from = nodes[fromIndex];
+  const to = nodes[toIndex];
+  if (from === undefined || to === undefined) return false;
+  const route = (trip.adoptedRoutes ?? []).find(
+    (candidate) =>
+      candidate.status === 'ACTIVE' &&
+      candidate.anchorFromNodeId === from.id &&
+      candidate.anchorToNodeId === to.id,
+  );
+  return (
+    route !== undefined &&
+    nodes
+      .slice(fromIndex + 1, toIndex)
+      .every(
+        (node) =>
+          node.kind === 'PLACE_VISIT' &&
+          node.source === 'ROUTE_GENERATED' &&
+          node.adoptedRouteId === route.id,
+      )
+  );
 }
 
 function providerCandidateUsesSupportedZones(

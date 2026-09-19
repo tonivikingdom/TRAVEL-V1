@@ -23,6 +23,9 @@ export type {
 } from './notifications.js';
 export type {
   CreateRoutePreviewRequest,
+  AdoptRoutePreviewRequest,
+  AdoptRoutePreviewResponse,
+  OperationReceiptView,
   RouteCandidateLegView,
   RouteCandidateView,
   RouteFareView,
@@ -34,6 +37,12 @@ export type {
   RoutePreviewLocationView,
   RoutePreviewSegmentView,
   RoutePreviewView,
+  RoutePreviewStatus,
+  RouteGroupingEvidence,
+  RoutePreviewGeneratedNodePlanView,
+  RoutePreviewRemovedNodeView,
+  RoutePreviewInternalTransferView,
+  RoutePreviewDayProjectionPlanView,
   RouteTimePointView,
 } from './routes.js';
 export type {
@@ -70,6 +79,8 @@ export type {
   TemporalSubjectInput,
   TemporalValueView,
   TransportEdgeView,
+  TransportDayProjectionRole,
+  TransportDayProjectionView,
   TransportHistoryView,
   TransportInvalidationReason,
   TransportMode,

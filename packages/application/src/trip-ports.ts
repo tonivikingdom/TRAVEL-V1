@@ -7,7 +7,7 @@ import type {
 } from '@travel/contracts';
 
 export type TripNodeKind = 'PLACE_VISIT' | 'FREE_ACTION';
-export type TripNodeSource = 'USER_PLANNED';
+export type TripNodeSource = 'USER_PLANNED' | 'ROUTE_GENERATED';
 export type TransportInvalidationReason =
   | 'ADJACENCY_CHANGED'
   | 'ENDPOINT_REPLACED'
@@ -47,6 +47,13 @@ export interface ItineraryNodeRecord {
   readonly place: PlaceRecord | null;
   readonly note: string | null;
   readonly source: TripNodeSource;
+  readonly adoptedRouteId?: string | null;
+  readonly provider?: string | null;
+  readonly providerPlaceRef?: string | null;
+  readonly providerHubRef?: string | null;
+  readonly sourceOperationId?: string | null;
+  readonly autoReplaceable?: boolean;
+  readonly userModifiedAt?: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly timeValues: readonly TemporalValueRecord[];
@@ -76,6 +83,13 @@ export interface DayOccurrenceRecord {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly nodes: readonly ItineraryNodeRecord[];
+  readonly transportProjections?: readonly TransportDayProjectionRecord[];
+}
+
+export interface TransportDayProjectionRecord {
+  readonly transportEdgeId: string;
+  readonly dayOccurrenceId: string;
+  readonly role: 'SAME_DAY' | 'START' | 'OCCUPIED' | 'END';
 }
 
 export interface TransportEdgeRecord {
@@ -87,7 +101,10 @@ export interface TransportEdgeRecord {
   readonly fixedService: boolean;
   readonly serviceLabel: string | null;
   readonly note: string | null;
-  readonly source: 'MANUAL';
+  readonly source: 'MANUAL' | 'ADOPTED_ROUTE';
+  readonly adoptedRouteId?: string | null;
+  readonly provider?: string | null;
+  readonly providerRef?: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly timeValues: readonly TemporalValueRecord[];
@@ -103,7 +120,10 @@ export interface TransportHistoryRecord {
   readonly fixedService: boolean;
   readonly serviceLabel: string | null;
   readonly note: string | null;
-  readonly source: 'MANUAL';
+  readonly source: 'MANUAL' | 'ADOPTED_ROUTE';
+  readonly adoptedRouteId?: string | null;
+  readonly provider?: string | null;
+  readonly providerRef?: string | null;
   readonly originalCreatedAt: Date;
   readonly invalidatedAt: Date;
   readonly invalidationReason: TransportInvalidationReason;
@@ -124,6 +144,21 @@ export interface TripAggregateRecord {
   readonly ownedDates: readonly Date[];
   readonly dayOccurrences: readonly DayOccurrenceRecord[];
   readonly transportEdges: readonly TransportEdgeRecord[];
+  readonly adoptedRoutes?: readonly AdoptedRouteRecord[];
+}
+
+export interface AdoptedRouteRecord {
+  readonly id: string;
+  readonly tripId: string;
+  readonly anchorFromNodeId: string;
+  readonly anchorToNodeId: string;
+  readonly sourcePreviewId: string;
+  readonly candidateSnapshotId: string;
+  readonly candidateHash: string;
+  readonly policyVersion: string;
+  readonly status: 'ACTIVE' | 'REPLACED';
+  readonly createdAt: Date;
+  readonly replacedAt: Date | null;
 }
 
 export type RepositoryPlaceInput =
@@ -239,7 +274,8 @@ export type TripMutationResult =
         | 'INVALID_POSITION'
         | 'INVALID_COMMAND'
         | 'NOT_ADJACENT'
-        | 'TRANSPORT_NOT_APPLICABLE';
+        | 'TRANSPORT_NOT_APPLICABLE'
+        | 'TRANSPORT_OCCUPIED_DAY';
     };
 
 export interface TripRepository {

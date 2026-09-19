@@ -56,6 +56,7 @@ enum ItineraryNodeKind {
 
 enum ItineraryNodeSource {
   USER_PLANNED
+  ROUTE_GENERATED
 }
 
 enum TransportMode {
@@ -71,6 +72,27 @@ enum TransportMode {
 
 enum TransportSource {
   MANUAL
+  ADOPTED_ROUTE
+}
+
+enum AdoptedRouteStatus {
+  ACTIVE
+  REPLACED
+}
+
+enum TransportDayProjectionRole {
+  SAME_DAY
+  START
+  OCCUPIED
+  END
+}
+
+enum OperationType {
+  ROUTE_ADOPT
+}
+
+enum OutboxEventType {
+  ROUTE_ADOPTED
 }
 
 enum TransportInvalidationReason {
@@ -113,24 +135,25 @@ enum UserTimeIntentOperator {
 }
 
 model User {
-  id              String              @id @default(uuid()) @db.Uuid
-  email           String
-  normalizedEmail String              @unique
-  role            UserRole            @default(USER)
-  status          UserStatus          @default(ACTIVE)
-  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime            @updatedAt @db.Timestamptz(3)
-  invitationsSent Invitation[]        @relation("InvitationInviter")
-  magicLinkTokens MagicLinkToken[]
-  sessions        Session[]
-  preference      UserPreference?
-  notifications   NotificationEvent[]
-  storedObjects   StoredObject[]
-  trips           Trip[]
-  places          Place[]
-  dateOwnerships  DateOwnership[]
+  id                      String                   @id @default(uuid()) @db.Uuid
+  email                   String
+  normalizedEmail         String                   @unique
+  role                    UserRole                 @default(USER)
+  status                  UserStatus               @default(ACTIVE)
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(3)
+  invitationsSent         Invitation[]             @relation("InvitationInviter")
+  magicLinkTokens         MagicLinkToken[]
+  sessions                Session[]
+  preference              UserPreference?
+  notifications           NotificationEvent[]
+  storedObjects           StoredObject[]
+  trips                   Trip[]
+  places                  Place[]
+  dateOwnerships          DateOwnership[]
   routeCandidateSnapshots RouteCandidateSnapshot[]
-  routePreviews   RoutePreview[]
+  routePreviews           RoutePreview[]
+  operationReceipts       OperationReceipt[]
 
   @@index([status])
 }
@@ -268,39 +291,44 @@ model Job {
 }
 
 model Trip {
-  id                 String                 @id @default(uuid()) @db.Uuid
-  ownerUserId        String                 @db.Uuid
-  name               String                 @db.VarChar(200)
-  planningAnchorDate DateTime               @db.Date
-  defaultPeopleCount Int
-  version            Int                    @default(1)
-  effectiveStartDate DateTime?              @db.Date
-  effectiveEndDate   DateTime?              @db.Date
-  createdAt          DateTime               @default(now()) @db.Timestamptz(3)
-  updatedAt          DateTime               @updatedAt @db.Timestamptz(3)
-  owner              User                   @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  dateOwnerships     DateOwnership[]
-  dayOccurrences     DayOccurrence[]
-  nodes              ItineraryNode[]
-  transportEdges     TransportEdge[]
-  transportHistory   TransportEdgeHistory[]
-  timeIntents        UserTimeIntent[]
+  id                      String                   @id @default(uuid()) @db.Uuid
+  ownerUserId             String                   @db.Uuid
+  name                    String                   @db.VarChar(200)
+  planningAnchorDate      DateTime                 @db.Date
+  defaultPeopleCount      Int
+  version                 Int                      @default(1)
+  effectiveStartDate      DateTime?                @db.Date
+  effectiveEndDate        DateTime?                @db.Date
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(3)
+  owner                   User                     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  dateOwnerships          DateOwnership[]
+  dayOccurrences          DayOccurrence[]
+  nodes                   ItineraryNode[]
+  transportEdges          TransportEdge[]
+  transportHistory        TransportEdgeHistory[]
+  timeIntents             UserTimeIntent[]
   routeCandidateSnapshots RouteCandidateSnapshot[]
-  routePreviews      RoutePreview[]
+  routePreviews           RoutePreview[]
+  adoptedRoutes           AdoptedRoute[]
+  transportDayProjections TransportDayProjection[]
+  operationReceipts       OperationReceipt[]
+  outboxEvents            OutboxEvent[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
 }
 
 model DayOccurrence {
-  id        String          @id @default(uuid()) @db.Uuid
-  tripId    String          @db.Uuid
-  localDate DateTime        @db.Date
-  sequence  Int
-  createdAt DateTime        @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime        @updatedAt @db.Timestamptz(3)
-  trip      Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  nodes     ItineraryNode[]
+  id                   String                   @id @default(uuid()) @db.Uuid
+  tripId               String                   @db.Uuid
+  localDate            DateTime                 @db.Date
+  sequence             Int
+  createdAt            DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime                 @updatedAt @db.Timestamptz(3)
+  trip                 Trip                     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  nodes                ItineraryNode[]
+  transportProjections TransportDayProjection[]
 
   @@unique([tripId, sequence])
   @@unique([id, tripId])
@@ -335,51 +363,65 @@ model Place {
 }
 
 model ItineraryNode {
-  id              String              @id @default(uuid()) @db.Uuid
-  tripId          String              @db.Uuid
-  dayOccurrenceId String              @db.Uuid
-  kind            ItineraryNodeKind
-  position        Int
-  placeId         String?             @db.Uuid
-  note            String?             @db.VarChar(2000)
-  source          ItineraryNodeSource @default(USER_PLANNED)
-  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime            @updatedAt @db.Timestamptz(3)
-  trip            Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  dayOccurrence   DayOccurrence       @relation(fields: [dayOccurrenceId, tripId], references: [id, tripId], onDelete: Cascade)
-  place           Place?              @relation(fields: [placeId], references: [id], onDelete: Restrict)
-  temporalValues  TemporalValue[]
-  timeIntents     UserTimeIntent[]
-  routeSnapshotsFrom RouteCandidateSnapshot[] @relation("RouteSnapshotFromNode")
-  routeSnapshotsTo   RouteCandidateSnapshot[] @relation("RouteSnapshotToNode")
+  id                     String                   @id @default(uuid()) @db.Uuid
+  tripId                 String                   @db.Uuid
+  dayOccurrenceId        String                   @db.Uuid
+  kind                   ItineraryNodeKind
+  position               Int
+  placeId                String?                  @db.Uuid
+  note                   String?                  @db.VarChar(2000)
+  source                 ItineraryNodeSource      @default(USER_PLANNED)
+  adoptedRouteId         String?                  @db.Uuid
+  provider               String?                  @db.VarChar(100)
+  providerPlaceRef       String?                  @db.VarChar(300)
+  providerHubRef         String?                  @db.VarChar(300)
+  sourceOperationId      String?                  @db.Uuid
+  autoReplaceable        Boolean                  @default(false)
+  userModifiedAt         DateTime?                @db.Timestamptz(3)
+  createdAt              DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime                 @updatedAt @db.Timestamptz(3)
+  trip                   Trip                     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  dayOccurrence          DayOccurrence            @relation(fields: [dayOccurrenceId, tripId], references: [id, tripId], onDelete: Cascade)
+  place                  Place?                   @relation(fields: [placeId], references: [id], onDelete: Restrict)
+  temporalValues         TemporalValue[]
+  timeIntents            UserTimeIntent[]
+  routeSnapshotsFrom     RouteCandidateSnapshot[] @relation("RouteSnapshotFromNode")
+  routeSnapshotsTo       RouteCandidateSnapshot[] @relation("RouteSnapshotToNode")
+  adoptedRoute           AdoptedRoute?            @relation("GeneratedRouteNodes", fields: [adoptedRouteId], references: [id], onDelete: SetNull)
+  adoptedRouteAnchorFrom AdoptedRoute[]           @relation("AdoptedRouteFromAnchor")
+  adoptedRouteAnchorTo   AdoptedRoute[]           @relation("AdoptedRouteToAnchor")
 
   @@unique([dayOccurrenceId, position])
   @@unique([id, tripId])
   @@index([tripId, dayOccurrenceId, position])
   @@index([placeId])
+  @@index([adoptedRouteId])
+  @@index([provider, providerPlaceRef])
+  @@index([provider, providerHubRef])
 }
 
 model RouteCandidateSnapshot {
-  id                     String   @id @default(uuid()) @db.Uuid
-  ownerUserId            String   @db.Uuid
-  tripId                 String   @db.Uuid
-  basisVersion           Int
-  fromNodeId             String   @db.Uuid
-  toNodeId               String   @db.Uuid
-  provider               String   @db.VarChar(100)
-  providerCandidateRef   String?  @db.VarChar(300)
-  observedAt             DateTime @db.Timestamptz(3)
-  providerValidUntil     DateTime? @db.Timestamptz(3)
-  candidatePayload       Json     @db.JsonB
-  candidateHash          String   @db.VarChar(64)
-  queryTimeCondition     Json     @db.JsonB
-  createdAt              DateTime @db.Timestamptz(3)
-  expiresAt              DateTime @db.Timestamptz(3)
-  owner                   User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  trip                    Trip     @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
-  fromNode                ItineraryNode @relation("RouteSnapshotFromNode", fields: [fromNodeId, tripId], references: [id, tripId], onDelete: Cascade)
-  toNode                  ItineraryNode @relation("RouteSnapshotToNode", fields: [toNodeId, tripId], references: [id, tripId], onDelete: Cascade)
-  previews                RoutePreview[]
+  id                   String         @id @default(uuid()) @db.Uuid
+  ownerUserId          String         @db.Uuid
+  tripId               String         @db.Uuid
+  basisVersion         Int
+  fromNodeId           String         @db.Uuid
+  toNodeId             String         @db.Uuid
+  provider             String         @db.VarChar(100)
+  providerCandidateRef String?        @db.VarChar(300)
+  observedAt           DateTime       @db.Timestamptz(3)
+  providerValidUntil   DateTime?      @db.Timestamptz(3)
+  candidatePayload     Json           @db.JsonB
+  candidateHash        String         @db.VarChar(64)
+  queryTimeCondition   Json           @db.JsonB
+  createdAt            DateTime       @db.Timestamptz(3)
+  expiresAt            DateTime       @db.Timestamptz(3)
+  owner                User           @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                 Trip           @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  fromNode             ItineraryNode  @relation("RouteSnapshotFromNode", fields: [fromNodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  toNode               ItineraryNode  @relation("RouteSnapshotToNode", fields: [toNodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  previews             RoutePreview[]
+  adoptedRoutes        AdoptedRoute[]
 
   @@unique([id, tripId, ownerUserId])
   @@index([ownerUserId, tripId, expiresAt])
@@ -387,19 +429,22 @@ model RouteCandidateSnapshot {
 }
 
 model RoutePreview {
-  id                     String   @id @default(uuid()) @db.Uuid
-  ownerUserId            String   @db.Uuid
-  tripId                 String   @db.Uuid
-  basisVersion           Int
-  candidateSnapshotId    String   @db.Uuid
-  candidateHash          String   @db.VarChar(64)
-  policyVersion          String   @db.VarChar(100)
-  previewPayload         Json     @db.JsonB
-  createdAt              DateTime @db.Timestamptz(3)
-  expiresAt              DateTime @db.Timestamptz(3)
-  owner                   User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  trip                    Trip     @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
-  candidateSnapshot      RouteCandidateSnapshot @relation(fields: [candidateSnapshotId, tripId, ownerUserId], references: [id, tripId, ownerUserId], onDelete: Cascade)
+  id                  String                 @id @default(uuid()) @db.Uuid
+  ownerUserId         String                 @db.Uuid
+  tripId              String                 @db.Uuid
+  basisVersion        Int
+  candidateSnapshotId String                 @db.Uuid
+  candidateHash       String                 @db.VarChar(64)
+  policyVersion       String                 @db.VarChar(100)
+  previewPayload      Json                   @db.JsonB
+  previewHash         String?                @db.VarChar(64)
+  createdAt           DateTime               @db.Timestamptz(3)
+  expiresAt           DateTime               @db.Timestamptz(3)
+  owner               User                   @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                Trip                   @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  candidateSnapshot   RouteCandidateSnapshot @relation(fields: [candidateSnapshotId, tripId, ownerUserId], references: [id, tripId, ownerUserId], onDelete: Cascade)
+  adoptedRoutes       AdoptedRoute[]
+  operationReceipts   OperationReceipt[]
 
   @@unique([id, tripId, ownerUserId])
   @@index([ownerUserId, tripId, expiresAt])
@@ -428,24 +473,31 @@ model UserTimeIntent {
 }
 
 model TransportEdge {
-  id             String          @id @default(uuid()) @db.Uuid
-  tripId         String          @db.Uuid
-  fromNodeId     String          @db.Uuid
-  toNodeId       String          @db.Uuid
+  id             String                   @id @default(uuid()) @db.Uuid
+  tripId         String                   @db.Uuid
+  fromNodeId     String                   @db.Uuid
+  toNodeId       String                   @db.Uuid
   mode           TransportMode
   fixedService   Boolean
-  serviceLabel   String?         @db.VarChar(200)
-  note           String?         @db.VarChar(2000)
-  source         TransportSource @default(MANUAL)
-  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime        @updatedAt @db.Timestamptz(3)
-  trip           Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  serviceLabel   String?                  @db.VarChar(200)
+  note           String?                  @db.VarChar(2000)
+  source         TransportSource          @default(MANUAL)
+  adoptedRouteId String?                  @db.Uuid
+  provider       String?                  @db.VarChar(100)
+  providerRef    String?                  @db.VarChar(300)
+  createdAt      DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                 @updatedAt @db.Timestamptz(3)
+  trip           Trip                     @relation(fields: [tripId], references: [id], onDelete: Cascade)
   temporalValues TemporalValue[]
+  adoptedRoute   AdoptedRoute?            @relation(fields: [adoptedRouteId], references: [id], onDelete: SetNull)
+  dayProjections TransportDayProjection[]
 
   @@unique([tripId, fromNodeId, toNodeId])
   @@unique([tripId, fromNodeId])
   @@unique([tripId, toNodeId])
+  @@unique([id, tripId])
   @@index([tripId, createdAt, id])
+  @@index([adoptedRouteId])
 }
 
 model TransportEdgeHistory {
@@ -459,6 +511,9 @@ model TransportEdgeHistory {
   serviceLabel            String?                         @db.VarChar(200)
   note                    String?                         @db.VarChar(2000)
   source                  TransportSource
+  adoptedRouteId          String?                         @db.Uuid
+  provider                String?                         @db.VarChar(100)
+  providerRef             String?                         @db.VarChar(300)
   originalCreatedAt       DateTime                        @db.Timestamptz(3)
   invalidatedAt           DateTime                        @default(now()) @db.Timestamptz(3)
   invalidationReason      TransportInvalidationReason
@@ -467,6 +522,87 @@ model TransportEdgeHistory {
 
   @@index([tripId, invalidatedAt(sort: Desc), id(sort: Desc)])
   @@index([originalFromNodeId, originalToNodeId])
+  @@index([adoptedRouteId])
+}
+
+model AdoptedRoute {
+  id                  String                 @id @default(uuid()) @db.Uuid
+  tripId              String                 @db.Uuid
+  anchorFromNodeId    String                 @db.Uuid
+  anchorToNodeId      String                 @db.Uuid
+  sourcePreviewId     String                 @unique @db.Uuid
+  candidateSnapshotId String                 @db.Uuid
+  candidateHash       String                 @db.VarChar(64)
+  policyVersion       String                 @db.VarChar(100)
+  status              AdoptedRouteStatus     @default(ACTIVE)
+  createdAt           DateTime               @default(now()) @db.Timestamptz(3)
+  replacedAt          DateTime?              @db.Timestamptz(3)
+  trip                Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  anchorFrom          ItineraryNode          @relation("AdoptedRouteFromAnchor", fields: [anchorFromNodeId, tripId], references: [id, tripId], onDelete: Restrict)
+  anchorTo            ItineraryNode          @relation("AdoptedRouteToAnchor", fields: [anchorToNodeId, tripId], references: [id, tripId], onDelete: Restrict)
+  sourcePreview       RoutePreview           @relation(fields: [sourcePreviewId], references: [id], onDelete: Restrict)
+  candidateSnapshot   RouteCandidateSnapshot @relation(fields: [candidateSnapshotId], references: [id], onDelete: Restrict)
+  generatedNodes      ItineraryNode[]        @relation("GeneratedRouteNodes")
+  transportEdges      TransportEdge[]
+  operationReceipts   OperationReceipt[]
+
+  @@unique([id, tripId])
+  @@index([tripId, status, anchorFromNodeId, anchorToNodeId])
+}
+
+model TransportDayProjection {
+  id              String                     @id @default(uuid()) @db.Uuid
+  tripId          String                     @db.Uuid
+  transportEdgeId String                     @db.Uuid
+  dayOccurrenceId String                     @db.Uuid
+  role            TransportDayProjectionRole
+  createdAt       DateTime                   @default(now()) @db.Timestamptz(3)
+  trip            Trip                       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  transportEdge   TransportEdge              @relation(fields: [transportEdgeId, tripId], references: [id, tripId], onDelete: Cascade)
+  dayOccurrence   DayOccurrence              @relation(fields: [dayOccurrenceId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@unique([transportEdgeId, dayOccurrenceId])
+  @@index([tripId, dayOccurrenceId, role])
+}
+
+model OperationReceipt {
+  id                   String        @id @default(uuid()) @db.Uuid
+  ownerUserId          String        @db.Uuid
+  tripId               String        @db.Uuid
+  operationType        OperationType
+  idempotencyKey       String        @db.VarChar(200)
+  requestHash          String        @db.VarChar(64)
+  baseTripVersion      Int
+  resultingTripVersion Int
+  previewId            String        @db.Uuid
+  adoptedRouteId       String        @db.Uuid
+  delta                Json          @db.JsonB
+  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
+  owner                User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                 Trip          @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  preview              RoutePreview  @relation(fields: [previewId], references: [id], onDelete: Restrict)
+  adoptedRoute         AdoptedRoute  @relation(fields: [adoptedRouteId], references: [id], onDelete: Restrict)
+  outboxEvents         OutboxEvent[]
+
+  @@unique([ownerUserId, tripId, operationType, idempotencyKey])
+  @@index([ownerUserId, tripId, createdAt(sort: Desc)])
+}
+
+model OutboxEvent {
+  id                 String           @id @default(uuid()) @db.Uuid
+  type               OutboxEventType
+  aggregateType      String           @db.VarChar(100)
+  aggregateId        String           @db.Uuid
+  tripId             String           @db.Uuid
+  operationReceiptId String           @db.Uuid
+  payload            Json             @db.JsonB
+  createdAt          DateTime         @default(now()) @db.Timestamptz(3)
+  processedAt        DateTime?        @db.Timestamptz(3)
+  trip               Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  operationReceipt   OperationReceipt @relation(fields: [operationReceiptId], references: [id], onDelete: Cascade)
+
+  @@unique([operationReceiptId, type])
+  @@index([processedAt, createdAt])
 }
 
 model TemporalValue {

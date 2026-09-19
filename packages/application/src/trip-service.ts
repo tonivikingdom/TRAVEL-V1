@@ -442,6 +442,12 @@ function mutationResultToView(result: TripMutationResult): TripView {
         '自由行动节点不能绑定手工交通。',
         400,
       );
+    case 'TRANSPORT_OCCUPIED_DAY':
+      throw new ApplicationError(
+        'TRANSPORT_OCCUPIED_DAY',
+        '该日期卡已被连续交通完整占用，不能加入普通行程内容。',
+        409,
+      );
   }
 }
 
@@ -504,6 +510,7 @@ function projectDays(record: TripAggregateRecord): readonly DayView[] {
       localDate: formatLocalDate(occurrence.localDate),
       sequence: occurrence.sequence,
       nodes: occurrence.nodes.map(toNodeView),
+      transportProjections: occurrence.transportProjections ?? [],
     };
   });
 }
@@ -517,6 +524,13 @@ function toNodeView(record: ItineraryNodeRecord): ItineraryNodeView {
     place: record.place === null ? null : toPlaceView(record.place),
     note: record.note,
     source: record.source,
+    adoptedRouteId: record.adoptedRouteId ?? null,
+    provider: record.provider ?? null,
+    providerPlaceRef: record.providerPlaceRef ?? null,
+    providerHubRef: record.providerHubRef ?? null,
+    sourceOperationId: record.sourceOperationId ?? null,
+    autoReplaceable: record.autoReplaceable ?? false,
+    userModifiedAt: record.userModifiedAt?.toISOString() ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     timeValues: record.timeValues.map(toTemporalValueView),
@@ -621,6 +635,9 @@ function toTransportEdgeView(record: TransportEdgeRecord): TransportEdgeView {
     serviceLabel: record.serviceLabel,
     note: record.note,
     source: record.source,
+    adoptedRouteId: record.adoptedRouteId ?? null,
+    provider: record.provider ?? null,
+    providerRef: record.providerRef ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     timeValues: record.timeValues.map(toTemporalValueView),
@@ -640,6 +657,9 @@ function toTransportHistoryView(
     serviceLabel: record.serviceLabel,
     note: record.note,
     source: record.source,
+    adoptedRouteId: record.adoptedRouteId ?? null,
+    provider: record.provider ?? null,
+    providerRef: record.providerRef ?? null,
     originalCreatedAt: record.originalCreatedAt.toISOString(),
     invalidatedAt: record.invalidatedAt.toISOString(),
     invalidationReason: record.invalidationReason,

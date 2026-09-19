@@ -1227,11 +1227,14 @@ function authConfig() {
 async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
   await managed.client.outboxEvent.deleteMany();
   await managed.client.operationReceipt.deleteMany();
-  await managed.client.adoptedRoute.deleteMany();
   await managed.client.transportEdgeHistoryTimeValue.deleteMany();
   await managed.client.transportEdgeHistory.deleteMany();
   await managed.client.temporalValue.deleteMany();
   await managed.client.transportEdge.deleteMany();
+  await managed.client.itineraryNode.deleteMany({
+    where: { source: 'ROUTE_GENERATED' },
+  });
+  await managed.client.adoptedRoute.deleteMany();
   await managed.client.itineraryNode.deleteMany();
   await managed.client.dayOccurrence.deleteMany();
   await managed.client.dateOwnership.deleteMany();

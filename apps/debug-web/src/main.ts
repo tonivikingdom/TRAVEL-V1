@@ -794,7 +794,7 @@ function timeline(trip: TripView): string {
 function nodeView(day: DayView, node: DayView['nodes'][number]): string {
   return `<div class="node-card"><div class="node-main"><strong>${esc(node.kind === 'PLACE_VISIT' ? (node.place?.name ?? 'Place') : 'FreeAction')}</strong><span>position ${node.position}</span><p>${esc(node.note ?? '无备注')}</p></div>
     <div class="actions"><button data-action="move-up" data-id="${attr(node.id)}">上移</button><button data-action="move-down" data-id="${attr(node.id)}">下移</button><button data-action="move-node" data-id="${attr(node.id)}">移到指定日期卡</button>${node.kind === 'PLACE_VISIT' ? `<button data-action="replace-place" data-id="${attr(node.id)}">替换地点</button>` : ''}<button class="danger" data-action="delete-node" data-id="${attr(node.id)}">删除</button></div>
-    <details><summary>Debug details / 时间</summary><pre>${esc(JSON.stringify({ dayOccurrenceId: day.dayOccurrenceId, nodeId: node.id, source: node.source, provider: node.provider, providerPlaceRef: node.providerPlaceRef, providerHubRef: node.providerHubRef, adoptedRouteId: node.adoptedRouteId, sourceOperationId: node.sourceOperationId, autoReplaceable: node.autoReplaceable, userModifiedAt: node.userModifiedAt, temporalValues: node.timeValues }, null, 2))}</pre>${intentList(node)}</details>
+    <details><summary>Debug details / 时间</summary><pre>${esc(JSON.stringify({ dayOccurrenceId: day.dayOccurrenceId, nodeId: node.id, source: node.source, provider: node.provider, providerPlaceRef: node.providerPlaceRef, providerHubRef: node.providerHubRef, adoptedRouteId: node.adoptedRouteId, sourceOperationId: node.sourceOperationId, autoReplaceable: node.autoReplaceable, userModifiedAt: node.userModifiedAt, systemDwellSuggestion: node.systemDwellSuggestion, temporalValues: node.timeValues }, null, 2))}</pre>${intentList(node)}</details>
   </div>`;
 }
 
@@ -895,7 +895,12 @@ function previewForm(): string {
 function previewView(): string {
   const preview = state.preview;
   if (preview === null) return '<p class="muted">尚无 Preview。</p>';
-  return `<div class="preview"><p><strong>${esc(preview.status)}</strong> · adoptable=${preview.adoptable} · policy=${esc(preview.policyVersion)} · expires=${esc(preview.expiresAt)}</p><pre>${esc(JSON.stringify(preview.changeSummary, null, 2))}</pre>${preview.adoptable ? '<button data-action="adopt">采用路线</button>' : '<button disabled>不可采用</button>'}</div>`;
+  const impact = preview.changeSummary.downstreamImpact;
+  const impactSummary =
+    impact === null || impact === undefined
+      ? '<p class="muted">没有最近下游 dwell impact。</p>'
+      : `<p><strong>Downstream ${esc(impact.status)}</strong> · projected dwell=${esc(String(impact.projectedDwellSeconds))}s · required adjustments=${impact.requiredUserAdjustments.length}</p>`;
+  return `<div class="preview"><p><strong>${esc(preview.status)}</strong> · adoptable=${preview.adoptable} · policy=${esc(preview.policyVersion)} · expires=${esc(preview.expiresAt)}</p>${impactSummary}<pre>${esc(JSON.stringify(preview.changeSummary, null, 2))}</pre>${preview.adoptable ? '<button data-action="adopt">采用路线</button>' : '<button disabled>不可采用</button>'}</div>`;
 }
 
 function receiptView(trip: TripView): string {

@@ -12,6 +12,8 @@
 
 - `SystemDwellSuggestion` 是 Node 当前有效的系统建议值，独立于 `UserTimeIntent`。直接采用建议不会创建
   `MIN_DWELL`；只有用户主动编辑才形成硬的用户最低停留要求，移除该 Intent 即恢复使用系统建议。
+- 当前内部 suggestion upsert 走 Trip row lock，并按既有 mutation boundary 将 Trip version 增加一次；
+  同一 Node 始终只有一份当前 suggestion。这里记录实现事实，不把它扩展成新的产品规则。
 - 当前预计停留始终是 `departure - arrival`。超过建议或用户最低值是正常结果；低于系统建议是
   `SOFT_DEVIATION`，低于用户最低值则必须结构化返回 `requiresUserAdjustment`。
 
@@ -24,6 +26,11 @@
   `fare=null` 不参与最低价胜出，跨币种不直接比较金额。该排序不向产品 UI 暴露“最快/最优惠”标签。
 - Preview 只突出最近相关下游节点：没有下游 anchor 时按建议/用户最低值推导预计离开；有 anchor 时重新计算
   projected dwell，并区分正常、软偏离、用户要求调整与不可行。
+- Hardening 将 Provider 候选 canonical hash 限定为候选事实，不包含内部 `planningAssessment`；同一候选不会因
+  系统建议或排序元数据变化而改变身份。票价仍做精确 decimal 比较，并把外部输入限制为最多 64 位整数、
+  32 位小数，避免异常 scale 放大 BigInt 工作量；该上限是解析安全边界，不是币种精度规则。
+- 当前 downstream impact 只评估最近相关节点，不越过 USER_PLANNED 节点猜测更远 corridor。最近节点没有
+  约束、但更远节点有 anchor 的跨节点传播仍是明确 gap；本轮未新增未经确认的传播规则。
 
 ## Adopt、Undo 与兼容性
 

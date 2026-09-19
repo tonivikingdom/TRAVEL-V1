@@ -81,6 +81,8 @@ describe('route candidate hard-bound validation', () => {
       { amount: '-1.00', currency: 'CNY' },
       { amount: '1e3', currency: 'CNY' },
       { amount: '1.00', currency: 'cny' },
+      { amount: `1.${'0'.repeat(33)}`, currency: 'CNY' },
+      { amount: '9'.repeat(65), currency: 'CNY' },
     ]) {
       expect(
         validateRouteCandidate(routeCandidate({ fare }), {

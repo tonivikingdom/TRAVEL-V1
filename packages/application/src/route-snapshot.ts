@@ -29,7 +29,11 @@ export interface CandidateHashBasis {
 }
 
 export function hashRouteCandidateSnapshot(basis: CandidateHashBasis): string {
-  return createHash('sha256').update(canonicalJson(basis)).digest('hex');
+  const candidateFacts = { ...basis.candidatePayload };
+  delete candidateFacts.planningAssessment;
+  return createHash('sha256')
+    .update(canonicalJson({ ...basis, candidatePayload: candidateFacts }))
+    .digest('hex');
 }
 
 export function restoreNormalizedCandidate(

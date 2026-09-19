@@ -1,4 +1,7 @@
-import type { NormalizedRouteCandidate } from './route-query.js';
+import {
+  isCanonicalRouteFareAmount,
+  type NormalizedRouteCandidate,
+} from './route-query.js';
 
 export const ROUTE_QUERY_LOOKBACK_SECONDS = 15 * 60;
 export const VALUE_EFFECTIVE_TIME_BASIS_POINTS = 14_000;
@@ -124,6 +127,14 @@ export function rankRouteCandidates(
   }
   if (!Number.isSafeInteger(valueBasisPoints) || valueBasisPoints < 10_000) {
     throw new Error('valueBasisPoints must be an integer >= 10000');
+  }
+  for (const candidate of candidates) {
+    if (candidate.fare !== null) {
+      parseDecimal(candidate.fare.amount);
+      if (!/^[A-Z]{3}$/u.test(candidate.fare.currency)) {
+        throw new Error('fare currency must be a canonical ISO-style code');
+      }
+    }
   }
   const fastest = [...candidates].sort(primaryComparator)[0]!;
   const fastestEffective = effectiveMilliseconds(fastest, availableStart);
@@ -281,8 +292,12 @@ function primaryComparator(
     compareComparableFare(left, right) ||
     transferCount(left) - transferCount(right) ||
     walkingSeconds(left) - walkingSeconds(right) ||
-    left.candidateId.localeCompare(right.candidateId)
+    compareCodePoints(left.candidateId, right.candidateId)
   );
+}
+
+function compareCodePoints(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function compareComparableFare(
@@ -312,10 +327,10 @@ function parseDecimal(value: string): {
   readonly value: bigint;
   readonly scale: number;
 } {
-  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/.exec(value);
-  if (match === null) {
-    throw new Error('fare amount must be a non-negative decimal');
+  if (!isCanonicalRouteFareAmount(value)) {
+    throw new Error('fare amount must be a bounded canonical decimal');
   }
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/u.exec(value)!;
   const fraction = match[2] ?? '';
   return { value: BigInt(`${match[1]}${fraction}`), scale: fraction.length };
 }

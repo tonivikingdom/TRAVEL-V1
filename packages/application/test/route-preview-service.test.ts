@@ -176,6 +176,40 @@ describe('RoutePreviewService', () => {
     });
   });
 
+  it('marks zero dwell against a positive requirement as infeasible', async () => {
+    trip = withDownstreamDwell({
+      minimumSeconds: 600,
+      plannedDeparture: '2030-01-01T02:00:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(false);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 0,
+      status: 'INFEASIBLE',
+      requiredUserAdjustments: [],
+    });
+  });
+
+  it('does not warn when projected dwell exceeds suggestion and user minimum', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      minimumSeconds: 3_000,
+      plannedDeparture: '2030-01-01T03:30:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 5_400,
+      status: 'NORMAL',
+      requiredUserAdjustments: [],
+    });
+  });
+
   it('identifies a directly adjacent ACTIVE adopted route from its current edge', async () => {
     trip = singleLegAdoptedTrip();
     vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
@@ -376,27 +410,30 @@ describe('RoutePreviewService', () => {
     expect(fetched).toMatchObject({ status: 'EXPIRED', adoptable: false });
   });
 
-  it('keeps a v1 preview readable but marks it SUPERSEDED_POLICY', async () => {
-    const active = await service().createPreview(actor, tripId, request());
-    const persisted = await vi.mocked(planningRepository.createPreview).mock
-      .results[0]!.value;
-    if (persisted.status !== 'SUCCESS') throw new Error('expected preview');
-    vi.mocked(planningRepository.findPreviewOwned).mockResolvedValue({
-      ...persisted.preview,
-      policyVersion: 'route-adoption-preview-v1',
-      previewPayload: {
-        ...persisted.preview.previewPayload,
-        policyVersion: 'route-adoption-preview-v1',
-      },
-    });
+  it.each(['route-adoption-preview-v1', 'route-adoption-preview-v2'])(
+    'keeps an old %s preview readable but marks it SUPERSEDED_POLICY',
+    async (policyVersion) => {
+      const active = await service().createPreview(actor, tripId, request());
+      const persisted = await vi.mocked(planningRepository.createPreview).mock
+        .results[0]!.value;
+      if (persisted.status !== 'SUCCESS') throw new Error('expected preview');
+      vi.mocked(planningRepository.findPreviewOwned).mockResolvedValue({
+        ...persisted.preview,
+        policyVersion,
+        previewPayload: {
+          ...persisted.preview.previewPayload,
+          policyVersion,
+        },
+      });
 
-    await expect(
-      service().getPreview(actor, tripId, active.previewId),
-    ).resolves.toMatchObject({
-      status: 'SUPERSEDED_POLICY',
-      adoptable: false,
-    });
-  });
+      await expect(
+        service().getPreview(actor, tripId, active.previewId),
+      ).resolves.toMatchObject({
+        status: 'SUPERSEDED_POLICY',
+        adoptable: false,
+      });
+    },
+  );
 
   it('collapses a structured same-hub walking transfer without creating a formal segment', async () => {
     const from = location('From', 35, 139, 'from');

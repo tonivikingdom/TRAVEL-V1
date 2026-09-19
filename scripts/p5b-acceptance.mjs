@@ -398,8 +398,8 @@ async function verifyP5cPlanningFlow(baseUrl, compose, env, owner, attacker) {
   const candidate = route.candidates[0];
   if (
     route.timeCondition.lookbackSeconds !== 900 ||
-    route.timeCondition.planningEarliestDeparture !== `${day}T11:00:00.000Z` ||
-    candidate.overall.departure.instant !== `${day}T10:45:00.000Z`
+    route.timeCondition.planningEarliestDeparture !== `${day}T10:50:00.000Z` ||
+    candidate.overall.departure.instant !== `${day}T10:35:00.000Z`
   ) {
     throw new Error('P5C acceptance did not expose the 15-minute lookback');
   }
@@ -415,7 +415,7 @@ async function verifyP5cPlanningFlow(baseUrl, compose, env, owner, attacker) {
   if (
     adjustments.length !== 1 ||
     adjustments[0].fromDurationSeconds !== 3_000 ||
-    adjustments[0].toDurationSeconds !== 2_700
+    adjustments[0].toDurationSeconds !== 2_100
   ) {
     throw new Error(
       'P5C acceptance did not require the expected dwell adjustment',
@@ -440,7 +440,7 @@ async function verifyP5cPlanningFlow(baseUrl, compose, env, owner, attacker) {
     .find((node) => node.id === scenario.fromNode.id)
     ?.timeIntents.find((intent) => intent.kind === 'MIN_DWELL');
   if (
-    adjustedIntent?.durationSeconds !== 2_700 ||
+    adjustedIntent?.durationSeconds !== 2_100 ||
     adopted.trip.connections[0]?.transport?.source !== 'ADOPTED_ROUTE'
   ) {
     throw new Error(

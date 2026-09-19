@@ -221,6 +221,23 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/schedule/evaluate',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireTripService(dependencies).evaluateSchedule(
+        authenticated.actor,
+        request.params.id,
+        requiredNumber(body, 'basisVersion'),
+      );
+    },
+  );
+
   app.post('/admin/invitations', async (request, reply) => {
     const authenticated = await authenticate(
       dependencies,
@@ -451,9 +468,57 @@ function parseTripCommand(value: unknown): TripCommandInput {
         type,
         transportEdgeId: requiredString(command, 'transportEdgeId'),
       };
+    case 'SET_TIME_INTENT':
+      return {
+        type,
+        nodeId: requiredString(command, 'nodeId'),
+        pointKind: parseTemporalPointKind(requiredString(command, 'pointKind')),
+        operator: parsePointTimeOperator(requiredString(command, 'operator')),
+        instant: requiredString(command, 'instant'),
+        timeZone: requiredString(command, 'timeZone'),
+        locked: requiredBoolean(command, 'locked'),
+      };
+    case 'REMOVE_TIME_INTENT':
+      return {
+        type,
+        nodeId: requiredString(command, 'nodeId'),
+        pointKind: parseTemporalPointKind(requiredString(command, 'pointKind')),
+        operator: parsePointTimeOperator(requiredString(command, 'operator')),
+      };
+    case 'SET_MIN_DWELL':
+      return {
+        type,
+        nodeId: requiredString(command, 'nodeId'),
+        durationSeconds: requiredNumber(command, 'durationSeconds'),
+        locked: requiredBoolean(command, 'locked'),
+      };
+    case 'REMOVE_MIN_DWELL':
+      return { type, nodeId: requiredString(command, 'nodeId') };
+    case 'SET_TIME_INTENT_LOCK':
+      return {
+        type,
+        intentId: requiredString(command, 'intentId'),
+        locked: requiredBoolean(command, 'locked'),
+      };
     default:
       throw new ApplicationError('VALIDATION_ERROR', '不支持的行程命令。', 400);
   }
+}
+
+function parseTemporalPointKind(value: string): 'ARRIVAL' | 'DEPARTURE' {
+  if (value === 'ARRIVAL' || value === 'DEPARTURE') {
+    return value;
+  }
+  throw new ApplicationError('VALIDATION_ERROR', '时间点类型无效。', 400);
+}
+
+function parsePointTimeOperator(
+  value: string,
+): 'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER' {
+  if (value === 'EXACT' || value === 'NOT_BEFORE' || value === 'NOT_AFTER') {
+    return value;
+  }
+  throw new ApplicationError('VALIDATION_ERROR', '时间要求操作符无效。', 400);
 }
 
 function parseDayOccurrenceTarget(value: unknown): DayOccurrenceTargetInput {

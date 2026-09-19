@@ -26,6 +26,11 @@ export type TemporalSourceKind =
   | 'SYSTEM_SUGGESTION'
   | 'DERIVED'
   | 'PROVIDER_OBSERVATION';
+export type UserTimeIntentKind = 'POINT_TIME' | 'MIN_DWELL';
+export type UserTimeIntentOperator =
+  'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER' | 'MINIMUM';
+export type ScheduleEvaluationStatus =
+  'SATISFIED' | 'VIOLATED' | 'UNKNOWN' | 'CONFLICT';
 
 export interface TemporalValueView {
   readonly id: string;
@@ -60,6 +65,20 @@ export interface ItineraryNodeView {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly timeValues: readonly TemporalValueView[];
+  readonly timeIntents: readonly UserTimeIntentView[];
+}
+
+export interface UserTimeIntentView {
+  readonly id: string;
+  readonly kind: UserTimeIntentKind;
+  readonly pointKind: TemporalPointKind | null;
+  readonly operator: UserTimeIntentOperator;
+  readonly instant: string | null;
+  readonly timeZone: string | null;
+  readonly durationSeconds: number | null;
+  readonly locked: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface TransportEdgeView {
@@ -188,6 +207,36 @@ export type TripCommandInput =
   | {
       readonly type: 'CLEAR_TRANSPORT';
       readonly transportEdgeId: string;
+    }
+  | {
+      readonly type: 'SET_TIME_INTENT';
+      readonly nodeId: string;
+      readonly pointKind: TemporalPointKind;
+      readonly operator: Exclude<UserTimeIntentOperator, 'MINIMUM'>;
+      readonly instant: string;
+      readonly timeZone: string;
+      readonly locked: boolean;
+    }
+  | {
+      readonly type: 'REMOVE_TIME_INTENT';
+      readonly nodeId: string;
+      readonly pointKind: TemporalPointKind;
+      readonly operator: Exclude<UserTimeIntentOperator, 'MINIMUM'>;
+    }
+  | {
+      readonly type: 'SET_MIN_DWELL';
+      readonly nodeId: string;
+      readonly durationSeconds: number;
+      readonly locked: boolean;
+    }
+  | {
+      readonly type: 'REMOVE_MIN_DWELL';
+      readonly nodeId: string;
+    }
+  | {
+      readonly type: 'SET_TIME_INTENT_LOCK';
+      readonly intentId: string;
+      readonly locked: boolean;
     };
 
 export type TemporalSubjectInput =
@@ -202,4 +251,67 @@ export interface ResolvedTemporalValueInput {
   readonly sourceKind: TemporalSourceKind;
   readonly sourceRef?: string | null;
   readonly observedAt?: string | null;
+}
+
+export interface ScheduleEffectivePointView {
+  readonly value: TemporalValueView;
+  readonly subjectType: 'NODE' | 'FIXED_TRANSPORT';
+  readonly subjectId: string;
+  readonly anchor: 'FIXED_TRANSPORT' | null;
+}
+
+export interface SchedulePointProjectionView {
+  readonly planned: TemporalValueView | null;
+  readonly estimated: TemporalValueView | null;
+  readonly actual: TemporalValueView | null;
+  readonly effective: ScheduleEffectivePointView | null;
+}
+
+export interface FixedTransportAnchorView {
+  readonly type: 'FIXED_TRANSPORT';
+  readonly transportEdgeId: string;
+  readonly nodeId: string;
+  readonly pointKind: TemporalPointKind;
+  readonly value: TemporalValueView;
+}
+
+export type ScheduleMeasureView =
+  | {
+      readonly kind: 'INSTANT';
+      readonly instant: string;
+      readonly timeZone: string;
+    }
+  | { readonly kind: 'DURATION'; readonly durationSeconds: number };
+
+export interface ScheduleConstraintEvaluationView {
+  readonly intentIds: readonly string[];
+  readonly nodeId: string;
+  readonly status: ScheduleEvaluationStatus;
+  readonly rule: UserTimeIntentOperator | 'USER_CONSTRAINT_CONFLICT';
+  readonly expected: ScheduleMeasureView | null;
+  readonly current: ScheduleMeasureView | null;
+  readonly currentLayer: TemporalLayer | null;
+  readonly sourceRefs: readonly string[];
+  readonly locked: boolean;
+  readonly explanation: string;
+}
+
+export interface ScheduleNodeProjectionView {
+  readonly nodeId: string;
+  readonly dayOccurrenceId: string;
+  readonly arrival: SchedulePointProjectionView;
+  readonly departure: SchedulePointProjectionView;
+  readonly activeUserTimeIntents: readonly UserTimeIntentView[];
+  readonly anchors: readonly FixedTransportAnchorView[];
+  readonly dwellSeconds: number | null;
+  readonly status: ScheduleEvaluationStatus;
+  readonly evaluations: readonly ScheduleConstraintEvaluationView[];
+}
+
+export interface ScheduleProjectionView {
+  readonly tripId: string;
+  readonly basisVersion: number;
+  readonly nodes: readonly ScheduleNodeProjectionView[];
+  readonly violations: readonly ScheduleConstraintEvaluationView[];
+  readonly conflicts: readonly ScheduleConstraintEvaluationView[];
 }

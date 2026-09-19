@@ -26,22 +26,22 @@ Application负责I/O编排。Provider提供观测/候选，不直接改Trip。Wo
 
 ## 2. 关键对象与责任
 
-| 对象                                           | 作用                                                    | 首轮落点                                                       |
-| ---------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------- |
-| User / Invitation / Session                    | 受控账号、角色、会话失效                                | P1                                                             |
-| UserPreference                                 | 基准货币、语言分别保存                                  | P1必要字段                                                     |
-| Trip                                           | 所有者、名称、默认人数、有效日期范围、生命周期          | P2；O-01/O-02规则已确认                                        |
-| DayOccurrence / Day projection / DateOwnership | sequence 中的日期卡身份、显示投影、用户内自然日归属约束 | P3A 持久化 DayOccurrence；DateOwnership 继续保持自然日唯一归属 |
-| Place                                          | 真实地图地点身份/坐标，不是每次访问                     | P2                                                             |
-| Visit                                          | 某次出现；PLACE或FREE_ACTION；来源与执行状态            | P2                                                             |
-| TransportEdge / AdoptedRoute                   | 相邻连接、已采用快照、历史失效                          | P2/P4                                                          |
-| RouteCandidate / RouteReference                | 尚未采用的查询候选 / 复制来的旧方案参考                 | P4；不直接当现行事实                                           |
-| UserTimeIntent / TimeConstraint                | 精确/最早/最晚/最低停留与 lock 元数据                   | P3B1 已实现当前要求基础；完整传播后置                           |
-| ScheduleProjection                             | 从当前版本、事实与用户要求纯计算出的可解释评估          | P3B1 已实现 V1 只读评估；完整 solver 后置                      |
-| Evidence / ProviderSnapshot                    | 观测时间、来源、适用位置、可靠性                        | P3/P4                                                          |
-| Preview / OperationReceipt                     | 变更预览与采用回执、幂等与撤销依据                      | P4                                                             |
-| Job / NotificationEvent                        | 持久任务与站内通知                                      | P1骨架/P5业务                                                  |
-| Expense / Task / Attachment / ShareClaim       | 完整蓝图中保留的数据边界                                | 分阶段另发，不在P0全建                                         |
+| 对象                                           | 作用                                                     | 首轮落点                                                       |
+| ---------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------- |
+| User / Invitation / Session                    | 受控账号、角色、会话失效                                 | P1                                                             |
+| UserPreference                                 | 基准货币、语言分别保存                                   | P1必要字段                                                     |
+| Trip                                           | 所有者、名称、默认人数、有效日期范围、生命周期           | P2；O-01/O-02规则已确认                                        |
+| DayOccurrence / Day projection / DateOwnership | sequence 中的日期卡身份、显示投影、用户内自然日归属约束  | P3A 持久化 DayOccurrence；DateOwnership 继续保持自然日唯一归属 |
+| Place                                          | 真实地图地点身份/坐标，不是每次访问                      | P2                                                             |
+| Visit                                          | 某次出现；PLACE或FREE_ACTION；来源与执行状态             | P2                                                             |
+| TransportEdge / AdoptedRoute                   | 相邻连接、已采用快照、历史失效                           | P2/P4                                                          |
+| RouteCandidate / RouteReference                | 尚未采用的查询候选 / 复制来的旧方案参考                  | P4；不直接当现行事实                                           |
+| UserTimeIntent / TimeConstraint                | 精确/最早/最晚/最低停留与 lock 元数据                    | P3B1 已实现当前要求基础；P3B2 只读传播这些要求                 |
+| ScheduleProjection                             | 从当前版本、事实与用户要求纯计算出的可解释评估与要求窗口 | P3B2 已增加确定性 bounds propagation；计划写入/路线求解后置    |
+| Evidence / ProviderSnapshot                    | 观测时间、来源、适用位置、可靠性                         | P3/P4                                                          |
+| Preview / OperationReceipt                     | 变更预览与采用回执、幂等与撤销依据                       | P4                                                             |
+| Job / NotificationEvent                        | 持久任务与站内通知                                       | P1骨架/P5业务                                                  |
+| Expense / Task / Attachment / ShareClaim       | 完整蓝图中保留的数据边界                                 | 分阶段另发，不在P0全建                                         |
 
 ## 2.1 Trip 日期范围与 DateOwnership（O-01/O-02 已确认）
 
@@ -102,7 +102,10 @@ NOT_BEFORE、NOT_AFTER，MIN_DWELL 保存正数秒数；同一 Node 的同一要
 基于指定 `basisVersion` 只读计算 `ScheduleProjection`，不会写回 PLANNED、TemporalValue 或 Trip。
 当前值按 ACTUAL、ESTIMATED、PLANNED 事实层选择；已采用 fixedService Transport 的 PLANNED
 时刻作为显式锚点参与判断，但不复制到 Node 时间表。用户要求彼此矛盾时返回 CONFLICT，缺证据
-返回 UNKNOWN。本阶段不包含 forward/backward solver、自动修改或 Recommendation。
+返回 UNKNOWN。P3B2 在同一只读 endpoint 上增加 arrival/departure 的 earliest/latest requirement
+window：UserTimeIntent、ACTUAL 与 fixedService Transport PLANNED 是硬约束；普通 PLANNED/ESTIMATED
+不是硬约束。明确 MIN_DWELL 支持 forward/backward 单调收紧，lower > upper 返回带 provenance 的
+客观冲突。传播结果不写回时间事实，不跨未知 Transport 猜时长，也不包含 Provider、计划修改或推荐。
 
 没有 Trip 级统一时区；生命周期日期的调度基准不能暗用服务器 UTC，参见 O-03。跨日期线与
 DST 产品规则已确认；sequence/DayOccurrence 与 migration 在 P3A 落地，输入 command/UI 仍待实现。

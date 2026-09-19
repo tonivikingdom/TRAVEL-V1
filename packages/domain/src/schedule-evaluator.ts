@@ -1,3 +1,10 @@
+import {
+  propagateScheduleBounds,
+  type SchedulePropagationConflict,
+  type SchedulePropagationTransportAnchor,
+  type SchedulePropagationWindow,
+} from './schedule-propagator.js';
+
 export type ScheduleTemporalLayer = 'PLANNED' | 'ESTIMATED' | 'ACTUAL';
 export type SchedulePointKind = 'ARRIVAL' | 'DEPARTURE';
 export type ScheduleIntentOperator =
@@ -63,13 +70,14 @@ export interface ScheduleNodeInput {
 export interface ScheduleEvaluationInput {
   readonly nodes: readonly ScheduleNodeInput[];
   readonly fixedTransportAnchors: readonly FixedTransportScheduleAnchor[];
+  readonly propagationTransportAnchors: readonly SchedulePropagationTransportAnchor[];
 }
 
 export interface EffectiveSchedulePoint {
   readonly value: ScheduleTemporalValue;
-  readonly subjectType: 'NODE' | 'FIXED_TRANSPORT';
+  readonly subjectType: 'NODE' | 'TRANSPORT' | 'FIXED_TRANSPORT';
   readonly subjectId: string;
-  readonly anchor: 'FIXED_TRANSPORT' | null;
+  readonly anchor: 'TRANSPORT_ACTUAL' | 'FIXED_TRANSPORT' | null;
 }
 
 export interface SchedulePointProjection {
@@ -77,6 +85,7 @@ export interface SchedulePointProjection {
   readonly estimated: ScheduleTemporalValue | null;
   readonly actual: ScheduleTemporalValue | null;
   readonly effective: EffectiveSchedulePoint | null;
+  readonly requirementWindow: SchedulePropagationWindow;
 }
 
 export type ScheduleMeasure =
@@ -115,21 +124,67 @@ export interface ScheduleNodeEvaluation {
 export interface ScheduleEvaluationResult {
   readonly nodes: readonly ScheduleNodeEvaluation[];
   readonly violations: readonly ScheduleConstraintEvaluation[];
-  readonly conflicts: readonly ScheduleConstraintEvaluation[];
+  readonly conflicts: readonly (
+    ScheduleConstraintEvaluation | SchedulePropagationConflict
+  )[];
 }
 
 export function evaluateScheduleConstraints(
   input: ScheduleEvaluationInput,
 ): ScheduleEvaluationResult {
-  const nodes = input.nodes.map((node) => evaluateNode(node, input));
+  const propagation = propagateScheduleBounds({
+    nodes: input.nodes,
+    transportAnchors: input.propagationTransportAnchors,
+  });
+  const propagationByNode = new Map(
+    propagation.nodes.map((node) => [node.nodeId, node] as const),
+  );
+  const propagationConflicts = propagation.conflicts.filter((conflict) => {
+    const node = input.nodes.find(
+      (candidate) => candidate.nodeId === conflict.nodeId,
+    );
+    if (node === undefined) return true;
+    const intrinsicIds = conflictingIntentIds(node, conflict.pointKind);
+    return !(
+      intrinsicIds.length > 0 &&
+      conflict.sourceRefs.every((sourceRef) => intrinsicIds.includes(sourceRef))
+    );
+  });
+  const propagationConflictNodes = new Set(
+    propagationConflicts.map((conflict) => conflict.nodeId),
+  );
+  const nodes = input.nodes.map((node) => {
+    const evaluated = evaluateNode(node, input);
+    const propagated = propagationByNode.get(node.nodeId);
+    if (propagated === undefined) {
+      throw new Error(`Schedule propagation omitted node: ${node.nodeId}`);
+    }
+    return {
+      ...evaluated,
+      arrival: {
+        ...evaluated.arrival,
+        requirementWindow: propagated.arrival,
+      },
+      departure: {
+        ...evaluated.departure,
+        requirementWindow: propagated.departure,
+      },
+      status: propagationConflictNodes.has(node.nodeId)
+        ? ('CONFLICT' as const)
+        : evaluated.status,
+    };
+  });
   return {
     nodes,
     violations: nodes.flatMap((node) =>
       node.evaluations.filter((entry) => entry.status === 'VIOLATED'),
     ),
-    conflicts: nodes.flatMap((node) =>
-      node.evaluations.filter((entry) => entry.status === 'CONFLICT'),
-    ),
+    conflicts: [
+      ...nodes.flatMap((node) =>
+        node.evaluations.filter((entry) => entry.status === 'CONFLICT'),
+      ),
+      ...propagationConflicts,
+    ],
   };
 }
 
@@ -140,8 +195,16 @@ function evaluateNode(
   const anchors = input.fixedTransportAnchors.filter(
     (anchor) => anchor.nodeId === node.nodeId,
   );
-  const arrival = projectPoint(node, anchors, 'ARRIVAL');
-  const departure = projectPoint(node, anchors, 'DEPARTURE');
+  const propagationAnchors = input.propagationTransportAnchors.filter(
+    (anchor) => anchor.nodeId === node.nodeId,
+  );
+  const arrival = projectPoint(node, anchors, propagationAnchors, 'ARRIVAL');
+  const departure = projectPoint(
+    node,
+    anchors,
+    propagationAnchors,
+    'DEPARTURE',
+  );
   const conflicts = findIntentConflicts(node);
   const conflictingIds = new Set(conflicts.flatMap((entry) => entry.intentIds));
   const evaluations = [
@@ -174,6 +237,7 @@ function evaluateNode(
 function projectPoint(
   node: ScheduleNodeInput,
   anchors: readonly FixedTransportScheduleAnchor[],
+  propagationAnchors: readonly SchedulePropagationTransportAnchor[],
   pointKind: SchedulePointKind,
 ): SchedulePointProjection {
   const values = node.timeValues.filter(
@@ -187,22 +251,50 @@ function projectPoint(
     .toSorted((left, right) =>
       left.transportEdgeId.localeCompare(right.transportEdgeId),
     )[0];
+  const transportActual = propagationAnchors
+    .filter(
+      (anchor) =>
+        anchor.pointKind === pointKind &&
+        anchor.anchorKind === 'TRANSPORT_ACTUAL',
+    )
+    .toSorted((left, right) =>
+      left.transportEdgeId.localeCompare(right.transportEdgeId),
+    )[0];
   const effective =
     actual === null
-      ? estimated === null
-        ? fixedAnchor === undefined
-          ? planned === null
-            ? null
-            : effectiveNodeValue(node.nodeId, planned)
-          : {
-              value: fixedAnchor.value,
-              subjectType: 'FIXED_TRANSPORT' as const,
-              subjectId: fixedAnchor.transportEdgeId,
-              anchor: 'FIXED_TRANSPORT' as const,
-            }
-        : effectiveNodeValue(node.nodeId, estimated)
+      ? transportActual === undefined
+        ? estimated === null
+          ? fixedAnchor === undefined
+            ? planned === null
+              ? null
+              : effectiveNodeValue(node.nodeId, planned)
+            : {
+                value: fixedAnchor.value,
+                subjectType: 'FIXED_TRANSPORT' as const,
+                subjectId: fixedAnchor.transportEdgeId,
+                anchor: 'FIXED_TRANSPORT' as const,
+              }
+          : effectiveNodeValue(node.nodeId, estimated)
+        : {
+            value: transportActual.value,
+            subjectType: 'TRANSPORT' as const,
+            subjectId: transportActual.transportEdgeId,
+            anchor: 'TRANSPORT_ACTUAL' as const,
+          }
       : effectiveNodeValue(node.nodeId, actual);
-  return { planned, estimated, actual, effective };
+  return {
+    planned,
+    estimated,
+    actual,
+    effective,
+    requirementWindow: {
+      earliest: null,
+      latest: null,
+      status: 'UNBOUNDED',
+      earliestBasis: [],
+      latestBasis: [],
+    },
+  };
 }
 
 function effectiveNodeValue(
@@ -321,48 +413,18 @@ function findIntentConflicts(
   node: ScheduleNodeInput,
 ): readonly ScheduleConstraintEvaluation[] {
   return (['ARRIVAL', 'DEPARTURE'] as const).flatMap((pointKind) => {
-    const intents = node.intents.filter(
-      (
-        intent,
-      ): intent is Extract<ScheduleUserTimeIntent, { kind: 'POINT_TIME' }> =>
-        intent.kind === 'POINT_TIME' && intent.pointKind === pointKind,
-    );
-    const exact = intents.find((intent) => intent.operator === 'EXACT');
-    const lower = intents.find((intent) => intent.operator === 'NOT_BEFORE');
-    const upper = intents.find((intent) => intent.operator === 'NOT_AFTER');
-    const conflicting = new Set<
-      Extract<ScheduleUserTimeIntent, { kind: 'POINT_TIME' }>
-    >();
-    if (
-      lower !== undefined &&
-      upper !== undefined &&
-      lower.instant.getTime() > upper.instant.getTime()
-    ) {
-      conflicting.add(lower);
-      conflicting.add(upper);
-    }
-    if (
-      exact !== undefined &&
-      lower !== undefined &&
-      exact.instant < lower.instant
-    ) {
-      conflicting.add(exact);
-      conflicting.add(lower);
-    }
-    if (
-      exact !== undefined &&
-      upper !== undefined &&
-      exact.instant > upper.instant
-    ) {
-      conflicting.add(exact);
-      conflicting.add(upper);
-    }
-    if (conflicting.size === 0) {
+    const conflictingIds = conflictingIntentIds(node, pointKind);
+    if (conflictingIds.length === 0) {
       return [];
     }
-    const entries = [...conflicting].toSorted((left, right) =>
-      left.id.localeCompare(right.id),
-    );
+    const entries = node.intents
+      .filter(
+        (
+          intent,
+        ): intent is Extract<ScheduleUserTimeIntent, { kind: 'POINT_TIME' }> =>
+          intent.kind === 'POINT_TIME' && conflictingIds.includes(intent.id),
+      )
+      .toSorted((left, right) => left.id.localeCompare(right.id));
     return [
       {
         intentIds: entries.map((intent) => intent.id),
@@ -378,6 +440,47 @@ function findIntentConflicts(
       },
     ];
   });
+}
+
+function conflictingIntentIds(
+  node: ScheduleNodeInput,
+  pointKind: SchedulePointKind,
+): readonly string[] {
+  const intents = node.intents.filter(
+    (
+      intent,
+    ): intent is Extract<ScheduleUserTimeIntent, { kind: 'POINT_TIME' }> =>
+      intent.kind === 'POINT_TIME' && intent.pointKind === pointKind,
+  );
+  const exact = intents.find((intent) => intent.operator === 'EXACT');
+  const lower = intents.find((intent) => intent.operator === 'NOT_BEFORE');
+  const upper = intents.find((intent) => intent.operator === 'NOT_AFTER');
+  const conflicting = new Set<string>();
+  if (
+    lower !== undefined &&
+    upper !== undefined &&
+    lower.instant.getTime() > upper.instant.getTime()
+  ) {
+    conflicting.add(lower.id);
+    conflicting.add(upper.id);
+  }
+  if (
+    exact !== undefined &&
+    lower !== undefined &&
+    exact.instant < lower.instant
+  ) {
+    conflicting.add(exact.id);
+    conflicting.add(lower.id);
+  }
+  if (
+    exact !== undefined &&
+    upper !== undefined &&
+    exact.instant > upper.instant
+  ) {
+    conflicting.add(exact.id);
+    conflicting.add(upper.id);
+  }
+  return [...conflicting].toSorted((left, right) => left.localeCompare(right));
 }
 
 function calculateDwellSeconds(

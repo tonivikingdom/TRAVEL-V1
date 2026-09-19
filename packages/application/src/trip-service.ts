@@ -6,6 +6,8 @@ import type {
   PlaceInput,
   PlaceView,
   ResolvedTemporalValueInput,
+  ScheduleBoundBasisView,
+  ScheduleConflictView,
   ScheduleConstraintEvaluationView,
   ScheduleMeasureView,
   SchedulePointProjectionView,
@@ -24,8 +26,10 @@ import {
   evaluateScheduleConstraints,
   parseAbsoluteIsoInstant,
   type ScheduleConstraintEvaluation,
+  type ScheduleBoundBasis,
   type ScheduleMeasure,
   type SchedulePointProjection,
+  type SchedulePropagationConflict,
   type ScheduleUserTimeIntent,
 } from '@travel/domain';
 
@@ -242,6 +246,25 @@ export class TripService {
               }))
           : [],
       ),
+      propagationTransportAnchors: trip.transportEdges.flatMap((edge) =>
+        edge.timeValues
+          .filter(
+            (value) =>
+              value.layer === 'ACTUAL' ||
+              (edge.fixedService && value.layer === 'PLANNED'),
+          )
+          .map((value) => ({
+            transportEdgeId: edge.id,
+            nodeId:
+              value.pointKind === 'DEPARTURE' ? edge.fromNodeId : edge.toNodeId,
+            pointKind: value.pointKind,
+            anchorKind:
+              value.layer === 'ACTUAL'
+                ? ('TRANSPORT_ACTUAL' as const)
+                : ('FIXED_TRANSPORT_PLANNED' as const),
+            value,
+          })),
+      ),
     });
     return {
       tripId: trip.id,
@@ -264,7 +287,7 @@ export class TripService {
         evaluations: node.evaluations.map(toConstraintEvaluationView),
       })),
       violations: result.violations.map(toConstraintEvaluationView),
-      conflicts: result.conflicts.map(toConstraintEvaluationView),
+      conflicts: result.conflicts.map(toScheduleConflictView),
     };
   }
 }
@@ -1013,6 +1036,17 @@ function toSchedulePointProjectionView(
             subjectId: point.effective.subjectId,
             anchor: point.effective.anchor,
           },
+    requirementWindow: {
+      earliest: point.requirementWindow.earliest?.toISOString() ?? null,
+      latest: point.requirementWindow.latest?.toISOString() ?? null,
+      status: point.requirementWindow.status,
+      earliestBasis: point.requirementWindow.earliestBasis.map(
+        toScheduleBoundBasisView,
+      ),
+      latestBasis: point.requirementWindow.latestBasis.map(
+        toScheduleBoundBasisView,
+      ),
+    },
   };
 }
 
@@ -1043,6 +1077,30 @@ function toConstraintEvaluationView(
     expected: toMeasureView(evaluation.expected),
     current: toMeasureView(evaluation.current),
   };
+}
+
+function toScheduleConflictView(
+  conflict: ScheduleConstraintEvaluation | SchedulePropagationConflict,
+): ScheduleConflictView {
+  if ('type' in conflict) {
+    return {
+      ...conflict,
+      lower: conflict.lower.toISOString(),
+      upper: conflict.upper.toISOString(),
+      lowerBasis: conflict.lowerBasis.map(toScheduleBoundBasisView),
+      upperBasis: conflict.upperBasis.map(toScheduleBoundBasisView),
+    };
+  }
+  return {
+    type: 'USER_CONSTRAINT_CONFLICT',
+    ...toConstraintEvaluationView(conflict),
+  };
+}
+
+function toScheduleBoundBasisView(
+  basis: ScheduleBoundBasis,
+): ScheduleBoundBasisView {
+  return basis;
 }
 
 function toMeasureView(

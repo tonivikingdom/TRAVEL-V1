@@ -103,6 +103,19 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 - P3B1 不包含 forward/backward/bidirectional solver、自动改 PLANNED、Provider、Preview/Adopt、
   RecommendationPolicy、风险通知、跨日 Transport 多卡投影或 DST wall-clock command/UI。
 
+## 确定性时间上下界传播（P3B2 foundation）
+
+- P3B2 在纯 domain 中为每个 Node 的 ARRIVAL/DEPARTURE 维护 earliest/latest requirement window，
+  结果只扩展现有 `schedule/evaluate` projection，不写 Trip、Intent、TemporalValue 或 Transport。
+- 硬约束来源仅为全部 UserTimeIntent、Node ACTUAL、Transport ACTUAL，以及 fixedService Transport
+  的 PLANNED 时刻。Node PLANNED/ESTIMATED、非固定交通 PLANNED 与 Transport ESTIMATED 不收紧窗口。
+- MIN_DWELL 只在用户明确设置时建立约束：到达下界向前收紧离开下界，离开上界向后收紧到达上界；
+  没有锚点时保持 UNBOUNDED，不从当前计划停留时长猜用户要求。
+- 传播使用离散 epoch milliseconds、单调收紧 worklist 与有界 relaxation guard，到 fixed point 即停；
+  每个 bound 保留 ruleId、sourceRefs 与简短业务解释。lower > upper 返回结构化客观冲突，不移动 ACTUAL。
+- 相邻节点间没有可靠 Transport ACTUAL/固定班次锚点时不传播旅行时长；P3B2 不把当前路线耗时固化，
+  不查询 Provider，也不生成 RouteCandidate、Recommendation、Preview/Adopt 或计划写入。
+
 ## 受保护安排（O-04 产品规则已确认，仅规格）
 
 - 保护来源只接受可靠结构化事实（例如已采用固定班次、结构化确认的预约/门票时间）或用户主动

@@ -255,9 +255,9 @@ export interface ResolvedTemporalValueInput {
 
 export interface ScheduleEffectivePointView {
   readonly value: TemporalValueView;
-  readonly subjectType: 'NODE' | 'FIXED_TRANSPORT';
+  readonly subjectType: 'NODE' | 'TRANSPORT' | 'FIXED_TRANSPORT';
   readonly subjectId: string;
-  readonly anchor: 'FIXED_TRANSPORT' | null;
+  readonly anchor: 'TRANSPORT_ACTUAL' | 'FIXED_TRANSPORT' | null;
 }
 
 export interface SchedulePointProjectionView {
@@ -265,6 +265,39 @@ export interface SchedulePointProjectionView {
   readonly estimated: TemporalValueView | null;
   readonly actual: TemporalValueView | null;
   readonly effective: ScheduleEffectivePointView | null;
+  readonly requirementWindow: SchedulePropagationWindowView;
+}
+
+export type SchedulePropagationWindowStatus =
+  | 'UNBOUNDED'
+  | 'LOWER_BOUNDED'
+  | 'UPPER_BOUNDED'
+  | 'BOUNDED'
+  | 'EXACT'
+  | 'CONFLICT';
+
+export type SchedulePropagationRuleId =
+  | 'USER_EXACT'
+  | 'USER_NOT_BEFORE'
+  | 'USER_NOT_AFTER'
+  | 'NODE_ACTUAL'
+  | 'TRANSPORT_ACTUAL'
+  | 'FIXED_TRANSPORT_PLANNED'
+  | 'MIN_DWELL_FORWARD'
+  | 'MIN_DWELL_BACKWARD';
+
+export interface ScheduleBoundBasisView {
+  readonly ruleId: SchedulePropagationRuleId;
+  readonly sourceRefs: readonly string[];
+  readonly explanation: string;
+}
+
+export interface SchedulePropagationWindowView {
+  readonly earliest: string | null;
+  readonly latest: string | null;
+  readonly status: SchedulePropagationWindowStatus;
+  readonly earliestBasis: readonly ScheduleBoundBasisView[];
+  readonly latestBasis: readonly ScheduleBoundBasisView[];
 }
 
 export interface FixedTransportAnchorView {
@@ -296,6 +329,25 @@ export interface ScheduleConstraintEvaluationView {
   readonly explanation: string;
 }
 
+export interface ScheduleUserConstraintConflictView extends ScheduleConstraintEvaluationView {
+  readonly type: 'USER_CONSTRAINT_CONFLICT';
+}
+
+export interface SchedulePropagationConflictView {
+  readonly type: 'PROPAGATION_BOUND_CONFLICT';
+  readonly nodeId: string;
+  readonly pointKind: TemporalPointKind;
+  readonly lower: string;
+  readonly upper: string;
+  readonly lowerBasis: readonly ScheduleBoundBasisView[];
+  readonly upperBasis: readonly ScheduleBoundBasisView[];
+  readonly sourceRefs: readonly string[];
+  readonly explanation: string;
+}
+
+export type ScheduleConflictView =
+  ScheduleUserConstraintConflictView | SchedulePropagationConflictView;
+
 export interface ScheduleNodeProjectionView {
   readonly nodeId: string;
   readonly dayOccurrenceId: string;
@@ -313,5 +365,5 @@ export interface ScheduleProjectionView {
   readonly basisVersion: number;
   readonly nodes: readonly ScheduleNodeProjectionView[];
   readonly violations: readonly ScheduleConstraintEvaluationView[];
-  readonly conflicts: readonly ScheduleConstraintEvaluationView[];
+  readonly conflicts: readonly ScheduleConflictView[];
 }

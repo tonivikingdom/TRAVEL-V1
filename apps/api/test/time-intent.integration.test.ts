@@ -257,6 +257,9 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
     const before = await managed.client.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*)::bigint AS count FROM "TemporalValue"
     `;
+    const intentsBefore = await managed.client.userTimeIntent.count({
+      where: { tripId: trip.id },
+    });
     const projection = await evaluate(userA, trip);
     expect(projection.nodes[0]).toMatchObject({
       status: 'VIOLATED',
@@ -264,6 +267,11 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
         planned: { layer: 'PLANNED' },
         estimated: { layer: 'ESTIMATED' },
         effective: { value: { layer: 'ESTIMATED' } },
+        requirementWindow: {
+          earliest: null,
+          latest: '2030-10-01T11:30:00.000Z',
+          status: 'UPPER_BOUNDED',
+        },
       },
     });
     expect(projection.violations[0]?.currentLayer).toBe('ESTIMATED');
@@ -272,6 +280,11 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
       SELECT COUNT(*)::bigint AS count FROM "TemporalValue"
     `;
     expect(after[0]?.count).toBe(before[0]?.count);
+    expect(
+      await managed.client.userTimeIntent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(intentsBefore);
   });
 
   it('uses ACTUAL as immutable evaluation evidence and evaluates dwell states', async () => {
@@ -336,10 +349,15 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
     });
     const projection = await evaluate(userA, trip);
     expect(projection.nodes[0]?.status).toBe('CONFLICT');
-    expect(projection.conflicts[0]?.intentIds).toHaveLength(2);
+    const conflict = projection.conflicts[0];
+    expect(conflict?.type).toBe('USER_CONSTRAINT_CONFLICT');
+    if (conflict?.type === 'USER_CONSTRAINT_CONFLICT') {
+      expect(conflict.intentIds).toHaveLength(2);
+    }
+    expect(projection.conflicts).toHaveLength(1);
   });
 
-  it('projects fixed transport planned anchors without copying them to Node values', async () => {
+  it('C02 projects a fixed 20:21 departure backward through 40-minute dwell without writing planned time', async () => {
     let trip = await tripWithVisit(userA, ['Tokyo', 'Los Angeles']);
     const [from, to] = trip.days.flatMap((day) => day.nodes);
     trip = await command(userA, trip, {
@@ -365,15 +383,15 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
         sourceRef: 'SYNTHETIC_FIXED_SERVICE',
       },
     );
+    trip = await setTime(trip, userA, from!.id, 'PLANNED', 'ARRIVAL', '19:56');
     trip = await command(userA, trip, {
-      type: 'SET_TIME_INTENT',
+      type: 'SET_MIN_DWELL',
       nodeId: from!.id,
-      pointKind: 'DEPARTURE',
-      operator: 'EXACT',
-      instant: '2030-10-01T20:21:00+08:00',
-      timeZone: 'Asia/Shanghai',
+      durationSeconds: 2_400,
       locked: true,
     });
+    const version = trip.version;
+    const temporalCount = await managed.client.temporalValue.count();
     const projection = await evaluate(userA, trip);
     expect(projection.nodes[0]?.departure.planned).toBeNull();
     expect(projection.nodes[0]?.departure.effective).toMatchObject({
@@ -382,6 +400,151 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
       anchor: 'FIXED_TRANSPORT',
     });
     expect(projection.nodes[0]?.anchors[0]?.type).toBe('FIXED_TRANSPORT');
+    expect(projection.nodes[0]?.arrival.requirementWindow).toMatchObject({
+      earliest: null,
+      latest: '2030-10-01T11:41:00.000Z',
+      status: 'UPPER_BOUNDED',
+    });
+    expect(projection.nodes[0]?.departure.requirementWindow).toMatchObject({
+      earliest: '2030-10-01T12:21:00.000Z',
+      latest: '2030-10-01T12:21:00.000Z',
+      status: 'EXACT',
+    });
+    expect(projection.nodes[0]?.evaluations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'MINIMUM', status: 'VIOLATED' }),
+      ]),
+    );
+    expect((await getTrip(userA, trip.id)).version).toBe(version);
+    expect(await managed.client.temporalValue.count()).toBe(temporalCount);
+    expect(
+      firstNode(await getTrip(userA, trip.id)).timeValues.find(
+        (value) => value.layer === 'PLANNED',
+      )?.instant,
+    ).toBe('2030-10-01T11:56:00.000Z');
+  });
+
+  it('reports a propagation conflict without moving ACTUAL to satisfy a fixed departure', async () => {
+    let trip = await tripWithVisit(userA, ['Actual arrival', 'Next']);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    trip = await command(userA, trip, {
+      type: 'SET_MANUAL_TRANSPORT',
+      fromNodeId: from!.id,
+      toNodeId: to!.id,
+      mode: 'RAIL',
+      fixedService: true,
+      serviceLabel: 'SYNTHETIC 20:21 train',
+    });
+    const edge = trip.connections[0]!.transport!;
+    trip = await setTime(trip, userA, from!.id, 'ACTUAL', 'ARRIVAL', '20:00');
+    trip = await setTransportTime(
+      trip,
+      userA,
+      edge.id,
+      'PLANNED',
+      'DEPARTURE',
+      '20:21',
+    );
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: from!.id,
+      durationSeconds: 2_400,
+      locked: true,
+    });
+
+    const projection = await evaluate(userA, trip);
+    expect(projection.nodes[0]?.arrival.requirementWindow).toMatchObject({
+      earliest: '2030-10-01T12:00:00.000Z',
+      latest: '2030-10-01T11:41:00.000Z',
+      status: 'CONFLICT',
+    });
+    expect(projection.conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'PROPAGATION_BOUND_CONFLICT',
+          nodeId: from!.id,
+          pointKind: 'ARRIVAL',
+        }),
+      ]),
+    );
+    const actual = await managed.client.temporalValue.findFirstOrThrow({
+      where: {
+        nodeId: from!.id,
+        layer: 'ACTUAL',
+        pointKind: 'ARRIVAL',
+      },
+    });
+    expect(actual.instant.toISOString()).toBe('2030-10-01T12:00:00.000Z');
+  });
+
+  it('uses non-fixed Transport ACTUAL as hard anchors but ignores its PLANNED time', async () => {
+    let trip = await tripWithVisit(userA, ['From', 'To']);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    trip = await command(userA, trip, {
+      type: 'SET_MANUAL_TRANSPORT',
+      fromNodeId: from!.id,
+      toNodeId: to!.id,
+      mode: 'TAXI',
+      fixedService: false,
+    });
+    const edge = trip.connections[0]!.transport!;
+    trip = await setTransportTime(
+      trip,
+      userA,
+      edge.id,
+      'PLANNED',
+      'DEPARTURE',
+      '09:00',
+    );
+    trip = await setTransportTime(
+      trip,
+      userA,
+      edge.id,
+      'ESTIMATED',
+      'ARRIVAL',
+      '09:30',
+    );
+    let projection = await evaluate(userA, trip);
+    expect(projection.nodes[0]?.departure.requirementWindow.status).toBe(
+      'UNBOUNDED',
+    );
+    expect(projection.nodes[1]?.arrival.requirementWindow.status).toBe(
+      'UNBOUNDED',
+    );
+
+    trip = await setTransportTime(
+      trip,
+      userA,
+      edge.id,
+      'ACTUAL',
+      'DEPARTURE',
+      '09:05',
+    );
+    trip = await setTransportTime(
+      trip,
+      userA,
+      edge.id,
+      'ACTUAL',
+      'ARRIVAL',
+      '09:35',
+    );
+    projection = await evaluate(userA, trip);
+    expect(projection.nodes[0]?.departure.requirementWindow).toMatchObject({
+      earliest: '2030-10-01T01:05:00.000Z',
+      latest: '2030-10-01T01:05:00.000Z',
+      status: 'EXACT',
+    });
+    expect(projection.nodes[0]?.departure.effective).toMatchObject({
+      value: { layer: 'ACTUAL' },
+      subjectType: 'TRANSPORT',
+      subjectId: edge.id,
+      anchor: 'TRANSPORT_ACTUAL',
+    });
+    expect(projection.nodes[1]?.arrival.requirementWindow).toMatchObject({
+      earliest: '2030-10-01T01:35:00.000Z',
+      latest: '2030-10-01T01:35:00.000Z',
+      status: 'EXACT',
+    });
   });
 
   it('keeps occurrence sequence during evaluation when local dates go backward', async () => {
@@ -497,6 +660,36 @@ describe('P3B1 time intents and deterministic evaluation with PostgreSQL 17', ()
         timeZone: 'Asia/Shanghai',
         sourceKind: layer === 'ACTUAL' ? 'PROVIDER_OBSERVATION' : 'USER_VALUE',
         sourceRef: 'SYNTHETIC_P3B1',
+        ...(layer === 'ACTUAL'
+          ? { observedAt: `2030-10-01T${clock}:00+08:00` }
+          : {}),
+      },
+    );
+  }
+
+  async function setTransportTime(
+    trip: TripView,
+    identity: SyntheticIdentity,
+    transportEdgeId: string,
+    layer: 'PLANNED' | 'ESTIMATED' | 'ACTUAL',
+    pointKind: 'ARRIVAL' | 'DEPARTURE',
+    clock: string,
+  ): Promise<TripView> {
+    return tripService.setResolvedTemporalValue(
+      identity.actor,
+      trip.id,
+      trip.version,
+      { type: 'TRANSPORT', transportEdgeId },
+      {
+        layer,
+        pointKind,
+        instant: `2030-10-01T${clock}:00+08:00`,
+        timeZone: 'Asia/Shanghai',
+        sourceKind:
+          layer === 'ACTUAL'
+            ? 'PROVIDER_OBSERVATION'
+            : 'ADOPTED_TRANSPORT_FACT',
+        sourceRef: 'SYNTHETIC_P3B2',
         ...(layer === 'ACTUAL'
           ? { observedAt: `2030-10-01T${clock}:00+08:00` }
           : {}),

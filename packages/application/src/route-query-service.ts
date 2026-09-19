@@ -1,5 +1,4 @@
 import type {
-  RouteCandidateView,
   RouteQueryHint,
   RouteQueryRequest,
   RouteQueryResponse,
@@ -18,6 +17,13 @@ import type {
   RouteProvider,
   RouteProviderTimePreference,
 } from './route-ports.js';
+import {
+  systemClock,
+  type Clock,
+  type RouteCandidatePayload,
+  type RoutePlanningRepository,
+} from './route-planning-ports.js';
+import { hashRouteCandidateSnapshot } from './route-snapshot.js';
 import {
   evaluateTripScheduleRecord,
   orderedTripNodes,
@@ -57,7 +63,11 @@ export class RouteQueryService {
   constructor(
     private readonly repository: TripRepository,
     private readonly provider: RouteProvider,
-  ) {}
+    private readonly planningRepository: RoutePlanningRepository,
+    private readonly options: RouteQueryServiceOptions,
+  ) {
+    requireTtl(options.candidateSnapshotTtlSeconds);
+  }
 
   async queryRoutes(
     actor: Actor,
@@ -164,6 +174,7 @@ export class RouteQueryService {
       );
     }
 
+    const now = (this.options.clock ?? systemClock).now();
     const candidateIds = new Set<string>();
     const accepted: NormalizedRouteCandidate[] = [];
     for (const candidate of providerResult.candidates) {
@@ -184,6 +195,9 @@ export class RouteQueryService {
       if (!providerCandidateUsesSupportedZones(candidate)) {
         throw invalidProviderResponse();
       }
+      if (candidate.validUntil !== null && candidate.validUntil <= now) {
+        continue;
+      }
       accepted.push(candidate);
     }
     if (accepted.length === 0) {
@@ -191,17 +205,74 @@ export class RouteQueryService {
     }
 
     const timeCondition = toTimeConditionView(time);
+    const payloads = accepted.map((candidate) =>
+      toCandidatePayload(candidate, trip.version, timeCondition),
+    );
+    const saved = await this.planningRepository.saveCandidateSnapshots({
+      ownerUserId: actor.userId,
+      tripId: trip.id,
+      basisVersion: trip.version,
+      fromNodeId: fromNode.id,
+      toNodeId: toNode.id,
+      snapshots: accepted.map((candidate, index) => {
+        const candidatePayload = payloads[index];
+        if (candidatePayload === undefined) {
+          throw new Error('Route candidate snapshot payload is missing');
+        }
+        const expiresAt = snapshotExpiry(
+          now,
+          this.options.candidateSnapshotTtlSeconds,
+          candidate.validUntil,
+        );
+        return {
+          provider: candidate.provider,
+          providerCandidateRef: candidate.providerCandidateRef,
+          observedAt: candidate.observedAt,
+          providerValidUntil: candidate.validUntil,
+          candidatePayload,
+          candidateHash: hashRouteCandidateSnapshot({
+            tripId: trip.id,
+            basisVersion: trip.version,
+            fromNodeId: fromNode.id,
+            toNodeId: toNode.id,
+            provider: candidate.provider,
+            observedAt: candidate.observedAt.toISOString(),
+            candidatePayload,
+          }),
+          queryTimeCondition: timeCondition,
+          createdAt: now,
+          expiresAt,
+        };
+      }),
+    });
+    if (saved.status === 'NOT_FOUND') {
+      throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
+    }
+    if (saved.status !== 'SUCCESS') {
+      throw new ApplicationError(
+        'VERSION_CONFLICT',
+        '行程在路线查询期间发生变化，请刷新后重新查询。',
+        409,
+      );
+    }
     return {
       tripId: trip.id,
       basisVersion: trip.version,
       fromNodeId: fromNode.id,
       toNodeId: toNode.id,
       timeCondition,
-      candidates: accepted.map((candidate) =>
-        toCandidateView(candidate, trip.version, timeCondition),
-      ),
+      candidates: saved.snapshots.map((snapshot) => ({
+        ...snapshot.candidatePayload,
+        candidateSnapshotId: snapshot.id,
+        snapshotExpiresAt: snapshot.expiresAt.toISOString(),
+      })),
     };
   }
+}
+
+export interface RouteQueryServiceOptions {
+  readonly candidateSnapshotTtlSeconds: number;
+  readonly clock?: Clock;
 }
 
 function combineQueryTime(
@@ -320,11 +391,11 @@ function toTimeConditionView(
   };
 }
 
-function toCandidateView(
+function toCandidatePayload(
   candidate: NormalizedRouteCandidate,
   basisVersion: number,
   timeCondition: RouteQueryTimeConditionView,
-): RouteCandidateView {
+): RouteCandidatePayload {
   return {
     candidateId: candidate.candidateId,
     provider: candidate.provider,
@@ -347,6 +418,23 @@ function toCandidateView(
     })),
     fare: candidate.fare,
   };
+}
+
+function snapshotExpiry(
+  now: Date,
+  ttlSeconds: number,
+  providerValidUntil: Date | null,
+): Date {
+  const internalExpiry = new Date(now.getTime() + ttlSeconds * 1_000);
+  return providerValidUntil !== null && providerValidUntil < internalExpiry
+    ? providerValidUntil
+    : internalExpiry;
+}
+
+function requireTtl(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 604_800) {
+    throw new Error('candidateSnapshotTtlSeconds must be 1..604800');
+  }
 }
 
 function toTimePointView(point: {

@@ -51,6 +51,23 @@ export {
 } from './tokens.js';
 export { TripService } from './trip-service.js';
 export { RouteQueryService } from './route-query-service.js';
+export { RoutePreviewService } from './route-preview-service.js';
+export {
+  hashRouteCandidateSnapshot,
+  restoreNormalizedCandidate,
+} from './route-snapshot.js';
+export {
+  systemClock,
+  type Clock,
+  type CreateRoutePreviewResult,
+  type RouteCandidatePayload,
+  type RouteCandidateSnapshotDraft,
+  type RouteCandidateSnapshotRecord,
+  type RoutePlanningRepository,
+  type RoutePreviewRecord,
+  type SaveRouteCandidateSnapshotsResult,
+  type StoredRoutePreviewPayload,
+} from './route-planning-ports.js';
 export type {
   RouteProvider,
   RouteProviderLocationInput,

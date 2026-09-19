@@ -1,6 +1,7 @@
 import {
   AuthService,
   NotificationService,
+  RoutePreviewService,
   RouteQueryService,
   TripService,
 } from '@travel/application';
@@ -9,6 +10,7 @@ import {
   createPrismaClient,
   PrismaAuthRepository,
   PrismaNotificationRepository,
+  PrismaRoutePlanningRepository,
   PrismaTripRepository,
   type ManagedPrismaClient,
 } from '@travel/persistence';
@@ -20,6 +22,7 @@ import {
 
 import { buildApi } from './app.js';
 import { readAuthRuntimeConfig } from './auth-config.js';
+import { readRoutePlanningConfig } from './route-planning-config.js';
 
 const host = process.env.API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.API_PORT ?? '3000', 10);
@@ -29,6 +32,7 @@ let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
 let routeQueryService: RouteQueryService | undefined;
+let routePreviewService: RoutePreviewService | undefined;
 let tripService: TripService | undefined;
 
 if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
@@ -42,12 +46,29 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     new PrismaNotificationRepository(managedPrisma.client),
   );
   const tripRepository = new PrismaTripRepository(managedPrisma.client);
+  const planningRepository = new PrismaRoutePlanningRepository(
+    managedPrisma.client,
+  );
+  const routePlanningConfig = readRoutePlanningConfig(process.env);
   const routeProviderConfig = readRouteProviderConfig(process.env);
   const routeProvider =
     routeProviderConfig.provider === 'synthetic'
       ? createDevelopmentSyntheticRouteProvider()
       : new UnconfiguredRouteProvider();
-  routeQueryService = new RouteQueryService(tripRepository, routeProvider);
+  routeQueryService = new RouteQueryService(
+    tripRepository,
+    routeProvider,
+    planningRepository,
+    {
+      candidateSnapshotTtlSeconds:
+        routePlanningConfig.candidateSnapshotTtlSeconds,
+    },
+  );
+  routePreviewService = new RoutePreviewService(
+    tripRepository,
+    planningRepository,
+    { previewTtlSeconds: routePlanningConfig.previewTtlSeconds },
+  );
   tripService = new TripService(tripRepository);
 }
 
@@ -56,6 +77,7 @@ const app = buildApi({
   ...(authService === undefined ? {} : { authService }),
   ...(notificationService === undefined ? {} : { notificationService }),
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
+  ...(routePreviewService === undefined ? {} : { routePreviewService }),
   ...(tripService === undefined ? {} : { tripService }),
 });
 let shuttingDown = false;

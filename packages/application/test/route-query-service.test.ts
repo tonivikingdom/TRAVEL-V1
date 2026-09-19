@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { RouteQueryService } from '../src/route-query-service.js';
 import type { Actor } from '../src/authorization.js';
+import type { RoutePlanningRepository } from '../src/route-planning-ports.js';
 import type { RouteProvider } from '../src/route-ports.js';
 import type {
   ItineraryNodeRecord,
@@ -31,6 +32,7 @@ describe('RouteQueryService', () => {
   let findOwnedById: Mock<TripRepository['findOwnedById']>;
   let queryRoutes: Mock<RouteProvider['queryRoutes']>;
   let provider: RouteProvider;
+  let planningRepository: RoutePlanningRepository;
 
   beforeEach(() => {
     findOwnedById = vi
@@ -49,6 +51,29 @@ describe('RouteQueryService', () => {
       .fn<RouteProvider['queryRoutes']>()
       .mockResolvedValue({ status: 'SUCCESS', candidates: [candidate()] });
     provider = { queryRoutes };
+    planningRepository = {
+      saveCandidateSnapshots: vi.fn(
+        async (
+          input: Parameters<
+            RoutePlanningRepository['saveCandidateSnapshots']
+          >[0],
+        ) => ({
+          status: 'SUCCESS' as const,
+          snapshots: input.snapshots.map((snapshot, index) => ({
+            ...snapshot,
+            id: `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`,
+            ownerUserId: input.ownerUserId,
+            tripId: input.tripId,
+            basisVersion: input.basisVersion,
+            fromNodeId: input.fromNodeId,
+            toNodeId: input.toNodeId,
+          })),
+        }),
+      ),
+      findSnapshotOwned: vi.fn(),
+      createPreview: vi.fn(),
+      findPreviewOwned: vi.fn(),
+    };
   });
 
   it('queries an adjacent Place pair and preserves provider provenance', async () => {
@@ -62,8 +87,58 @@ describe('RouteQueryService', () => {
       observedAt: '2030-01-01T00:00:00.000Z',
       queryBasisVersion: 3,
       fare: null,
+      candidateSnapshotId: '00000000-0000-4000-8000-000000000010',
+      snapshotExpiresAt: '2030-01-01T00:15:00.000Z',
     });
     expect(findOwnedById).toHaveBeenCalledWith({ ownerUserId, tripId });
+  });
+
+  it('caps snapshot expiry at provider validity before the internal TTL', async () => {
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...candidate(),
+          validUntil: new Date('2030-01-01T00:05:00.000Z'),
+        },
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, request());
+    expect(result.candidates[0]?.snapshotExpiresAt).toBe(
+      '2030-01-01T00:05:00.000Z',
+    );
+    expect(planningRepository.saveCandidateSnapshots).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshots: [
+          expect.objectContaining({
+            expiresAt: new Date('2030-01-01T00:05:00.000Z'),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('rejects a provider-time race when the short save transaction sees a changed Trip', async () => {
+    vi.mocked(planningRepository.saveCandidateSnapshots).mockResolvedValue({
+      status: 'VERSION_CONFLICT',
+    });
+
+    await expect(
+      service().queryRoutes(actor, tripId, request()),
+    ).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    expect(queryRoutes).toHaveBeenCalledOnce();
+  });
+
+  it('rejects duplicate provider candidate IDs before saving snapshots', async () => {
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [candidate(), candidate()],
+    });
+    await expect(
+      service().queryRoutes(actor, tripId, request()),
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    expect(planningRepository.saveCandidateSnapshots).not.toHaveBeenCalled();
   });
 
   it('requires a query time when propagation is unbounded and no hint exists', async () => {
@@ -367,7 +442,10 @@ describe('RouteQueryService', () => {
   });
 
   function service(): RouteQueryService {
-    return new RouteQueryService(repository, provider);
+    return new RouteQueryService(repository, provider, planningRepository, {
+      candidateSnapshotTtlSeconds: 900,
+      clock: { now: () => now },
+    });
   }
 });
 

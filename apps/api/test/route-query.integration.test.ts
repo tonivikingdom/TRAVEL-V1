@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AuthService,
   digestOpaqueToken,
+  RoutePreviewService,
   RouteQueryService,
   TripService,
   type Actor,
@@ -13,6 +14,7 @@ import type { RouteQueryResponse, TripView } from '@travel/contracts';
 import {
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaRoutePlanningRepository,
   PrismaTripRepository,
   type ManagedPrismaClient,
 } from '@travel/persistence';
@@ -45,6 +47,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   let admin: SyntheticIdentity;
   let providerInputs: RouteProviderQueryInput[];
   let providerResult: RouteProviderResult;
+  let currentNow: Date;
+  let providerHook: (() => Promise<void>) | undefined;
 
   beforeAll(() => {
     managed = createPrismaClient(databaseUrl);
@@ -58,15 +62,21 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       createIdentity(managed, 'p4a1-admin@synthetic.example.test', 'ADMIN'),
     ]);
     providerInputs = [];
+    currentNow = NOW;
+    providerHook = undefined;
     providerResult = {
       status: 'SUCCESS',
       candidates: [candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z')],
     };
     const repository = new PrismaTripRepository(managed.client);
-    const provider = new SyntheticRouteProvider((input) => {
+    const provider = new SyntheticRouteProvider(async (input) => {
       providerInputs.push(input);
+      await providerHook?.();
       return providerResult;
     });
+    const routePlanningRepository = new PrismaRoutePlanningRepository(
+      managed.client,
+    );
     app = buildApi({
       readinessProbe: {
         async check() {
@@ -78,7 +88,23 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         authConfig(),
       ),
       tripService: new TripService(repository),
-      routeQueryService: new RouteQueryService(repository, provider),
+      routeQueryService: new RouteQueryService(
+        repository,
+        provider,
+        routePlanningRepository,
+        {
+          candidateSnapshotTtlSeconds: 900,
+          clock: { now: () => currentNow },
+        },
+      ),
+      routePreviewService: new RoutePreviewService(
+        repository,
+        routePlanningRepository,
+        {
+          previewTtlSeconds: 600,
+          clock: { now: () => currentNow },
+        },
+      ),
     });
   });
 
@@ -90,7 +116,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     await managed.close();
   });
 
-  it('queries adjacent places and remains transactionally read-only', async () => {
+  it('persists a candidate snapshot without mutating official Trip facts', async () => {
     const trip = await tripWithVisits(userA, ['Tokyo', 'Los Angeles']);
     const [from, to] = trip.days.flatMap((day) => day.nodes);
     const before = await databaseFacts(trip.id);
@@ -111,6 +137,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           provider: 'SYNTHETIC',
           queryBasisVersion: trip.version,
           overall: { durationSeconds: 3600 },
+          candidateSnapshotId: expect.any(String),
+          snapshotExpiresAt: '2030-09-01T00:15:00.000Z',
         },
       ],
     });
@@ -119,7 +147,165 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       destination: { name: 'Los Angeles' },
       earliestDeparture: new Date('2030-10-01T10:00:00Z'),
     });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(1);
     expect(await databaseFacts(trip.id)).toEqual(before);
+  });
+
+  it('creates and re-reads an immutable Preview without changing official Trip facts', async () => {
+    const trip = await tripWithVisits(userA, ['Tokyo', 'Los Angeles']);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    const before = await databaseFacts(trip.id);
+    const routeResponse = await query(
+      userA,
+      trip,
+      from!.id,
+      to!.id,
+      departHint(),
+    );
+    const route = routeResponse.json() as RouteQueryResponse;
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const preview = createResponse.json() as { previewId: string } & Record<
+      string,
+      unknown
+    >;
+    expect(preview).toMatchObject({
+      basisVersion: trip.version,
+      candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      status: 'ACTIVE',
+      adoptable: true,
+      currentConnection: { state: 'MISSING', transport: null },
+      changeSummary: {
+        transportAction: 'CREATE',
+        requiresGeneratedNodes: false,
+        temporalLayer: 'PLANNED',
+        temporalSourceKind: 'ADOPTED_TRANSPORT_FACT',
+      },
+    });
+    expect(await databaseFacts(trip.id)).toEqual(before);
+    expect(
+      await managed.client.routePreview.count({ where: { tripId: trip.id } }),
+    ).toBe(1);
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/previews/${preview.previewId}`,
+      headers: bearer(userA),
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toEqual(preview);
+    expect(providerInputs).toHaveLength(1);
+  });
+
+  it('returns NOT_FOUND across owner boundaries and marks expired Preview non-adoptable', async () => {
+    const trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    const routeResponse = await query(
+      userA,
+      trip,
+      from!.id,
+      to!.id,
+      departHint(),
+    );
+    const route = routeResponse.json() as RouteQueryResponse;
+
+    let response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userB),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(response.statusCode).toBe(404);
+
+    response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const previewId = (response.json() as { previewId: string }).previewId;
+
+    const hiddenPreview = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/previews/${previewId}`,
+      headers: bearer(userB),
+    });
+    expect(hiddenPreview.statusCode).toBe(404);
+    currentNow = new Date(NOW.getTime() + 901_000);
+
+    const staleCreate = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(staleCreate.statusCode).toBe(409);
+    expect(staleCreate.json()).toMatchObject({
+      error: { code: 'PREVIEW_STALE' },
+    });
+
+    response = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/previews/${previewId}`,
+      headers: bearer(userA),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      previewId,
+      status: 'EXPIRED',
+      adoptable: false,
+    });
+  });
+
+  it('does not persist a snapshot when the Trip changes during Provider I/O', async () => {
+    const trip = await tripWithVisits(userA, ['From', 'To']);
+    const [from, to] = trip.days[0]!.nodes;
+    providerHook = async () => {
+      const mutation = await app.inject({
+        method: 'PATCH',
+        url: `/trips/${trip.id}`,
+        headers: bearer(userA),
+        payload: {
+          baseTripVersion: trip.version,
+          name: 'SYNTHETIC changed during provider call',
+        },
+      });
+      expect(mutation.statusCode).toBe(200);
+    };
+
+    const response = await query(userA, trip, from!.id, to!.id, departHint());
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: { code: 'VERSION_CONFLICT' },
+    });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
   });
 
   it('feeds both P3B2 hard bounds to the provider without copying propagation', async () => {

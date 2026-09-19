@@ -11,6 +11,7 @@ export { PrismaMagicLinkDeliveryRepository } from './prisma-magic-link-delivery-
 export { PrismaNotificationRepository } from './prisma-notification-repository.js';
 export { PrismaStoredObjectRepository } from './prisma-stored-object-repository.js';
 export { PrismaTripRepository } from './prisma-trip-repository.js';
+export { PrismaRoutePlanningRepository } from './prisma-route-planning-repository.js';
 export {
   createPrismaClient,
   PrismaClient,

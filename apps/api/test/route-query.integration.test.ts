@@ -1442,6 +1442,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       ['Expired From', 'Expired To'],
       '2030-10-02',
     );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [singleCandidateForLocalDate('2030-10-02')],
+    };
     const [expiredFrom, expiredTo] = expiredTrip.days[0]!.nodes;
     const expiredPreview = await createPreview(
       userA,
@@ -1471,6 +1475,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       ['Legacy From', 'Legacy To'],
       '2030-10-03',
     );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [singleCandidateForLocalDate('2030-10-03')],
+    };
     const [legacyFrom, legacyTo] = legacyTrip.days[0]!.nodes;
     const legacyPreview = await createPreview(
       userA,
@@ -1504,6 +1512,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       ['Changed From', 'Changed To'],
       '2030-10-04',
     );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [singleCandidateForLocalDate('2030-10-04')],
+    };
     const [changedFrom, changedTo] = changedTrip.days[0]!.nodes;
     const changedPreview = await createPreview(
       userA,
@@ -1576,6 +1588,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       ['Conflict From', 'Conflict To'],
       '2030-10-02',
     );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [singleCandidateForLocalDate('2030-10-02')],
+    };
     const [conflictFrom, conflictTo] = conflictTrip.days[0]!.nodes;
     const conflictPreview = await createPreview(
       userA,
@@ -2192,6 +2208,17 @@ function replacementSingleCandidate(
   };
 }
 
+function singleCandidateForLocalDate(
+  localDate: string,
+): Extract<RouteProviderResult, { status: 'SUCCESS' }>['candidates'][number] {
+  return candidate(
+    `${localDate}T10:00:00Z`,
+    `${localDate}T11:00:00Z`,
+    'UTC',
+    'UTC',
+  );
+}
+
 function transferCandidate(): Extract<
   RouteProviderResult,
   { status: 'SUCCESS' }
@@ -2270,30 +2297,39 @@ function dateRollbackTransferCandidate(): Extract<
   const candidate = result.candidates[0]!;
   const first = candidate.legs[0]!;
   const second = candidate.legs[1]!;
-  const departure = new Date('2030-10-01T23:30:00Z');
-  const transferAt = new Date('2030-10-02T00:10:00Z');
-  const arrival = new Date('2030-10-02T01:00:00Z');
+  const departure = new Date('2030-10-01T10:00:00Z');
+  const transferAt = new Date('2030-10-01T16:00:00Z');
+  const arrival = new Date('2030-10-01T18:00:00Z');
   return {
     status: 'SUCCESS',
     candidates: [
       {
         ...candidate,
         candidateId: 'candidate-date-rollback-transfer',
-        departure: { instant: departure, timeZone: 'UTC' },
-        arrival: { instant: arrival, timeZone: 'UTC' },
-        durationSeconds: 5_400,
+        departure: { instant: departure, timeZone: 'Asia/Tokyo' },
+        arrival: { instant: arrival, timeZone: 'America/Los_Angeles' },
+        durationSeconds: 28_800,
         legs: [
           {
             ...first,
-            departure: { instant: departure, timeZone: 'UTC' },
-            arrival: { instant: transferAt, timeZone: 'UTC' },
-            durationSeconds: 2_400,
+            departure: { instant: departure, timeZone: 'Asia/Tokyo' },
+            arrival: {
+              instant: transferAt,
+              timeZone: 'Pacific/Kiritimati',
+            },
+            durationSeconds: 21_600,
           },
           {
             ...second,
-            departure: { instant: transferAt, timeZone: 'UTC' },
-            arrival: { instant: arrival, timeZone: 'UTC' },
-            durationSeconds: 3_000,
+            departure: {
+              instant: transferAt,
+              timeZone: 'Pacific/Kiritimati',
+            },
+            arrival: {
+              instant: arrival,
+              timeZone: 'America/Los_Angeles',
+            },
+            durationSeconds: 7_200,
           },
         ],
       },

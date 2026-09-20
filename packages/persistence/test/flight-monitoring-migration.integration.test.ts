@@ -56,6 +56,21 @@ describe('P5D3 flight monitoring migration', () => {
         expect(
           (
             await target.query(`
+              SELECT column_name
+              FROM information_schema.columns
+              WHERE table_schema = 'public'
+                AND table_name = 'FlightMonitorState'
+                AND column_name IN ('lastDecisionFetchedAt', 'lastDecisionSnapshot')
+              ORDER BY column_name
+            `)
+          ).rows,
+        ).toEqual([
+          { column_name: 'lastDecisionFetchedAt' },
+          { column_name: 'lastDecisionSnapshot' },
+        ]);
+        expect(
+          (
+            await target.query(`
               SELECT "priority", "changeKinds", "hasDownstreamImpact"
               FROM "NotificationEvent"
               LIMIT 1

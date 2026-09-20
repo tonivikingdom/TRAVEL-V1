@@ -272,7 +272,16 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       await managed.client.flightMonitorState.findUniqueOrThrow({
         where: { flightBindingId: adopted.binding.id },
       }),
-    ).toMatchObject({ mode: 'DELAYED', lastNotifiedDelayMinutes: 150 });
+    ).toMatchObject({
+      mode: 'DELAYED',
+      lastNotifiedDelayMinutes: 150,
+      lastDecisionFetchedAt: new Date('2030-01-01T12:02:00.000Z'),
+      lastDecisionSnapshot: expect.objectContaining({
+        departure: expect.objectContaining({
+          revisedUtc: '2030-01-02T14:30:00.000Z',
+        }),
+      }),
+    });
     expect(
       await managed.client.notificationEvent.count({
         where: {
@@ -292,6 +301,199 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         select: { runAt: true },
       }),
     ).toEqual([{ runAt: new Date('2030-01-01T13:00:00.000Z') }]);
+  });
+
+  it.each([
+    {
+      name: 'boarding and gate',
+      newer: snapshot({
+        status: 'BOARDING',
+        fetchedAt: '2030-01-01T12:02:00.000Z',
+        gate: 'A7',
+      }),
+      expectedKinds: ['GATE_AVAILABLE', 'BOARDING'],
+      expectedMode: 'NORMAL',
+      expectedDelay: null,
+      expectedDelayedRunAt: null,
+    },
+    {
+      name: 'delay, boarding and gate',
+      newer: snapshot({
+        status: 'BOARDING',
+        fetchedAt: '2030-01-01T12:02:00.000Z',
+        revisedDeparture: '2030-01-02T14:30:00.000Z',
+        gate: 'A7',
+      }),
+      expectedKinds: ['DELAY', 'GATE_AVAILABLE', 'BOARDING'],
+      expectedMode: 'DELAYED',
+      expectedDelay: 150,
+      expectedDelayedRunAt: new Date('2030-01-02T11:00:00.000Z'),
+    },
+  ])(
+    'executes the latest $name observation decision exactly once under concurrency',
+    async ({
+      newer,
+      expectedKinds,
+      expectedMode,
+      expectedDelay,
+      expectedDelayedRunAt,
+    }) => {
+      const fixture = await createFixture(managed);
+      const older = deferred<readonly FlightSnapshotView[]>();
+      let refreshCall = 0;
+      const provider: FlightSnapshotProvider = {
+        search: async () => [],
+        refresh: async () => {
+          refreshCall += 1;
+          return refreshCall === 1 ? older.promise : [newer];
+        },
+      };
+      const now = () => new Date('2030-01-02T10:00:00.000Z');
+      const flightRepository = new PrismaFlightRepository(managed.client);
+      const service = createMonitoringService(
+        managed,
+        flightRepository,
+        provider,
+        now,
+      );
+      const adopted = await flightRepository.adopt({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        baseTripVersion: 1,
+        transportEdgeId: fixture.flightEdgeId,
+        flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+      });
+      if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+      await service.ensureEligibleMonitoring();
+
+      const olderRefresh = service.executeJob(adopted.binding.id);
+      await waitFor(() => refreshCall === 1);
+      const newerRefresh = service.executeJob(adopted.binding.id);
+      await newerRefresh;
+      older.resolve([
+        snapshot({
+          status: 'SCHEDULED',
+          fetchedAt: '2030-01-01T12:01:00.000Z',
+        }),
+      ]);
+      await olderRefresh;
+
+      expect(
+        await managed.client.flightBinding.findUniqueOrThrow({
+          where: { id: adopted.binding.id },
+        }),
+      ).toMatchObject({
+        status: 'BOARDING',
+        lastRefreshedAt: new Date('2030-01-01T12:02:00.000Z'),
+      });
+      expect(
+        await managed.client.flightMonitorState.findUniqueOrThrow({
+          where: { flightBindingId: adopted.binding.id },
+        }),
+      ).toMatchObject({
+        mode: expectedMode,
+        lastNotifiedDelayMinutes: expectedDelay,
+        lastNotifiedDepartureGate: 'A7',
+        lastDecisionFetchedAt: new Date('2030-01-01T12:02:00.000Z'),
+        lastDecisionSnapshot: expect.objectContaining({
+          status: 'BOARDING',
+          fetchedAt: '2030-01-01T12:02:00.000Z',
+        }),
+      });
+      const notifications = await managed.client.notificationEvent.findMany({
+        where: {
+          flightBindingId: adopted.binding.id,
+          kind: 'FLIGHT_IMPORTANT_CHANGE',
+        },
+      });
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]?.changeKinds).toEqual(expectedKinds);
+      const delayedJobs = await managed.client.job.findMany({
+        where: {
+          type: 'FLIGHT_MONITOR',
+          payloadRef: adopted.binding.id,
+          status: 'QUEUED',
+          uniqueKey: { contains: ':delayed:' },
+        },
+        select: { runAt: true },
+      });
+      expect(delayedJobs).toEqual(
+        expectedDelayedRunAt === null ? [] : [{ runAt: expectedDelayedRunAt }],
+      );
+    },
+  );
+
+  it('lets a stale caller finish an uncommitted latest observation decision', async () => {
+    const fixture = await createFixture(managed);
+    const now = () => new Date('2030-01-02T10:00:00.000Z');
+    const flightRepository = new PrismaFlightRepository(managed.client);
+    const adopted = await flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    const repository = new PrismaFlightMonitoringRepository(managed.client);
+    await repository.ensureEligibleMonitoring(now());
+
+    const latest = snapshot({
+      status: 'BOARDING',
+      fetchedAt: '2030-01-01T12:02:00.000Z',
+      gate: 'A7',
+    });
+    const written = await flightRepository.refresh({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      flightBindingId: adopted.binding.id,
+      flight: latest,
+    });
+    if (written.status !== 'SUCCESS') throw new Error('refresh failed');
+    expect(
+      await managed.client.flightMonitorState.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({ lastDecisionFetchedAt: null });
+
+    const staleProvider: FlightSnapshotProvider = {
+      search: async () => [],
+      refresh: async () => [
+        snapshot({ fetchedAt: '2030-01-01T12:01:00.000Z' }),
+      ],
+    };
+    const service = createMonitoringService(
+      managed,
+      flightRepository,
+      staleProvider,
+      now,
+    );
+    await service.executeJob(adopted.binding.id);
+
+    const state = await managed.client.flightMonitorState.findUniqueOrThrow({
+      where: { flightBindingId: adopted.binding.id },
+    });
+    expect(state).toMatchObject({
+      mode: 'NORMAL',
+      lastNotifiedDepartureGate: 'A7',
+      lastDecisionFetchedAt: new Date('2030-01-01T12:02:00.000Z'),
+      lastDecisionSnapshot: expect.objectContaining({
+        status: 'BOARDING',
+        fetchedAt: '2030-01-01T12:02:00.000Z',
+      }),
+    });
+    expect(
+      await managed.client.notificationEvent.findMany({
+        where: {
+          flightBindingId: adopted.binding.id,
+          kind: 'FLIGHT_IMPORTANT_CHANGE',
+        },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        changeKinds: ['GATE_AVAILABLE', 'BOARDING'],
+      }),
+    ]);
   });
 
   it('uses a new schedule generation when the same binding row is rebound', async () => {
@@ -648,12 +850,32 @@ async function createMonitoring(
     actor,
     flightRepository,
     refreshCalls: () => call,
-    service: new FlightMonitoringService(
-      new FlightService(provider, flightRepository, risk),
-      new PrismaFlightMonitoringRepository(managed.client),
-      { now },
+    service: createMonitoringService(
+      managed,
+      flightRepository,
+      provider,
+      now,
+      risk,
     ),
   };
+}
+
+function createMonitoringService(
+  managed: ManagedPrismaClient,
+  flightRepository: PrismaFlightRepository,
+  provider: FlightSnapshotProvider,
+  now: () => Date,
+  risk = new ExecutionRiskService(
+    new PrismaTripRepository(managed.client),
+    new PrismaExecutionRiskRepository(managed.client),
+    { now },
+  ),
+) {
+  return new FlightMonitoringService(
+    new FlightService(provider, flightRepository, risk),
+    new PrismaFlightMonitoringRepository(managed.client),
+    { now },
+  );
 }
 
 interface Fixture {

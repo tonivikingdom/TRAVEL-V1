@@ -30,6 +30,8 @@ CREATE TABLE "FlightMonitorState" (
   "arrivedAtAirportAt" TIMESTAMPTZ(3),
   "arrivedAirportIata" VARCHAR(3),
   "lastSuccessfulMonitorRefreshAt" TIMESTAMPTZ(3),
+  "lastDecisionFetchedAt" TIMESTAMPTZ(3),
+  "lastDecisionSnapshot" JSONB,
   "lastNotifiedDelayMinutes" INTEGER,
   "earlyDepartureNotified" BOOLEAN NOT NULL DEFAULT false,
   "lastNotifiedDepartureGate" VARCHAR(100),

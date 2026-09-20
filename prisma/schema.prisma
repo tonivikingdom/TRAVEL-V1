@@ -653,6 +653,8 @@ model FlightMonitorState {
   arrivedAtAirportAt             DateTime?         @db.Timestamptz(3)
   arrivedAirportIata             String?           @db.VarChar(3)
   lastSuccessfulMonitorRefreshAt DateTime?         @db.Timestamptz(3)
+  lastDecisionFetchedAt          DateTime?         @db.Timestamptz(3)
+  lastDecisionSnapshot           Json?
   lastNotifiedDelayMinutes       Int?
   earlyDepartureNotified         Boolean           @default(false)
   lastNotifiedDepartureGate      String?           @db.VarChar(100)

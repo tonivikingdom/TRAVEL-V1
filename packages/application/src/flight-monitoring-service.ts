@@ -50,7 +50,6 @@ export class FlightMonitoringService {
       await this.repository.commitRefresh({
         flightBindingId,
         acceptedFetchedAt: new Date(context.binding.lastRefreshedAt),
-        previousSnapshot: context.binding.latestSnapshot,
         hasDownstreamImpact: false,
         recordSuccessfulRefresh: false,
         now,
@@ -153,7 +152,6 @@ export class FlightMonitoringService {
       const notification = await this.repository.commitRefresh({
         flightBindingId,
         acceptedFetchedAt: new Date(response.flightBinding.lastRefreshedAt),
-        previousSnapshot: before.binding.latestSnapshot,
         hasDownstreamImpact: hasFlightRelatedDownstreamImpact(response),
         recordSuccessfulRefresh: true,
         now,

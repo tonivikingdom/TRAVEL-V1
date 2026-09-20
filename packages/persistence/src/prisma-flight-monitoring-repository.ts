@@ -182,9 +182,24 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
         where: { flightBindingId: input.flightBindingId },
       });
       if (current === null) return null;
+      if (
+        input.recordSuccessfulRefresh &&
+        current.lastDecisionFetchedAt !== null &&
+        current.lastDecisionFetchedAt.getTime() >=
+          input.acceptedFetchedAt.getTime()
+      ) {
+        return null;
+      }
+      const latestSnapshot =
+        binding.latestSnapshot as unknown as FlightSnapshotView;
+      const previousSnapshot = input.recordSuccessfulRefresh
+        ? current.lastDecisionSnapshot === null
+          ? (binding.selectedSnapshot as unknown as FlightSnapshotView)
+          : (current.lastDecisionSnapshot as unknown as FlightSnapshotView)
+        : latestSnapshot;
       const decision = decideAcceptedFlightRefresh({
-        previous: input.previousSnapshot,
-        next: binding.latestSnapshot as unknown as FlightSnapshotView,
+        previous: previousSnapshot,
+        next: latestSnapshot,
         state: toDecisionState(current),
         now: input.now,
       });
@@ -196,6 +211,12 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           decision.state,
           input.recordSuccessfulRefresh ? input.now : null,
           current,
+          input.recordSuccessfulRefresh
+            ? {
+                fetchedAt: input.acceptedFetchedAt,
+                snapshot: latestSnapshot,
+              }
+            : null,
         ),
       });
 
@@ -394,7 +415,11 @@ async function cancelQueuedJobs(
 function stateUpdate(
   state: MonitorDecisionState,
   successfulRefreshAt: Date | null,
-  current?: FlightMonitorState,
+  current: FlightMonitorState | undefined,
+  completedDecision: {
+    readonly fetchedAt: Date;
+    readonly snapshot: FlightSnapshotView;
+  } | null = null,
 ) {
   return {
     mode: state.mode,
@@ -403,6 +428,13 @@ function stateUpdate(
     ...(successfulRefreshAt === null
       ? {}
       : { lastSuccessfulMonitorRefreshAt: successfulRefreshAt }),
+    ...(completedDecision === null
+      ? {}
+      : {
+          lastDecisionFetchedAt: completedDecision.fetchedAt,
+          lastDecisionSnapshot:
+            completedDecision.snapshot as unknown as Prisma.InputJsonValue,
+        }),
     lastNotifiedDelayMinutes: state.lastNotifiedDelayMinutes,
     earlyDepartureNotified: state.earlyDepartureNotified,
     lastNotifiedDepartureGate: state.lastNotifiedDepartureGate,

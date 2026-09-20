@@ -290,11 +290,37 @@ describe('P5C planning policy', () => {
 
   it('ranks ARRIVE_BY by latest departure, then duration, fare, transfers, walking, and ID', () => {
     const candidates = [
-      candidateAt('late-long', '2030-01-01T10:20:00Z', '2030-01-01T11:20:00Z', '5.00'),
-      candidateAt('late-short', '2030-01-01T10:20:00Z', '2030-01-01T11:00:00Z', '20.00'),
-      candidateAt('earlier-cheap', '2030-01-01T10:10:00Z', '2030-01-01T10:30:00Z', '1.00'),
-      candidateAt('null-fare', '2030-01-01T10:15:00Z', '2030-01-01T10:35:00Z', null),
-      candidateAt('usd', '2030-01-01T10:15:00Z', '2030-01-01T10:35:00Z', '0.01', 'USD'),
+      candidateAt(
+        'late-long',
+        '2030-01-01T10:20:00Z',
+        '2030-01-01T11:20:00Z',
+        '5.00',
+      ),
+      candidateAt(
+        'late-short',
+        '2030-01-01T10:20:00Z',
+        '2030-01-01T11:00:00Z',
+        '20.00',
+      ),
+      candidateAt(
+        'earlier-cheap',
+        '2030-01-01T10:10:00Z',
+        '2030-01-01T10:30:00Z',
+        '1.00',
+      ),
+      candidateAt(
+        'null-fare',
+        '2030-01-01T10:15:00Z',
+        '2030-01-01T10:35:00Z',
+        null,
+      ),
+      candidateAt(
+        'usd',
+        '2030-01-01T10:15:00Z',
+        '2030-01-01T10:35:00Z',
+        '0.01',
+        'USD',
+      ),
     ];
     const ranked = rankArriveByCandidates(candidates);
     expect(ranked.ordered.map((item) => item.candidateId)).toEqual([

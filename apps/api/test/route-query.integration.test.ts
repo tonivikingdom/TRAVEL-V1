@@ -392,7 +392,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   it('runs ARRIVE_BY through the Google adapter, snapshot, preview, adopt, and undo', async () => {
     currentNow = new Date('2026-09-20T05:00:00.000Z');
     const fetchImplementation = vi.fn(async (_url, init) => {
-      const requestedQuery = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const requestedQuery = JSON.parse(String(init?.body)) as Record<
+        string,
+        unknown
+      >;
       return new Response(
         JSON.stringify(googleConsumerHokkaidoFixture(requestedQuery)),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -426,7 +429,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       fare: { amount: '3910', currency: 'JPY' },
     });
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body))).toMatchObject({
+    expect(
+      JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
       timeMode: 'ARRIVE_BY',
       date: '2026-09-23',
       time: '17:30',

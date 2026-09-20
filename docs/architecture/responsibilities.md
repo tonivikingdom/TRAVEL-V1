@@ -190,6 +190,16 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
 - O-08 的后台实时监控、定位采集、Push、固定提醒调度与客户端投递仍未实现；P1B2
   `NotificationEvent` 和 P5D1 手工评估都不等于这些能力已完成。
 
+## Flight operational facts（P5D2）
+
+- `FlightSnapshotProvider` 是 application 边界；AeroDataBox RapidAPI 字段只在 providers 适配器内解析，
+  domain/application 不依赖 RapidAPI 响应类型。
+- `FlightBinding` 把当前 FLIGHT `TransportEdge` 与规范化航班快照关联。计划时间进入
+  `PLANNED / ADOPTED_TRANSPORT_FACT`，revised 进入 `ESTIMATED / PROVIDER_OBSERVATION`，runway
+  进入不可静默覆盖的 `ACTUAL`。predicted 只保留在快照中。
+- 手工 refresh 的网络请求在数据库事务外完成；短事务内使用 owner/Trip 锁更新事实，
+  提交后显式调用现有 `ExecutionRiskService`。本阶段没有后台轮询、自动换班或自动重排。
+
 ## Provider 与核心故障边界（O-10 产品规则已确认，仅规格）
 
 - Provider adapter 各自独立降级；单一铁路、航班或地图故障只让对应实时/路线结果 unavailable 或

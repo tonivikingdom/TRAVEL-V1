@@ -162,6 +162,19 @@ enum ExecutionRiskStatus {
   RESOLVED
 }
 
+enum FlightStatus {
+  SCHEDULED
+  BOARDING
+  DEPARTED
+  EN_ROUTE
+  LANDED
+  ARRIVED
+  DELAYED
+  CANCELLED
+  DIVERTED
+  UNKNOWN
+}
+
 model User {
   id                      String                   @id @default(uuid()) @db.Uuid
   email                   String
@@ -183,6 +196,7 @@ model User {
   routePreviews           RoutePreview[]
   operationReceipts       OperationReceipt[]
   executionRisks          ExecutionRisk[]
+  flightBindings          FlightBinding[]
 
   @@index([status])
 }
@@ -345,6 +359,7 @@ model Trip {
   operationReceipts       OperationReceipt[]
   outboxEvents            OutboxEvent[]
   executionRisks          ExecutionRisk[]
+  flightBindings          FlightBinding[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -571,6 +586,7 @@ model TransportEdge {
   temporalValues TemporalValue[]
   adoptedRoute   AdoptedRoute?            @relation(fields: [adoptedRouteId], references: [id], onDelete: SetNull)
   dayProjections TransportDayProjection[]
+  flightBinding  FlightBinding?
 
   @@unique([tripId, fromNodeId, toNodeId])
   @@unique([tripId, fromNodeId])
@@ -578,6 +594,32 @@ model TransportEdge {
   @@unique([id, tripId])
   @@index([tripId, createdAt, id])
   @@index([adoptedRouteId])
+}
+
+model FlightBinding {
+  id                    String        @id @default(uuid()) @db.Uuid
+  ownerUserId           String        @db.Uuid
+  tripId                String        @db.Uuid
+  transportEdgeId       String        @unique @db.Uuid
+  provider              String        @db.VarChar(100)
+  providerFlightRef     String        @db.VarChar(300)
+  canonicalFlightNumber String        @db.VarChar(16)
+  displayFlightNumber   String        @db.VarChar(32)
+  serviceDate           DateTime      @db.Date
+  selectedSnapshot      Json          @db.JsonB
+  latestSnapshot        Json          @db.JsonB
+  status                FlightStatus
+  lastRefreshedAt       DateTime      @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
+  owner                 User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                  Trip          @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  transportEdge         TransportEdge @relation(fields: [transportEdgeId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@unique([id, tripId, ownerUserId])
+  @@unique([transportEdgeId, tripId])
+  @@index([ownerUserId, tripId, updatedAt(sort: Desc)])
+  @@index([provider, canonicalFlightNumber, serviceDate])
 }
 
 model TransportEdgeHistory {

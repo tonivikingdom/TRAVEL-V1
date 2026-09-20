@@ -129,6 +129,9 @@ importers:
       '@travel/application':
         specifier: workspace:*
         version: link:../application
+      '@travel/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@travel/domain':
         specifier: workspace:*
         version: link:../domain

@@ -1,6 +1,7 @@
 import {
   AuthService,
   ExecutionRiskService,
+  FlightService,
   NotificationService,
   RouteAdoptionService,
   RoutePreviewService,
@@ -13,6 +14,7 @@ import {
   createPrismaClient,
   PrismaAuthRepository,
   PrismaExecutionRiskRepository,
+  PrismaFlightRepository,
   PrismaNotificationRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
@@ -20,7 +22,10 @@ import {
 } from '@travel/persistence';
 import {
   createDevelopmentSyntheticRouteProvider,
+  AeroDataBoxFlightProvider,
+  readFlightProviderConfig,
   readRouteProviderConfig,
+  UnconfiguredFlightProvider,
   UnconfiguredRouteProvider,
 } from '@travel/providers';
 
@@ -36,6 +41,7 @@ let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
 let executionRiskService: ExecutionRiskService | undefined;
+let flightService: FlightService | undefined;
 let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
@@ -56,6 +62,20 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   executionRiskService = new ExecutionRiskService(
     tripRepository,
     new PrismaExecutionRiskRepository(managedPrisma.client),
+  );
+  const flightProviderConfig = readFlightProviderConfig(process.env);
+  const flightProvider =
+    flightProviderConfig.provider === 'aerodatabox' &&
+    flightProviderConfig.liveApiEnabled &&
+    flightProviderConfig.apiKey !== null
+      ? new AeroDataBoxFlightProvider(flightProviderConfig.apiKey, {
+          host: flightProviderConfig.host,
+        })
+      : new UnconfiguredFlightProvider();
+  flightService = new FlightService(
+    flightProvider,
+    new PrismaFlightRepository(managedPrisma.client),
+    executionRiskService,
   );
   const planningRepository = new PrismaRoutePlanningRepository(
     managedPrisma.client,
@@ -94,6 +114,7 @@ const app = buildApi({
   ...(authService === undefined ? {} : { authService }),
   ...(notificationService === undefined ? {} : { notificationService }),
   ...(executionRiskService === undefined ? {} : { executionRiskService }),
+  ...(flightService === undefined ? {} : { flightService }),
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(routePreviewService === undefined ? {} : { routePreviewService }),
   ...(routeAdoptionService === undefined ? {} : { routeAdoptionService }),

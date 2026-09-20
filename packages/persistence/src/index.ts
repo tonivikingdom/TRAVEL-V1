@@ -10,6 +10,7 @@ export { PrismaJobRepository } from './prisma-job-repository.js';
 export { PrismaMagicLinkDeliveryRepository } from './prisma-magic-link-delivery-repository.js';
 export { PrismaNotificationRepository } from './prisma-notification-repository.js';
 export { PrismaExecutionRiskRepository } from './prisma-execution-risk-repository.js';
+export { PrismaFlightRepository } from './prisma-flight-repository.js';
 export { PrismaStoredObjectRepository } from './prisma-stored-object-repository.js';
 export { PrismaTripRepository } from './prisma-trip-repository.js';
 export { PrismaRoutePlanningRepository } from './prisma-route-planning-repository.js';

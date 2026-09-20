@@ -2,6 +2,7 @@ import {
   ApplicationError,
   AuthService,
   ExecutionRiskService,
+  FlightService,
   NotificationService,
   RouteAdoptionService,
   RoutePreviewService,
@@ -12,6 +13,7 @@ import {
 } from '@travel/application';
 import type {
   ApiErrorResponse,
+  FlightSnapshotView,
   DayOccurrenceTargetInput,
   LivenessResponse,
   PlaceInput,
@@ -35,6 +37,7 @@ export interface ApiDependencies {
   readonly authService?: AuthService;
   readonly notificationService?: NotificationService;
   readonly executionRiskService?: ExecutionRiskService;
+  readonly flightService?: FlightService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
   readonly routeAdoptionService?: RouteAdoptionService;
@@ -109,6 +112,55 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     );
     return authenticated.user;
   });
+
+  app.post('/flights/search', async (request) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    return requireFlightService(dependencies).search(
+      authenticated.actor,
+      requiredRecord(request.body),
+    );
+  });
+
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/flights/adopt',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      return requireFlightService(dependencies).adopt(
+        authenticated.actor,
+        request.params.tripId,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          transportEdgeId: requiredString(body, 'transportEdgeId'),
+          flight: requiredRecord(body.flight) as unknown as FlightSnapshotView,
+        },
+      );
+    },
+  );
+
+  app.post<{ Params: { tripId: string; flightBindingId: string } }>(
+    '/trips/:tripId/flights/:flightBindingId/refresh',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireFlightService(dependencies).refresh(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.flightBindingId,
+      );
+    },
+  );
 
   app.get<{ Querystring: { limit?: string; cursor?: string } }>(
     '/notifications',
@@ -588,6 +640,18 @@ function requireExecutionRiskService(
     );
   }
   return dependencies.executionRiskService;
+}
+
+function requireFlightService(dependencies: ApiDependencies): FlightService {
+  if (dependencies.flightService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '航班服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.flightService;
 }
 
 function requireTripService(dependencies: ApiDependencies): TripService {

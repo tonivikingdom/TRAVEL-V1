@@ -149,3 +149,17 @@ export interface RefreshFlightResponse {
   readonly requiresRouteReevaluation: boolean;
   readonly riskEvaluation: ExecutionRiskEvaluationResponse;
 }
+
+export type FlightExecutionTriggerType =
+  'ARRIVED_AT_AIRPORT' | 'FLIGHT_DETAIL_OPENED' | 'POST_FLIGHT_CHECK';
+
+export interface FlightExecutionTriggerRequest {
+  readonly type: FlightExecutionTriggerType;
+  readonly airportIata?: string;
+}
+
+export interface FlightExecutionTriggerResponse {
+  readonly flightBinding: FlightBindingView;
+  readonly providerRefreshPerformed: boolean;
+  readonly notificationId: string | null;
+}

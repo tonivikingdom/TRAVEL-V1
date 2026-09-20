@@ -296,25 +296,26 @@ Trip永久删除与不可逆合并不享有普通Undo；须用其已确认强提
 
 ## 9. API契约目录（蓝图，不要求P0全部实现）
 
-| 范围     | 示例接口                                                                   | 必要边界                                           |
-| -------- | -------------------------------------------------------------------------- | -------------------------------------------------- |
-| 健康     | GET /health/live, /health/ready                                            | 不含敏感配置                                       |
-| 登录     | POST /auth/magic-link/request, /auth/magic-link/consume                    | 邀请、单次、过期、限流                             |
-| 会话     | POST /auth/logout, GET /me                                                 | server端撤销                                       |
-| 管理     | POST /admin/invitations, POST /admin/users/{id}/disable, /revoke-sessions  | 管理员不读取Trip                                   |
-| 行程     | POST /trips, GET /trips/{id}, PATCH /trips/{id}                            | owner验证、baseVersion                             |
-| 节点     | POST /trips/{id}/commands                                                  | 类型化业务command，不接收随意数据库patch           |
-| 时间事实 | POST /trips/{id}/temporal-values                                           | 调用 application validation，不允许强制覆盖 ACTUAL |
-| 交通历史 | GET /trips/{id}/transport-history                                          | owner-only，返回强类型失效历史                     |
-| 计算     | POST /trips/{id}/schedule/evaluate                                         | 可解释、无正式写入                                 |
-| 执行风险 | POST /trips/{id}/execution/evaluate；GET /trips/{id}/execution/risks        | 显式只读评估；风险 bookkeeping 不增加 Trip version |
-| 风险操作 | POST /trips/{id}/execution/risks/{rid}/acknowledge 或 /snooze               | owner-only；确认不消除事实，snooze 固定 15 分钟    |
-| 路线     | POST /trips/{id}/routes/query                                              | 候选≠采用                                          |
-| 预览     | POST /trips/{id}/previews                                                  | baseVersion+输入快照                               |
-| 采用     | POST /trips/{id}/previews/{pid}/adopt                                      | 幂等+事务+版本                                     |
-| 撤销     | POST /trips/{id}/operations/{oid}/undo                                     | 仅最近一次且不覆盖新事实                           |
-| 通知     | GET /notifications, POST /notifications/{id}/dismiss                       | 归属隔离、抑制同一事件                             |
-| 附件     | POST /attachments/upload-intent, /complete, GET /attachments/{id}/download | 私有访问、类型/配额校验                            |
+| 范围     | 示例接口                                                                   | 必要边界                                             |
+| -------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 健康     | GET /health/live, /health/ready                                            | 不含敏感配置                                         |
+| 登录     | POST /auth/magic-link/request, /auth/magic-link/consume                    | 邀请、单次、过期、限流                               |
+| 会话     | POST /auth/logout, GET /me                                                 | server端撤销                                         |
+| 管理     | POST /admin/invitations, POST /admin/users/{id}/disable, /revoke-sessions  | 管理员不读取Trip                                     |
+| 行程     | POST /trips, GET /trips/{id}, PATCH /trips/{id}                            | owner验证、baseVersion                               |
+| 节点     | POST /trips/{id}/commands                                                  | 类型化业务command，不接收随意数据库patch             |
+| 时间事实 | POST /trips/{id}/temporal-values                                           | 调用 application validation，不允许强制覆盖 ACTUAL   |
+| 交通历史 | GET /trips/{id}/transport-history                                          | owner-only，返回强类型失效历史                       |
+| 计算     | POST /trips/{id}/schedule/evaluate                                         | 可解释、无正式写入                                   |
+| 执行风险 | POST /trips/{id}/execution/evaluate；GET /trips/{id}/execution/risks       | 显式只读评估；风险 bookkeeping 不增加 Trip version   |
+| 风险操作 | POST /trips/{id}/execution/risks/{rid}/acknowledge 或 /snooze              | owner-only；确认不消除事实，snooze 固定 15 分钟      |
+| 航班触发 | POST /trips/{id}/flights/{fid}/execution-triggers                          | 到机场/详情/落地后检查；不由客户端上传 Provider 事实 |
+| 路线     | POST /trips/{id}/routes/query                                              | 候选≠采用                                            |
+| 预览     | POST /trips/{id}/previews                                                  | baseVersion+输入快照                                 |
+| 采用     | POST /trips/{id}/previews/{pid}/adopt                                      | 幂等+事务+版本                                       |
+| 撤销     | POST /trips/{id}/operations/{oid}/undo                                     | 仅最近一次且不覆盖新事实                             |
+| 通知     | GET /notifications, POST /notifications/{id}/dismiss 或 /view              | 归属隔离、抑制同一事件、跨设备账户级已查看语义       |
+| 附件     | POST /attachments/upload-intent, /complete, GET /attachments/{id}/download | 私有访问、类型/配额校验                              |
 
 命名可在P0调整，语义不可暗改。DTO不能暴露ORM内部表，也不能叫desktop-card/mobile-card。
 

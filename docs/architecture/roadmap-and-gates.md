@@ -20,7 +20,8 @@
 | P5B  | Development/Test 内部验收与环境闸门                  | 已通过 PR #17 合并；main `49a76517ef7917678c8d2133977435a1854edd07`；CI `35439640209` 三个核心 job 通过            | ≤5 synthetic 用户跨层验收完成；不是性能容量认证、Staging 许可或 Production readiness |
 | P5C  | 停留/Buffer 策略、Route lookback、候选排序与可逆调整 | 已通过 PR #18 Squash Merge；main `7b069707ed67fe539adea373b642041cce1820ac`；CI `35479025186` 三个核心 job 通过    | 确定性 planning policy 已完成；真实 Provider、Push 与 Production 仍未授权            |
 | P5D1 | 确定性执行风险、持久生命周期与通知抑制               | 已完成；PR #20 已 Squash Merge 至 main `83ce12780879c563470ff3dc98a72e6f68a3fe00`                                  | 仅显式评估 foundation；无后台实时轮询、定位、Push、自动重排或下一班查询              |
-| P5D2 | Flight operational facts 与手工刷新                  | 已授权，在 `feature/p5d2-flight-facts` 实施                                                                        | AeroDataBox 适配器、FlightBinding 与风险重评；不含后台轮询或自动重排                 |
+| P5D2 | Flight operational facts 与手工刷新                  | 已通过 PR #21 Squash Merge；main `ddfa4cb558ea4dabec032189f2f66129f1f6f0f8`                                        | AeroDataBox 适配器、FlightBinding、事实排序与风险重评已完成                          |
+| P5D3 | Flight monitoring 与重要变化通知 V1                  | 已授权，在 `feature/p5d3-flight-monitoring` 实施；保持 Draft                                                       | 持久 Job、重要变化聚合与行李短轮询；不含 Push、定位、自动换班或 Production           |
 | P5D+ | 后续执行采集、提醒投递与正式客户端能力               | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、

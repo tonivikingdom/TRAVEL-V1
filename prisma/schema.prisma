@@ -25,6 +25,20 @@ enum InvitationStatus {
 
 enum JobType {
   MAGIC_LINK_EMAIL
+  FLIGHT_MONITOR
+}
+
+enum FlightMonitorMode {
+  NORMAL
+  DELAYED
+  CANCELLED
+  BAGGAGE
+  STOPPED
+}
+
+enum NotificationPriority {
+  NORMAL
+  STRONG
 }
 
 enum JobStatus {
@@ -202,20 +216,29 @@ model User {
 }
 
 model NotificationEvent {
-  id          String    @id @default(uuid()) @db.Uuid
-  ownerUserId String    @db.Uuid
-  kind        String    @db.VarChar(100)
-  dedupeKey   String    @db.VarChar(200)
-  title       String    @db.VarChar(200)
-  body        String    @db.VarChar(4000)
-  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
-  occurredAt  DateTime  @db.Timestamptz(3)
-  dismissedAt DateTime? @db.Timestamptz(3)
-  owner       User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(uuid()) @db.Uuid
+  ownerUserId         String               @db.Uuid
+  kind                String               @db.VarChar(100)
+  dedupeKey           String               @db.VarChar(200)
+  title               String               @db.VarChar(200)
+  body                String               @db.VarChar(4000)
+  createdAt           DateTime             @default(now()) @db.Timestamptz(3)
+  occurredAt          DateTime             @db.Timestamptz(3)
+  dismissedAt         DateTime?            @db.Timestamptz(3)
+  tripId              String?              @db.Uuid
+  flightBindingId     String?              @db.Uuid
+  flightNumber        String?              @db.VarChar(32)
+  priority            NotificationPriority @default(NORMAL)
+  summary             String?              @db.VarChar(500)
+  changeKinds         Json                 @default("[]") @db.JsonB
+  hasDownstreamImpact Boolean              @default(false)
+  viewedAt            DateTime?            @db.Timestamptz(3)
+  owner               User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
 
   @@unique([ownerUserId, dedupeKey])
   @@index([ownerUserId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([ownerUserId, dismissedAt])
+  @@index([flightBindingId, createdAt(sort: Desc)])
 }
 
 model StoredObject {
@@ -597,29 +620,52 @@ model TransportEdge {
 }
 
 model FlightBinding {
-  id                    String        @id @default(uuid()) @db.Uuid
-  ownerUserId           String        @db.Uuid
-  tripId                String        @db.Uuid
-  transportEdgeId       String        @unique @db.Uuid
-  provider              String        @db.VarChar(100)
-  providerFlightRef     String        @db.VarChar(300)
-  canonicalFlightNumber String        @db.VarChar(16)
-  displayFlightNumber   String        @db.VarChar(32)
-  serviceDate           DateTime      @db.Date
-  selectedSnapshot      Json          @db.JsonB
-  latestSnapshot        Json          @db.JsonB
+  id                    String              @id @default(uuid()) @db.Uuid
+  ownerUserId           String              @db.Uuid
+  tripId                String              @db.Uuid
+  transportEdgeId       String              @unique @db.Uuid
+  provider              String              @db.VarChar(100)
+  providerFlightRef     String              @db.VarChar(300)
+  canonicalFlightNumber String              @db.VarChar(16)
+  displayFlightNumber   String              @db.VarChar(32)
+  serviceDate           DateTime            @db.Date
+  selectedSnapshot      Json                @db.JsonB
+  latestSnapshot        Json                @db.JsonB
   status                FlightStatus
-  lastRefreshedAt       DateTime      @db.Timestamptz(3)
-  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
-  owner                 User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  trip                  Trip          @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
-  transportEdge         TransportEdge @relation(fields: [transportEdgeId, tripId], references: [id, tripId], onDelete: Cascade)
+  lastRefreshedAt       DateTime            @db.Timestamptz(3)
+  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @db.Timestamptz(3)
+  owner                 User                @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                  Trip                @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  transportEdge         TransportEdge       @relation(fields: [transportEdgeId, tripId], references: [id, tripId], onDelete: Cascade)
+  monitorState          FlightMonitorState?
 
   @@unique([id, tripId, ownerUserId])
   @@unique([transportEdgeId, tripId])
   @@index([ownerUserId, tripId, updatedAt(sort: Desc)])
   @@index([provider, canonicalFlightNumber, serviceDate])
+}
+
+model FlightMonitorState {
+  flightBindingId                String            @id @db.Uuid
+  generation                     String            @default(uuid()) @db.Uuid
+  mode                           FlightMonitorMode @default(NORMAL)
+  arrivedAtAirportAt             DateTime?         @db.Timestamptz(3)
+  arrivedAirportIata             String?           @db.VarChar(3)
+  lastSuccessfulMonitorRefreshAt DateTime?         @db.Timestamptz(3)
+  lastDecisionFetchedAt          DateTime?         @db.Timestamptz(3)
+  lastDecisionSnapshot           Json?
+  lastNotifiedDelayMinutes       Int?
+  earlyDepartureNotified         Boolean           @default(false)
+  lastNotifiedDepartureGate      String?           @db.VarChar(100)
+  providerUnavailableWarned      Boolean           @default(false)
+  cancellationNotified           Boolean           @default(false)
+  baggageWindowStartedAt         DateTime?         @db.Timestamptz(3)
+  baggageWindowEndsAt            DateTime?         @db.Timestamptz(3)
+  lastNotifiedBaggage            String?           @db.VarChar(100)
+  createdAt                      DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt                      DateTime          @updatedAt @db.Timestamptz(3)
+  flightBinding                  FlightBinding     @relation(fields: [flightBindingId], references: [id], onDelete: Cascade)
 }
 
 model TransportEdgeHistory {

@@ -1,6 +1,9 @@
 import { writeFile } from 'node:fs/promises';
 
 import {
+  ExecutionRiskService,
+  FlightMonitoringService,
+  FlightService,
   MagicLinkEmailHandler,
   UnconfiguredMailSender,
 } from '@travel/application';
@@ -8,8 +11,17 @@ import {
   createPostgresReadiness,
   createPrismaClient,
   PrismaJobRepository,
+  PrismaExecutionRiskRepository,
+  PrismaFlightMonitoringRepository,
+  PrismaFlightRepository,
   PrismaMagicLinkDeliveryRepository,
+  PrismaTripRepository,
 } from '@travel/persistence';
+import {
+  AeroDataBoxFlightProvider,
+  readFlightProviderConfig,
+  UnconfiguredFlightProvider,
+} from '@travel/providers';
 
 import { readWorkerConfig } from './config.js';
 import { FileCapturedMailSender } from './file-captured-mail-sender.js';
@@ -21,6 +33,31 @@ const config = readWorkerConfig(process.env);
 const managedProbe = createPostgresReadiness(config.databaseUrl);
 const managedPrisma = createPrismaClient(config.databaseUrl);
 const jobRepository = new PrismaJobRepository(managedPrisma.client);
+const tripRepository = new PrismaTripRepository(managedPrisma.client);
+const executionRiskService = new ExecutionRiskService(
+  tripRepository,
+  new PrismaExecutionRiskRepository(managedPrisma.client),
+);
+const flightProviderConfig = readFlightProviderConfig(process.env);
+const flightProvider =
+  flightProviderConfig.provider === 'aerodatabox' &&
+  flightProviderConfig.liveApiEnabled &&
+  flightProviderConfig.apiKey !== null
+    ? new AeroDataBoxFlightProvider(flightProviderConfig.apiKey, {
+        host: flightProviderConfig.host,
+      })
+    : new UnconfiguredFlightProvider();
+const flightMonitoringRepository = new PrismaFlightMonitoringRepository(
+  managedPrisma.client,
+);
+const flightMonitoringService = new FlightMonitoringService(
+  new FlightService(
+    flightProvider,
+    new PrismaFlightRepository(managedPrisma.client),
+    executionRiskService,
+  ),
+  flightMonitoringRepository,
+);
 const mailSender =
   config.mailProvider === 'capture'
     ? new FileCapturedMailSender(config.mailCaptureFile)
@@ -41,6 +78,10 @@ const jobRunner = createJobRunner({
       execute: (payloadRef, signal) =>
         magicLinkHandler.execute(payloadRef, signal),
     },
+    FLIGHT_MONITOR: {
+      execute: (payloadRef, signal) =>
+        flightMonitoringService.executeJob(payloadRef, signal),
+    },
   },
   workerId: config.workerId,
   config: config.runner,
@@ -60,6 +101,10 @@ async function heartbeat(): Promise<void> {
     flag: 'w',
   });
   process.stdout.write(`${JSON.stringify(payload)}\n`);
+
+  if (database.status === 'READY') {
+    await flightMonitoringService.ensureEligibleMonitoring();
+  }
 }
 
 const runtime = createWorkerRuntime({

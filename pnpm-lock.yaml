@@ -78,6 +78,9 @@ importers:
       '@travel/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@travel/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
 
   packages/application:
     dependencies:
@@ -113,6 +116,9 @@ importers:
       '@travel/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@travel/domain':
+        specifier: workspace:*
+        version: link:../domain
       pg:
         specifier: 8.23.0
         version: 8.23.0

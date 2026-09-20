@@ -72,6 +72,33 @@ describe('job runner lifecycle', () => {
     expect(fake.succeeded).toEqual([JOB.id]);
   });
 
+  it('dispatches a durable flight-monitor job to its registered handler', async () => {
+    const flightJob: ClaimedJob = {
+      ...JOB,
+      type: 'FLIGHT_MONITOR',
+      payloadRef: '33333333-3333-4333-8333-333333333333',
+    };
+    const fake = new FakeJobRepository([flightJob]);
+    const handled: string[] = [];
+    const runner = createJobRunner({
+      repository: fake,
+      handlers: {
+        FLIGHT_MONITOR: {
+          async execute(payloadRef) {
+            handled.push(payloadRef);
+          },
+        },
+      },
+      workerId: 'worker-test',
+      config: config(),
+    });
+
+    await runner.start();
+    await runner.stop();
+    expect(handled).toEqual([flightJob.payloadRef]);
+    expect(fake.succeeded).toEqual([flightJob.id]);
+  });
+
   it('records a safe error code and retry time after handler failure', async () => {
     const fake = new FakeJobRepository([JOB]);
     const runner = createJobRunner({

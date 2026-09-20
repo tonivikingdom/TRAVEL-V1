@@ -15,6 +15,13 @@ export class PrismaNotificationRepository implements NotificationRepository {
     readonly title: string;
     readonly body: string;
     readonly occurredAt: Date;
+    readonly tripId?: string | null;
+    readonly flightBindingId?: string | null;
+    readonly flightNumber?: string | null;
+    readonly priority?: 'NORMAL' | 'STRONG';
+    readonly summary?: string | null;
+    readonly changeKinds?: readonly string[];
+    readonly hasDownstreamImpact?: boolean;
   }): Promise<NotificationRecord> {
     return this.client.notificationEvent.upsert({
       where: {
@@ -23,7 +30,12 @@ export class PrismaNotificationRepository implements NotificationRepository {
           dedupeKey: input.dedupeKey,
         },
       },
-      create: input,
+      create: {
+        ...input,
+        ...(input.changeKinds === undefined
+          ? {}
+          : { changeKinds: input.changeKinds }),
+      },
       update: {},
     });
   }
@@ -66,6 +78,26 @@ export class PrismaNotificationRepository implements NotificationRepository {
           dismissedAt: null,
         },
         data: { dismissedAt: input.now },
+      });
+      return transaction.notificationEvent.findFirst({
+        where: { id: input.notificationId, ownerUserId: input.ownerUserId },
+      });
+    });
+  }
+
+  async viewOwned(input: {
+    readonly ownerUserId: string;
+    readonly notificationId: string;
+    readonly now: Date;
+  }): Promise<NotificationRecord | null> {
+    return this.client.$transaction(async (transaction) => {
+      await transaction.notificationEvent.updateMany({
+        where: {
+          id: input.notificationId,
+          ownerUserId: input.ownerUserId,
+          viewedAt: null,
+        },
+        data: { viewedAt: input.now },
       });
       return transaction.notificationEvent.findFirst({
         where: { id: input.notificationId, ownerUserId: input.ownerUserId },

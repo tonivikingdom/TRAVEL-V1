@@ -103,6 +103,24 @@ export class PrismaFlightRepository implements FlightRepository {
             sourceKind: 'PROVIDER_OBSERVATION',
           },
         });
+        await transaction.job.updateMany({
+          where: {
+            type: 'FLIGHT_MONITOR',
+            payloadRef: edge.flightBinding.id,
+            status: { in: ['QUEUED', 'RUNNING'] },
+          },
+          data: {
+            status: 'CANCELLED',
+            cancelRequested: true,
+            cancelledAt: new Date(),
+            completedAt: new Date(),
+            leaseOwner: null,
+            leaseUntil: null,
+          },
+        });
+        await transaction.flightMonitorState.deleteMany({
+          where: { flightBindingId: edge.flightBinding.id },
+        });
       }
       await writeTemporal(transaction, {
         transportEdgeId: edge.id,

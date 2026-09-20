@@ -1,4 +1,8 @@
-import type { AuthService, FlightService } from '@travel/application';
+import type {
+  AuthService,
+  FlightMonitoringService,
+  FlightService,
+} from '@travel/application';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApi } from '../src/app.js';
@@ -90,9 +94,34 @@ describe('P5D2 flight HTTP surface', () => {
       bindingId,
     );
   });
+
+  it('passes an ARRIVED_AT_AIRPORT execution trigger to monitoring', async () => {
+    const trigger = vi.fn(async () => ({
+      flightBinding: { id: bindingId },
+      providerRefreshPerformed: true,
+      notificationId: null,
+    }));
+    const app = api({}, { trigger });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${tripId}/flights/${bindingId}/execution-triggers`,
+      headers: { authorization: 'Bearer synthetic' },
+      payload: { type: 'ARRIVED_AT_AIRPORT', airportIata: 'HND' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(trigger).toHaveBeenCalledWith(
+      expect.objectContaining({ userId }),
+      tripId,
+      bindingId,
+      { type: 'ARRIVED_AT_AIRPORT', airportIata: 'HND' },
+    );
+  });
 });
 
-function api(flightMethods: Record<string, ReturnType<typeof vi.fn>>) {
+function api(
+  flightMethods: Record<string, ReturnType<typeof vi.fn>>,
+  monitoringMethods: Record<string, ReturnType<typeof vi.fn>> = {},
+) {
   const app = buildApi({
     readinessProbe: {
       async check() {
@@ -118,6 +147,8 @@ function api(flightMethods: Record<string, ReturnType<typeof vi.fn>>) {
       })),
     } as unknown as AuthService,
     flightService: flightMethods as unknown as FlightService,
+    flightMonitoringService:
+      monitoringMethods as unknown as FlightMonitoringService,
   });
   apps.push(app);
   return app;

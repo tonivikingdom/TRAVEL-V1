@@ -187,8 +187,9 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   由事务内 fingerprint/generation 去重。风险 bookkeeping 不增加 Trip version。
 - P5D1 只从现有 ACTUAL/ESTIMATED、固定班次 PLANNED、用户 POINT_TIME/MIN_DWELL 与已有系统建议读取
   证据，只检查最近的 downstream protected anchor；UNKNOWN 不降成 safe，也不猜下一班或 Provider 事实。
-- O-08 的后台实时监控、定位采集、Push、固定提醒调度与客户端投递仍未实现；P1B2
-  `NotificationEvent` 和 P5D1 手工评估都不等于这些能力已完成。
+- P5D3 只实现已绑定航班的服务端持久定点/状态驱动监控与账户级事件；定位采集、Push、通用固定提醒调度、
+  客户端 presence 与投递仍未实现。P1B2 `NotificationEvent`、P5D1 手工评估或 P5D3 航班 Job
+  都不等于完整 O-08 客户端能力已完成。
 
 ## Flight operational facts（P5D2）
 
@@ -198,7 +199,9 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   `PLANNED / ADOPTED_TRANSPORT_FACT`，revised 进入 `ESTIMATED / PROVIDER_OBSERVATION`，runway
   进入不可静默覆盖的 `ACTUAL`。predicted 只保留在快照中。
 - 手工 refresh 的网络请求在数据库事务外完成；短事务内使用 owner/Trip 锁更新事实，
-  提交后显式调用现有 `ExecutionRiskService`。本阶段没有后台轮询、自动换班或自动重排。
+  提交后显式调用现有 `ExecutionRiskService`。P5D3 在该边界上增加 `FLIGHT_MONITOR` 持久 Job：
+  Provider 调用仍在事务外，accepted refresh 后复用风险服务并原子保存 monitor state、下一检查与最多
+  一条合并通知。它不自动换班、改时间或重排。
 
 ## Provider 与核心故障边界（O-10 产品规则已确认，仅规格）
 
@@ -228,7 +231,7 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   用例以明确 owner 和 `(ownerUserId, dedupeKey)` 幂等边界创建。
 - `GET /notifications` 只列出当前 Session actor 的通知，按 `createdAt + id` 稳定倒序分页；
   已 dismiss 的事件保留并返回 `dismissedAt`，不物理删除证据。
-- `POST /notifications/:id/dismiss` 只能操作 actor 自己的记录并保持幂等。ADMIN 身份不获得
+- `POST /notifications/:id/dismiss` 与 `POST /notifications/:id/view` 只能操作 actor 自己的记录并保持幂等。ADMIN 身份不获得
   其他用户通知的读取或修改权。
 - P1B2 不生成风险业务语义、不实现 Push、偏好或正式通知 UI。
 

@@ -67,7 +67,7 @@ export interface AuthRepository {
   }): Promise<{ readonly created: boolean; readonly userId: string }>;
 }
 
-export type JobType = 'MAGIC_LINK_EMAIL';
+export type JobType = 'MAGIC_LINK_EMAIL' | 'FLIGHT_MONITOR';
 export type JobStatus =
   'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
@@ -143,6 +143,14 @@ export interface NotificationRecord {
   readonly occurredAt: Date;
   readonly createdAt: Date;
   readonly dismissedAt: Date | null;
+  readonly tripId: string | null;
+  readonly flightBindingId: string | null;
+  readonly flightNumber: string | null;
+  readonly priority: 'NORMAL' | 'STRONG';
+  readonly summary: string | null;
+  readonly changeKinds: unknown;
+  readonly hasDownstreamImpact: boolean;
+  readonly viewedAt: Date | null;
 }
 
 export interface NotificationRepository {
@@ -153,6 +161,13 @@ export interface NotificationRepository {
     readonly title: string;
     readonly body: string;
     readonly occurredAt: Date;
+    readonly tripId?: string | null;
+    readonly flightBindingId?: string | null;
+    readonly flightNumber?: string | null;
+    readonly priority?: 'NORMAL' | 'STRONG';
+    readonly summary?: string | null;
+    readonly changeKinds?: readonly string[];
+    readonly hasDownstreamImpact?: boolean;
   }): Promise<NotificationRecord>;
   list(input: {
     readonly ownerUserId: string;
@@ -160,6 +175,11 @@ export interface NotificationRepository {
     readonly before?: { readonly createdAt: Date; readonly id: string };
   }): Promise<readonly NotificationRecord[]>;
   dismissOwned(input: {
+    readonly ownerUserId: string;
+    readonly notificationId: string;
+    readonly now: Date;
+  }): Promise<NotificationRecord | null>;
+  viewOwned(input: {
     readonly ownerUserId: string;
     readonly notificationId: string;
     readonly now: Date;

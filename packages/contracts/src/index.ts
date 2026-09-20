@@ -130,5 +130,8 @@ export type {
   FlightSearchResponse,
   FlightSnapshotView,
   FlightStatus,
+  FlightExecutionTriggerRequest,
+  FlightExecutionTriggerResponse,
+  FlightExecutionTriggerType,
   RefreshFlightResponse,
 } from './flights.js';

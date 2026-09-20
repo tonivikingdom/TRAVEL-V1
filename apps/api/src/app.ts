@@ -2,6 +2,7 @@ import {
   ApplicationError,
   AuthService,
   ExecutionRiskService,
+  FlightMonitoringService,
   FlightService,
   NotificationService,
   RouteAdoptionService,
@@ -14,6 +15,7 @@ import {
 import type {
   ApiErrorResponse,
   FlightSnapshotView,
+  FlightExecutionTriggerRequest,
   DayOccurrenceTargetInput,
   LivenessResponse,
   PlaceInput,
@@ -38,6 +40,7 @@ export interface ApiDependencies {
   readonly notificationService?: NotificationService;
   readonly executionRiskService?: ExecutionRiskService;
   readonly flightService?: FlightService;
+  readonly flightMonitoringService?: FlightMonitoringService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
   readonly routeAdoptionService?: RouteAdoptionService;
@@ -162,6 +165,25 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.post<{ Params: { tripId: string; flightBindingId: string } }>(
+    '/trips/:tripId/flights/:flightBindingId/execution-triggers',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireFlightMonitoringService(dependencies).trigger(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.flightBindingId,
+        requiredRecord(
+          request.body,
+        ) as unknown as FlightExecutionTriggerRequest,
+      );
+    },
+  );
+
   app.get<{ Querystring: { limit?: string; cursor?: string } }>(
     '/notifications',
     async (request) => {
@@ -192,6 +214,21 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request,
       );
       return requireNotificationService(dependencies).dismissNotification(
+        authenticated.actor,
+        request.params.id,
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/notifications/:id/view',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireNotificationService(dependencies).viewNotification(
         authenticated.actor,
         request.params.id,
       );
@@ -652,6 +689,20 @@ function requireFlightService(dependencies: ApiDependencies): FlightService {
     );
   }
   return dependencies.flightService;
+}
+
+function requireFlightMonitoringService(
+  dependencies: ApiDependencies,
+): FlightMonitoringService {
+  if (dependencies.flightMonitoringService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '航班监控服务不可用。',
+      503,
+      true,
+    );
+  }
+  return dependencies.flightMonitoringService;
 }
 
 function requireTripService(dependencies: ApiDependencies): TripService {

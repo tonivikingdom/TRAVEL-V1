@@ -2,7 +2,7 @@
 
 ## 结果
 
-- RESULT：PARTIAL
+- RESULT：DEPART_AT_INTEGRATED
 - 分支：`feature/google-consumer-transit-integration`
 - HEAD：随本状态文档所在分支提交交付；精确 SHA 以最终交付回复为准，避免为文档自引用追加提交
 - 基线：`ddfa4cb558ea4dabec032189f2f66129f1f6f0f8`（P5D2 已 Squash Merge 的当前 main）
@@ -25,8 +25,9 @@
 
 ## 验证状态
 
-- `DEPART_AT` adapter / live sidecar：PASS。
-- `ARRIVE_BY` adapter mapping：PASS；live sidecar 明确返回 `UNSUPPORTED_QUERY`，状态为 `NOT_LIVE_VERIFIED`。
+- `DEPART_AT`：`LIVE_VERIFIED + POSTGRES_PIPELINE_VERIFIED`。
+- `ARRIVE_BY`：sidecar 标准错误 `UNSUPPORTED_MODE` 映射为 Travel `UNSUPPORTED_QUERY`；HTTP API 返回
+  `ROUTE_QUERY_UNSUPPORTED / 422`。当前状态为 `UNSUPPORTED_QUERY / NOT_LIVE_SUPPORTED`。
 - Scenario A，Hotel Mahoroba → 洞爷湖景乃之风，2026-09-23 15:00 Asia/Tokyo：6 candidates；
   adapter 约 7,448 ms，sidecar 约 7,336 ms。首条为 WALKING/BUS/WALKING/RAIL/WALKING/BUS/WALKING，
   JPY 3,910，班次 legs 正确标记 `fixedService=true`。
@@ -36,13 +37,17 @@
 - 多段边界标准化与精确坐标连续性：Provider 层 PASS；不按名称或距离合并站点。
 - Fare canonicalization、mode、serviceLabel、fixedService、duplicate candidate、时区/跨日转换、timeout、network、
   HTTP 401/429/500 与 sidecar error mapping：unit PASS。
+- CI PostgreSQL cross-layer acceptance：真实 `GoogleConsumerExperimentalRouteProvider` 配合 sanitized mocked-fetch
+  sidecar fixture，通过 Query → immutable Snapshot → Preview → Adopt → Undo；验证 7 段
+  WALKING/BUS/WALKING/RAIL/WALKING/BUS/WALKING、JPY 3,910、生成换乘节点、provider provenance、
+  PLANNED facts 与 Undo 恢复。Provider fetch 在 Query 恰好调用 1 次，后续阶段均不再调用。
 - Unit：36 files / 409 tests，PASS；包含 synthetic RouteProvider、Flight、ExecutionRisk、Query/Preview/Adopt/Undo 回归。
 - `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm prisma:validate`：PASS。
 - 修改文件的 Prettier 检查：PASS。全仓 `format:check` 仍受既有 Windows CRLF 基线影响，未批量改写无关文件。
 - PostgreSQL integration：未通过本机执行；机器没有 Docker/PostgreSQL 且没有 `TEST_DATABASE_URL`，命令按预期在
   环境闸门失败，未跳过或伪报成功。
 - Travel HTTP Query → Snapshot → Preview → Adopt → Undo live E2E：未验证；同样被本机 PostgreSQL 环境阻塞。
-- CI Run `35496360982`：`verify`、`Compose verification`、`P5B acceptance` 均通过。
+- CI Run `35497221107`：`verify`、`Compose verification`、`P5B acceptance` 均通过。
   `verify` 已在隔离 PostgreSQL 环境完成 migration deploy、PostgreSQL integration、typecheck、unit 与 build；
   Compose 和 P5B acceptance 继续验证通用 Query → Snapshot → Preview → Adopt → Undo 持久化链路。
 - Prisma schema/migration：0 变更。
@@ -61,7 +66,7 @@
 
 ## 未解决事项
 
-- Sidecar `ARRIVE_BY` 尚未 live 验证。
+- Sidecar `ARRIVE_BY` 未启用，当前明确返回不支持；不属于本集成已完成能力。
 - 本机缺少 PostgreSQL/Docker；通用持久化链路已由 CI 的隔离 PostgreSQL 环境补验。Google Consumer
   adapter 的 live 调用仍仅在本地 Development loopback sidecar 中低频验证，CI 不持有该 token 或 sidecar。
 - 不包含 reverse import、正式 UI、公网/Tailscale、真实多人并发、Production enablement 或商业可用性承诺。

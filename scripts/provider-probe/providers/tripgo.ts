@@ -37,7 +37,11 @@ export class TripGoProbeAdapter implements ProviderProbeAdapter {
     }
     const response = await this.fetchImpl(new URL('regions.json', BASE_URL), {
       method: 'POST',
-      headers: this.headers({ 'X-TripGo-HealthCheck': 'true' }),
+      headers: this.headers({
+        'Content-Type': 'application/json',
+        'X-TripGo-HealthCheck': 'true',
+      }),
+      body: JSON.stringify({}),
     });
     const body = await readJson(response);
     const passed =
@@ -154,6 +158,17 @@ export class TripGoProbeAdapter implements ProviderProbeAdapter {
         statusFromHttp(response.status),
         response.status,
         [providerMessage(body)],
+        evidence(response, body),
+      );
+    }
+    if (isProviderError(body)) {
+      return emptyResult(
+        scenario,
+        query,
+        capabilities,
+        body.errorCode === 1002 ? 'UNSUPPORTED' : 'PROVIDER_ERROR',
+        response.status,
+        [body.error],
         evidence(response, body),
       );
     }
@@ -622,6 +637,13 @@ function stringOrNull(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isProviderError(value: unknown): value is Record<string, unknown> & {
+  readonly error: string;
+  readonly errorCode?: number;
+} {
+  return isRecord(value) && typeof value.error === 'string';
 }
 
 function codePointCompare(left: string, right: string): number {

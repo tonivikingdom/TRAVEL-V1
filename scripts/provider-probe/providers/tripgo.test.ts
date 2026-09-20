@@ -35,6 +35,29 @@ const capabilities = {
 } as const;
 
 describe('TripGoProbeAdapter', () => {
+  it('sends the health check as JSON and validates the provider flag', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ healthCheckPassed: true }, 200));
+    const adapter = new TripGoProbeAdapter('SYNTHETIC_TEST_KEY', fetchMock);
+
+    await expect(adapter.healthCheck()).resolves.toMatchObject({
+      status: 'PASS',
+      httpStatus: 200,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-TripGo-HealthCheck': 'true',
+        }),
+        body: '{}',
+      }),
+    );
+  });
+
   it('expands segment references through templates and normalizes routes', () => {
     const routes = normalizeTripGoRoutingResponse(successResponse(), query);
     expect(routes).toEqual([
@@ -97,6 +120,30 @@ describe('TripGoProbeAdapter', () => {
     const result = await adapter.route(scenario, query, capabilities);
     expect(result.providerStatus).toBe('NO_ROUTE');
     expect(result.routeCount).toBe(0);
+  });
+
+  it('classifies a covered-area error returned with HTTP 200 as unsupported', async () => {
+    const adapter = new TripGoProbeAdapter(
+      'SYNTHETIC_TEST_KEY',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: 'Origin lies outside covered area.',
+            errorCode: 1002,
+            usererror: true,
+          },
+          200,
+        ),
+      ),
+    );
+
+    await expect(
+      adapter.route(scenario, query, capabilities),
+    ).resolves.toMatchObject({
+      providerStatus: 'UNSUPPORTED',
+      httpStatus: 200,
+      notes: ['Origin lies outside covered area.'],
+    });
   });
 
   it('does not send a request when the API key is absent', async () => {

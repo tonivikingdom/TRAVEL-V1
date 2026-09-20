@@ -2,6 +2,9 @@ import type {
   AdoptRoutePreviewResponse,
   DayOccurrenceTargetInput,
   DayView,
+  ExecutionRiskEvaluationResponse,
+  ExecutionRiskListResponse,
+  ExecutionRiskView,
   LivenessResponse,
   NotificationListResponse,
   NotificationView,
@@ -53,6 +56,7 @@ interface DebugState {
   preview: RoutePreviewView | null;
   receipt: OperationReceiptView | null;
   history: readonly TransportHistoryView[];
+  executionRisks: readonly ExecutionRiskView[];
 }
 
 const root = requiredElement<HTMLDivElement>('app');
@@ -75,6 +79,7 @@ const state: DebugState = {
   preview: null,
   receipt: store.getLastReceipt(store.getSelectedTripId()),
   history: [],
+  executionRisks: [],
 };
 
 root.addEventListener('submit', (event) => {
@@ -319,6 +324,15 @@ async function handleAction(element: HTMLElement): Promise<void> {
     case 'evaluate':
       await evaluateSchedule();
       break;
+    case 'evaluate-execution':
+      await evaluateExecutionRisks();
+      break;
+    case 'acknowledge-risk':
+      if (id !== undefined) await updateExecutionRisk(id, 'acknowledge');
+      break;
+    case 'snooze-risk':
+      if (id !== undefined) await updateExecutionRisk(id, 'snooze');
+      break;
     case 'choose-candidate':
       chooseCandidate(Number(element.dataset.index));
       break;
@@ -354,8 +368,45 @@ async function loadTrip(id: string): Promise<void> {
   state.receipt = store.getLastReceipt(id);
   state.schedule = null;
   state.history = [];
+  await loadExecutionRisks(id);
   Object.assign(state, invalidateRouteArtifacts());
   render();
+}
+
+async function loadExecutionRisks(tripId: string): Promise<void> {
+  const response = await api.get<ExecutionRiskListResponse>(
+    `/trips/${encodeURIComponent(tripId)}/execution/risks`,
+  );
+  state.executionRisks = response.risks;
+}
+
+async function evaluateExecutionRisks(): Promise<void> {
+  const trip = requireTrip();
+  await run(async () => {
+    const response = await api.post<ExecutionRiskEvaluationResponse>(
+      `/trips/${encodeURIComponent(trip.id)}/execution/evaluate`,
+      {},
+    );
+    state.executionRisks = response.risks;
+    await loadNotifications(false);
+    state.message = `执行风险评估完成：${response.risks.length} 个活动风险，${response.resolvedRisks.length} 个已解决。`;
+  });
+}
+
+async function updateExecutionRisk(
+  riskId: string,
+  action: 'acknowledge' | 'snooze',
+): Promise<void> {
+  const trip = requireTrip();
+  await run(async () => {
+    await api.post<ExecutionRiskView>(
+      `/trips/${encodeURIComponent(trip.id)}/execution/risks/${encodeURIComponent(riskId)}/${action}`,
+      {},
+    );
+    await Promise.all([loadExecutionRisks(trip.id), loadNotifications(false)]);
+    state.message =
+      action === 'acknowledge' ? '风险已确认。' : '风险已暂停提醒 15 分钟。';
+  });
 }
 
 async function loadNotifications(append: boolean): Promise<void> {
@@ -660,6 +711,7 @@ function resetAuthenticatedState(): void {
   state.preview = null;
   state.receipt = null;
   state.history = [];
+  state.executionRisks = [];
 }
 
 function render(): void {
@@ -747,7 +799,7 @@ function createTripForm(): string {
 
 function notificationList(): string {
   if (state.notifications.length === 0) {
-    return '<p>当前没有站内通知。</p><p class="muted">通知基础设施已存在，但实时风险通知业务尚未实现。</p>';
+    return '<p>当前没有站内通知。</p><p class="muted">P5D1 风险通知仅由显式执行评估产生；后台实时监控、Push 尚未实现。</p>';
   }
   return `${state.notifications
     .map(
@@ -774,10 +826,23 @@ function tripWorkspace(trip: TripView): string {
       <section class="panel"><h2>测试事实输入</h2>${temporalForm(trip)}</section>
       <section class="panel"><h2>UserTimeIntent</h2>${intentForms(trip)}</section>
       <section class="panel span-2"><h2>Schedule Projection</h2><button data-action="evaluate">重新评估时间约束</button>${scheduleView()}</section>
+      <section class="panel span-2"><h2>Execution Risk（P5D1 手工测试）</h2><button data-action="evaluate-execution">触发执行风险评估</button>${executionRiskView()}</section>
       <section class="panel span-2"><h2>Route Query / Candidate</h2>${routeQueryForm(trip)}${candidateView()}</section>
       <section class="panel span-2"><h2>Preview / Adopt / Undo</h2>${previewForm()}${previewView()}${receiptView(trip)}</section>
       <section class="panel span-2"><h2>Transport History</h2><button data-action="load-history">加载历史</button>${historyView()}</section>
     </div>`;
+}
+
+function executionRiskView(): string {
+  if (state.executionRisks.length === 0) {
+    return '<p class="muted">当前没有活动执行风险。此处不会后台轮询，也不会伪造风险。</p>';
+  }
+  return `<div class="stack-form">${state.executionRisks
+    .map(
+      (risk) =>
+        `<article class="notification"><strong>${esc(risk.kind)} · ${esc(risk.severity)}</strong><small>${esc(risk.status)} · last seen ${esc(risk.lastSeenAt)}</small><pre>${esc(JSON.stringify({ sourceNodeId: risk.sourceNodeId, sourceTransportEdgeId: risk.sourceTransportEdgeId, protectedNodeId: risk.protectedNodeId, protectedTransportEdgeId: risk.protectedTransportEdgeId, evidenceRefs: risk.evidenceRefs, requiresRouteReevaluation: risk.requiresRouteReevaluation, acknowledgedAt: risk.acknowledgedAt, snoozedUntil: risk.snoozedUntil }, null, 2))}</pre><div class="actions"><button data-action="acknowledge-risk" data-id="${attr(risk.id)}">确认风险</button><button data-action="snooze-risk" data-id="${attr(risk.id)}">暂停提醒 15 分钟</button></div></article>`,
+    )
+    .join('')}</div>`;
 }
 
 function timeline(trip: TripView): string {

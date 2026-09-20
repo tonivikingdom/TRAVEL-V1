@@ -18,8 +18,9 @@
 | P4B3 | Route Adopt 单步 Undo                                | 已通过 PR #15 Squash Merge；main `d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`；CI `35434086597` 通过                 | 已完成短时单步前向补偿；不包含 Undo stack 或 Redo                                    |
 | P5A  | Dev/Test Debug Web 薄测试台                          | 已通过 PR #16 合并；main `cbf9fe2a727011e4708585ef259c3324c05b4362`；CI `35435976817` 通过                         | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、监控、Push 或离线编辑     |
 | P5B  | Development/Test 内部验收与环境闸门                  | 已通过 PR #17 合并；main `49a76517ef7917678c8d2133977435a1854edd07`；CI `35439640209` 三个核心 job 通过            | ≤5 synthetic 用户跨层验收完成；不是性能容量认证、Staging 许可或 Production readiness |
-| P5C  | 停留/Buffer 策略、Route lookback、候选排序与可逆调整 | 已授权，在 `feature/p5c-planning-policy` 实施                                                                      | 只实现确定性 planning policy；真实 Provider、实时监控、Push 与 Production 仍未授权   |
-| P5D+ | 后续执行/提醒/正式客户端能力                         | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
+| P5C  | 停留/Buffer 策略、Route lookback、候选排序与可逆调整 | 已通过 PR #18 Squash Merge；main `7b069707ed67fe539adea373b642041cce1820ac`；CI `35479025186` 三个核心 job 通过    | 确定性 planning policy 已完成；真实 Provider、Push 与 Production 仍未授权            |
+| P5D1 | 确定性执行风险、持久生命周期与通知抑制               | 已授权，在 `feature/p5d1-execution-risk` 实施                                                                      | 仅显式评估 foundation；无后台实时轮询、定位、Push、自动重排或下一班查询              |
+| P5D+ | 后续执行采集、提醒投递与正式客户端能力               | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。
@@ -73,8 +74,11 @@ O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI
   通过。P4B3 随后获得单独授权，只实现最近一次 Route Adopt 的短时安全补偿；真实 Provider、推荐、
   多级 Undo/Redo 与 Production 仍未授权。P5A 已通过 PR #16 合并，P5B 已通过 PR #17 Squash Merge
   到 main `49a76517ef7917678c8d2133977435a1854edd07`，main CI Run `35439640209` 的
-  `verify`、`Compose verification` 与 `P5B acceptance` 均为 success。P5C 只在独立 feature 分支实施
-  planning policy，不解除真实 Provider、实时监控、正式客户端或 Production 闸门。
+  `verify`、`Compose verification` 与 `P5B acceptance` 均为 success。P5C 已通过 PR #18 合并到 main
+  `7b069707ed67fe539adea373b642041cce1820ac`；Provider Probe PR #19 随后合并到 main
+  `663a7b77f430d40fea77de0767b5dc6f927b05a9`，main CI Run `35486059281` 三个核心 job 均为
+  success。P5D1 只在独立 feature 分支实施执行风险 foundation，不解除真实 Provider、后台实时监控、
+  正式客户端或 Production 闸门。
 
 ## P1A → P1B 邮件安全闸门
 

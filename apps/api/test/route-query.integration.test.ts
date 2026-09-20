@@ -1994,22 +1994,23 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(restoredSingle.trip.connections[0]!.transport!.id).toBe(
       originalEdgeId,
     );
-    expect(
-      await managed.client.adoptedRoute.findMany({
-        where: { tripId: initial.id },
-        orderBy: { createdAt: 'asc' },
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        id: first.operationReceipt.adoptedRouteId,
-        status: 'ACTIVE',
-        replacedAt: null,
-      }),
-      expect.objectContaining({
-        id: second.operationReceipt.adoptedRouteId,
-        status: 'UNDONE',
-      }),
-    ]);
+    const adoptedRoutes = await managed.client.adoptedRoute.findMany({
+      where: { tripId: initial.id },
+    });
+    expect(adoptedRoutes).toHaveLength(2);
+    expect(adoptedRoutes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: first.operationReceipt.adoptedRouteId,
+          status: 'ACTIVE',
+          replacedAt: null,
+        }),
+        expect.objectContaining({
+          id: second.operationReceipt.adoptedRouteId,
+          status: 'UNDONE',
+        }),
+      ]),
+    );
 
     providerResult = transferCandidate();
     const multiPreview = await createPreview(

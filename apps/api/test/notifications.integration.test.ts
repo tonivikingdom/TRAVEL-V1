@@ -144,6 +144,23 @@ describe('private NotificationEvent API with PostgreSQL', () => {
     expect((await list(userA)).notifications[0]?.dismissedAt).not.toBeNull();
   });
 
+  it('marks an owned notification viewed idempotently without exposing it cross-owner', async () => {
+    const notification = await createNotification(
+      userA.userId,
+      'synthetic:viewed',
+    );
+    const denied = await view(userB, notification.id);
+    expect(denied.statusCode).toBe(404);
+    const first = await view(userA, notification.id);
+    const repeated = await view(userA, notification.id);
+    expect(first.statusCode).toBe(200);
+    expect(repeated.statusCode).toBe(200);
+    expect(repeated.json().viewedAt).toBe(first.json().viewedAt);
+    expect((await list(userA)).notifications[0]?.viewedAt).toBe(
+      first.json().viewedAt,
+    );
+  });
+
   it('uses stable newest-first cursor pagination', async () => {
     for (const index of [1, 2, 3, 4, 5]) {
       await notificationService.createNotification({
@@ -254,6 +271,14 @@ describe('private NotificationEvent API with PostgreSQL', () => {
     return app.inject({
       method: 'POST',
       url: `/notifications/${notificationId}/dismiss`,
+      headers: bearer(identity.credential),
+    });
+  }
+
+  function view(identity: SyntheticIdentity, notificationId: string) {
+    return app.inject({
+      method: 'POST',
+      url: `/notifications/${notificationId}/view`,
       headers: bearer(identity.credential),
     });
   }

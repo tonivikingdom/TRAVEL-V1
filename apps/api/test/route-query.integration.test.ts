@@ -389,6 +389,85 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
+  it('runs ARRIVE_BY through the Google adapter, snapshot, preview, adopt, and undo', async () => {
+    currentNow = new Date('2026-09-20T05:00:00.000Z');
+    const fetchImplementation = vi.fn(async (_url, init) => {
+      const requestedQuery = JSON.parse(String(init?.body)) as Record<
+        string,
+        unknown
+      >;
+      return new Response(
+        JSON.stringify(googleConsumerHokkaidoFixture(requestedQuery)),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    await app.close();
+    app = buildTestApi(
+      new GoogleConsumerExperimentalRouteProvider({
+        baseUrl: 'http://127.0.0.1:8787',
+        token: 'SYNTHETIC_INTEGRATION_TOKEN_DO_NOT_LOG',
+        timeoutMs: 1_000,
+        fetchImplementation,
+      }),
+    );
+    const trip = await tripWithVisitsOnDate(
+      userA,
+      ['Hotel Mahoroba', '洞爷湖景乃之风'],
+      '2026-09-23',
+    );
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    const response = await query(userA, trip, from!.id, to!.id, {
+      type: 'ARRIVE_BY',
+      instant: '2026-09-23T17:30:00+09:00',
+      timeZone: 'Asia/Tokyo',
+    });
+    expect(response.statusCode).toBe(200);
+    const route = response.json() as RouteQueryResponse;
+    expect(route.candidates[0]).toMatchObject({
+      provider: 'GOOGLE_CONSUMER_EXPERIMENTAL',
+      providerCandidateRef: 'sanitized-hokkaido-01',
+      fare: { amount: '3910', currency: 'JPY' },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      timeMode: 'ARRIVE_BY',
+      date: '2026-09-23',
+      time: '17:30',
+      timezone: 'Asia/Tokyo',
+    });
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    const preview = previewResponse.json() as RoutePreviewView;
+    expect(preview.adoptable).toBe(true);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `google-consumer-arrive-by-adopt-${randomUUID()}`,
+    );
+    expect(adopted.trip.version).toBe(trip.version + 1);
+    expect(adopted.operationReceipt.operationType).toBe('ROUTE_ADOPT');
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      `google-consumer-arrive-by-undo-${randomUUID()}`,
+    );
+    expect(undone.trip.version).toBe(adopted.trip.version + 1);
+    expect(undone.operationReceipt.operationType).toBe('ROUTE_UNDO');
+    expect(undone.trip.connections).toMatchObject([{ state: 'MISSING' }]);
+  });
+
   it('creates and re-reads an immutable Preview without changing official Trip facts', async () => {
     const trip = await tripWithVisits(userA, ['Tokyo', 'Los Angeles']);
     const [from, to] = trip.days.flatMap((day) => day.nodes);

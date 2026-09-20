@@ -190,7 +190,9 @@ async function readResponseBody(response: Response): Promise<unknown> {
 function mapSidecarError(value: unknown): RouteProviderResult {
   const code = sidecarErrorCode(value);
   if (code === 'NO_ROUTES') return { status: 'NO_MATCHING_CANDIDATE' };
-  if (code === 'UNSUPPORTED_MODE') return { status: 'UNSUPPORTED_QUERY' };
+  if (code === 'UNSUPPORTED_MODE' || code === 'UNSUPPORTED_QUERY') {
+    return { status: 'UNSUPPORTED_QUERY' };
+  }
   return {
     status: 'PROVIDER_UNAVAILABLE',
     reason: 'UPSTREAM_UNAVAILABLE',

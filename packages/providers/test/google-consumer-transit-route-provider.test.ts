@@ -206,6 +206,7 @@ describe('GoogleConsumerExperimentalRouteProvider', () => {
   it.each([
     ['NO_ROUTES', { status: 'NO_MATCHING_CANDIDATE' }],
     ['UNSUPPORTED_MODE', { status: 'UNSUPPORTED_QUERY' }],
+    ['UNSUPPORTED_QUERY', { status: 'UNSUPPORTED_QUERY' }],
     ['BUSY', unavailable()],
     ['SCHEMA_CHANGED', unavailable()],
     ['REQUEST_MISMATCH', unavailable()],

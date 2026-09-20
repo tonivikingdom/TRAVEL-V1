@@ -653,6 +653,42 @@ describe('RouteQueryService', () => {
     });
   });
 
+  it('keeps ARRIVE_BY adjustment candidates after fully feasible primary candidates', async () => {
+    findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        candidate(
+          '2030-10-01T10:45:00Z',
+          '2030-10-01T11:05:00Z',
+          'adjustment-later-departure',
+        ),
+        candidate(
+          '2030-10-01T10:50:00Z',
+          '2030-10-01T11:20:00Z',
+          'fully-feasible',
+        ),
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, {
+      ...request(),
+      hint: {
+        type: 'ARRIVE_BY',
+        instant: '2030-10-01T12:00:00Z',
+        timeZone: 'UTC',
+      },
+    });
+
+    expect(result.candidates.map((item) => item.candidateId)).toEqual([
+      'fully-feasible',
+      'adjustment-later-departure',
+    ]);
+    expect(result.candidates[1]?.planningAssessment).toMatchObject({
+      requiresUserAdjustment: true,
+    });
+  });
+
   function service(): RouteQueryService {
     return new RouteQueryService(repository, provider, planningRepository, {
       candidateSnapshotTtlSeconds: 900,

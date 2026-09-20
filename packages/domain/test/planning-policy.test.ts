@@ -4,6 +4,7 @@ import {
   assessDwell,
   evaluateBuffer,
   expandRouteQueryStart,
+  rankArriveByCandidates,
   rankRouteCandidates,
   suggestedExternalBoardingBufferSeconds,
   type NormalizedRouteCandidate,
@@ -287,6 +288,76 @@ describe('P5C planning policy', () => {
     expect(ranked.valueCandidateId).toBeNull();
   });
 
+  it('ranks ARRIVE_BY by latest departure, then duration, fare, transfers, walking, and ID', () => {
+    const candidates = [
+      candidateAt(
+        'late-long',
+        '2030-01-01T10:20:00Z',
+        '2030-01-01T11:20:00Z',
+        '5.00',
+      ),
+      candidateAt(
+        'late-short',
+        '2030-01-01T10:20:00Z',
+        '2030-01-01T11:00:00Z',
+        '20.00',
+      ),
+      candidateAt(
+        'earlier-cheap',
+        '2030-01-01T10:10:00Z',
+        '2030-01-01T10:30:00Z',
+        '1.00',
+      ),
+      candidateAt(
+        'null-fare',
+        '2030-01-01T10:15:00Z',
+        '2030-01-01T10:35:00Z',
+        null,
+      ),
+      candidateAt(
+        'usd',
+        '2030-01-01T10:15:00Z',
+        '2030-01-01T10:35:00Z',
+        '0.01',
+        'USD',
+      ),
+    ];
+    const ranked = rankArriveByCandidates(candidates);
+    expect(ranked.ordered.map((item) => item.candidateId)).toEqual([
+      'late-short',
+      'late-long',
+      'null-fare',
+      'usd',
+      'earlier-cheap',
+    ]);
+    expect(ranked.primaryCandidateId).toBe('late-short');
+    expect(ranked.valueCandidateId).toBeNull();
+  });
+
+  it('keeps ARRIVE_BY ordering deterministic for shuffled and identical candidates', () => {
+    const base = [
+      candidateAt('z', '2030-01-01T10:00:00Z', '2030-01-01T10:30:00Z', '2.00'),
+      candidateAt('a', '2030-01-01T10:00:00Z', '2030-01-01T10:30:00Z', '2.00'),
+      candidateAt('m', '2030-01-01T10:00:00Z', '2030-01-01T10:30:00Z', '2.00'),
+    ];
+    const expected = ['a', 'm', 'z'];
+    for (let seed = 1; seed <= 40; seed += 1) {
+      expect(
+        rankArriveByCandidates(deterministicShuffle(base, seed)).ordered.map(
+          (value) => value.candidateId,
+        ),
+      ).toEqual(expected);
+    }
+    expect(
+      rankArriveByCandidates([
+        candidateWithLegs('z-two-legs', 2, 0),
+        candidateWithLegs('b-walking', 1, 600),
+        candidateWithLegs('a-stable', 1, 0),
+        candidateWithLegs('c-stable', 1, 0),
+      ]).ordered.map((value) => value.candidateId),
+    ).toEqual(['a-stable', 'c-stable', 'b-walking', 'z-two-legs']);
+  });
+
   it('keeps suggested, preferred, and minimum buffer risk semantics distinct', () => {
     expect(
       evaluateBuffer({
@@ -448,10 +519,11 @@ function candidateAt(
   departure: string,
   arrival: string,
   amount: string | null,
+  currency = 'CNY',
 ): NormalizedRouteCandidate {
   const departureInstant = instant(departure);
   const arrivalInstant = instant(arrival);
-  const base = candidate(candidateId, '09:00', '10:00', amount);
+  const base = candidate(candidateId, '09:00', '10:00', amount, currency);
   return {
     ...base,
     departure: { instant: departureInstant, timeZone: 'UTC' },

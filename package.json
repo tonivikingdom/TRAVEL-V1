@@ -22,6 +22,7 @@
     "format:check": "prettier --check \"apps/**/*.{ts,css,json,html}\" \"packages/**/*.{ts,json}\" \"scripts/**/*.{mjs,ts,json}\" \".github/**/*.yml\" \"infra/**/*.{yml,md}\" \"docs/architecture/**/*.md\" \"docs/status/**/*.md\" \"docs/testing/**/*.md\" \"docs/deployment/**/*.md\" \"docs/adr/*.md\" \"README.md\" \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig.base.json\" \"eslint.config.mjs\" \"vitest.config.ts\" \"vitest.workspace-aliases.ts\" \"prisma.config.ts\"",
     "lint": "eslint .",
     "postinstall": "prisma generate",
+    "provider:probe": "tsx scripts/provider-probe/cli.ts",
     "p5b:acceptance": "tsx scripts/p5b-acceptance.mjs",
     "p5b:reset": "tsx scripts/reset-p5b-synthetic.ts",
     "prisma:generate": "prisma generate",

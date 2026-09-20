@@ -42,8 +42,9 @@
 - PostgreSQL integration：未通过本机执行；机器没有 Docker/PostgreSQL 且没有 `TEST_DATABASE_URL`，命令按预期在
   环境闸门失败，未跳过或伪报成功。
 - Travel HTTP Query → Snapshot → Preview → Adopt → Undo live E2E：未验证；同样被本机 PostgreSQL 环境阻塞。
-- CI：待本 Draft PR 创建并执行；GitHub CI 将作为 PostgreSQL integration 与通用
-  Query → Snapshot → Preview → Adopt → Undo 持久化链路的正式验收环境。
+- CI Run `35496360982`：`verify`、`Compose verification`、`P5B acceptance` 均通过。
+  `verify` 已在隔离 PostgreSQL 环境完成 migration deploy、PostgreSQL integration、typecheck、unit 与 build；
+  Compose 和 P5B acceptance 继续验证通用 Query → Snapshot → Preview → Adopt → Undo 持久化链路。
 - Prisma schema/migration：0 变更。
 
 ## 修改文件
@@ -61,5 +62,6 @@
 ## 未解决事项
 
 - Sidecar `ARRIVE_BY` 尚未 live 验证。
-- 本机缺少 PostgreSQL/Docker，Snapshot/Preview/Adopt/Undo 的真实持久化链路仍需在具备隔离 PostgreSQL 的环境补验。
+- 本机缺少 PostgreSQL/Docker；通用持久化链路已由 CI 的隔离 PostgreSQL 环境补验。Google Consumer
+  adapter 的 live 调用仍仅在本地 Development loopback sidecar 中低频验证，CI 不持有该 token 或 sidecar。
 - 不包含 reverse import、正式 UI、公网/Tailscale、真实多人并发、Production enablement 或商业可用性承诺。

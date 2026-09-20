@@ -90,6 +90,59 @@ describe('flight monitoring policy', () => {
     expect(result.nextCheckAt?.toISOString()).toBe('2030-01-02T11:30:00.000Z');
   });
 
+  it('keeps a predicted-only delayed estimate out of delay mode and notifications', () => {
+    const delayedPrediction = decideAcceptedFlightRefresh({
+      previous: snapshot(),
+      next: snapshot({ predictedUtc: '2030-01-02T12:45:00.000Z' }),
+      state: state(),
+      now: new Date('2030-01-02T10:00:00.000Z'),
+    });
+    expect(delayedPrediction.state.mode).toBe('NORMAL');
+    expect(delayedPrediction.notification).toBeNull();
+  });
+
+  it('does not emit early departure from a predicted-only time', () => {
+    const earlyPrediction = decideAcceptedFlightRefresh({
+      previous: snapshot(),
+      next: snapshot({ predictedUtc: '2030-01-02T11:50:00.000Z' }),
+      state: state(),
+      now: new Date('2030-01-02T10:00:00.000Z'),
+    });
+    expect(earlyPrediction.state.mode).toBe('NORMAL');
+    expect(earlyPrediction.notification).toBeNull();
+  });
+
+  it('uses delayed status without revised time but ignores predicted time for numbers and cadence', () => {
+    const now = new Date('2030-01-02T10:00:00.000Z');
+    const result = decideAcceptedFlightRefresh({
+      previous: snapshot(),
+      next: snapshot({
+        status: 'DELAYED',
+        predictedUtc: '2030-01-02T12:45:00.000Z',
+      }),
+      state: state(),
+      now,
+    });
+    expect(result.state.mode).toBe('DELAYED');
+    expect(result.notification).toBeNull();
+    expect(result.nextCheckAt?.toISOString()).toBe('2030-01-02T10:30:00.000Z');
+  });
+
+  it('stops preflight notification decisions once runway departure is factual', () => {
+    const result = decideAcceptedFlightRefresh({
+      previous: snapshot(),
+      next: snapshot({
+        status: 'SCHEDULED',
+        revisedUtc: '2030-01-02T12:45:00.000Z',
+        runwayUtc: '2030-01-02T12:40:00.000Z',
+      }),
+      state: state(),
+      now: new Date('2030-01-02T12:41:00.000Z'),
+    });
+    expect(result.state.mode).toBe('STOPPED');
+    expect(result.notification).toBeNull();
+  });
+
   it('replaces dynamic schedules even when the monitor mode is unchanged', () => {
     const delayed = decideAcceptedFlightRefresh({
       previous: snapshot({
@@ -271,6 +324,41 @@ describe('flight monitoring policy', () => {
     );
   });
 
+  it('aggregates meaningful restored-flight facts into one strong summary', () => {
+    const restored = decideAcceptedFlightRefresh({
+      previous: snapshot({
+        status: 'CANCELLED',
+        gate: '61',
+        terminal: 'T1',
+      }),
+      next: snapshot({
+        status: 'DELAYED',
+        revisedUtc: '2030-01-02T14:00:00.000Z',
+        gate: '72',
+        terminal: 'T2',
+      }),
+      state: state({
+        mode: 'CANCELLED',
+        cancellationNotified: true,
+        lastNotifiedDepartureGate: '61',
+      }),
+      now: new Date('2030-01-02T10:00:00.000Z'),
+    });
+    expect(restored.notification).toMatchObject({
+      priority: 'STRONG',
+      changeKinds: [
+        'RESTORED_AFTER_CANCELLATION',
+        'DELAY',
+        'GATE_CHANGED',
+        'TERMINAL_CHANGED',
+      ],
+    });
+    expect(restored.notification?.summary).toContain('航班已恢复执行');
+    expect(restored.notification?.summary).toContain('延误约 120 分钟');
+    expect(restored.notification?.summary).toContain('登机口现为 72');
+    expect(restored.notification?.summary).toContain('出发航站楼现为 T2');
+  });
+
   it('uses bounded two-hour/hourly cancellation checks and stops at T+2h', () => {
     const distant = decideAcceptedFlightRefresh({
       previous: snapshot(),
@@ -434,6 +522,8 @@ function snapshot(
   input: {
     readonly status?: string;
     readonly revisedUtc?: string | null;
+    readonly predictedUtc?: string | null;
+    readonly runwayUtc?: string | null;
     readonly gate?: string | null;
     readonly terminal?: string | null;
     readonly arrivalTerminal?: string | null;
@@ -446,8 +536,8 @@ function snapshot(
     departure: {
       scheduledUtc: scheduled,
       revisedUtc: input.revisedUtc ?? null,
-      predictedUtc: null,
-      runwayUtc: null,
+      predictedUtc: input.predictedUtc ?? null,
+      runwayUtc: input.runwayUtc ?? null,
       gate: input.gate ?? null,
       terminal: input.terminal ?? null,
     },

@@ -4,7 +4,6 @@ import type {
   RefreshFlightResponse,
 } from '@travel/contracts';
 import {
-  decideAcceptedFlightRefresh,
   decideProviderFailure,
   shouldRefreshFlightDetail,
   shouldSkipFixedRefresh,
@@ -48,21 +47,11 @@ export class FlightMonitoringService {
       context.state.mode === 'NORMAL' &&
       shouldSkipFixedRefresh(context.state.lastSuccessfulMonitorRefreshAt, now)
     ) {
-      const decision = decideAcceptedFlightRefresh({
-        previous: context.binding.latestSnapshot,
-        next: context.binding.latestSnapshot,
-        state: context.state,
-        now,
-      });
       await this.repository.commitRefresh({
         flightBindingId,
         acceptedFetchedAt: new Date(context.binding.lastRefreshedAt),
-        mode: decision.state.mode,
-        state: decision.state,
-        notification: decision.notification,
+        previousSnapshot: context.binding.latestSnapshot,
         hasDownstreamImpact: false,
-        nextCheckAt: decision.nextCheckAt,
-        replaceSchedule: decision.replaceSchedule,
         recordSuccessfulRefresh: false,
         now,
       });
@@ -161,21 +150,11 @@ export class FlightMonitoringService {
       );
       const after = await this.repository.findContext(flightBindingId);
       if (after === null) return { response, notificationId: null };
-      const decision = decideAcceptedFlightRefresh({
-        previous: before.binding.latestSnapshot,
-        next: response.flightBinding.latestSnapshot,
-        state: before.state,
-        now,
-      });
       const notification = await this.repository.commitRefresh({
         flightBindingId,
         acceptedFetchedAt: new Date(response.flightBinding.lastRefreshedAt),
-        mode: decision.state.mode,
-        state: decision.state,
-        notification: decision.notification,
-        hasDownstreamImpact: response.riskEvaluation.risks.length > 0,
-        nextCheckAt: decision.nextCheckAt,
-        replaceSchedule: decision.replaceSchedule,
+        previousSnapshot: before.binding.latestSnapshot,
+        hasDownstreamImpact: hasFlightRelatedDownstreamImpact(response),
         recordSuccessfulRefresh: true,
         now,
       });
@@ -197,6 +176,17 @@ export class FlightMonitoringService {
       return { response: null, notificationId: notification?.id ?? null };
     }
   }
+}
+
+export function hasFlightRelatedDownstreamImpact(
+  response: Pick<RefreshFlightResponse, 'flightBinding' | 'riskEvaluation'>,
+): boolean {
+  const transportRef = `transport:${response.flightBinding.transportEdgeId}`;
+  return response.riskEvaluation.risks.some(
+    (risk) =>
+      risk.sourceTransportEdgeId === response.flightBinding.transportEdgeId ||
+      risk.evidenceRefs.includes(transportRef),
+  );
 }
 
 function isProviderFailure(error: unknown): boolean {

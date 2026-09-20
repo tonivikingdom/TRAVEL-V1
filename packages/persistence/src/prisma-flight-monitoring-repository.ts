@@ -5,9 +5,12 @@ import type {
 } from '@travel/application';
 import type { FlightBindingView, FlightSnapshotView } from '@travel/contracts';
 import {
+  decideAcceptedFlightRefresh,
   futureNormalCheckpoints,
   nextCancellationCheck,
   nextDelayCheck,
+  type FlightMonitorNotificationDecision,
+  type MonitorDecisionState,
 } from '@travel/domain';
 
 import {
@@ -179,11 +182,18 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
         where: { flightBindingId: input.flightBindingId },
       });
       if (current === null) return null;
-      const replaceSchedule = input.mode === 'STOPPED' || input.replaceSchedule;
+      const decision = decideAcceptedFlightRefresh({
+        previous: input.previousSnapshot,
+        next: binding.latestSnapshot as unknown as FlightSnapshotView,
+        state: toDecisionState(current),
+        now: input.now,
+      });
+      const replaceSchedule =
+        decision.state.mode === 'STOPPED' || decision.replaceSchedule;
       await transaction.flightMonitorState.update({
         where: { flightBindingId: input.flightBindingId },
         data: stateUpdate(
-          input.state,
+          decision.state,
           input.recordSuccessfulRefresh ? input.now : null,
           current,
         ),
@@ -192,7 +202,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
       if (replaceSchedule) {
         await cancelQueuedJobs(transaction, input.flightBindingId, input.now);
       }
-      if (input.mode === 'NORMAL' && replaceSchedule) {
+      if (decision.state.mode === 'NORMAL' && replaceSchedule) {
         const snapshot =
           binding.latestSnapshot as unknown as FlightSnapshotView;
         const scheduled = requiredInstant(snapshot.departure.scheduledUtc);
@@ -204,19 +214,19 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           input.now,
           true,
         );
-      } else if (input.nextCheckAt !== null) {
+      } else if (decision.nextCheckAt !== null) {
         await scheduleJob(
           transaction,
           input.flightBindingId,
           current.generation,
-          input.nextCheckAt,
-          input.mode.toLowerCase(),
+          decision.nextCheckAt,
+          decision.state.mode.toLowerCase(),
           replaceSchedule,
         );
       }
       return createNotification(transaction, {
         binding,
-        notification: input.notification,
+        notification: decision.notification,
         hasDownstreamImpact: input.hasDownstreamImpact,
         occurredAt: input.now,
         generation: `${current.generation}:${input.acceptedFetchedAt.toISOString()}`,
@@ -382,7 +392,7 @@ async function cancelQueuedJobs(
 }
 
 function stateUpdate(
-  state: Parameters<FlightMonitoringRepository['commitRefresh']>[0]['state'],
+  state: MonitorDecisionState,
   successfulRefreshAt: Date | null,
   current?: FlightMonitorState,
 ) {
@@ -408,9 +418,7 @@ async function createNotification(
   transaction: Transaction,
   input: {
     readonly binding: FlightBinding;
-    readonly notification: Parameters<
-      FlightMonitoringRepository['commitRefresh']
-    >[0]['notification'];
+    readonly notification: FlightMonitorNotificationDecision | null;
     readonly hasDownstreamImpact: boolean;
     readonly occurredAt: Date;
     readonly generation: string;
@@ -517,10 +525,23 @@ function hasPositiveDepartureDelay(
   snapshot: FlightSnapshotView,
   scheduled: Date,
 ): boolean {
-  const revised = instant(
-    snapshot.departure.revisedUtc ?? snapshot.departure.predictedUtc,
-  );
+  const revised = instant(snapshot.departure.revisedUtc);
   return revised !== null && revised.getTime() > scheduled.getTime();
+}
+
+function toDecisionState(state: FlightMonitorState): MonitorDecisionState {
+  return {
+    mode: state.mode,
+    arrivedAtAirportAt: state.arrivedAtAirportAt,
+    lastNotifiedDelayMinutes: state.lastNotifiedDelayMinutes,
+    earlyDepartureNotified: state.earlyDepartureNotified,
+    lastNotifiedDepartureGate: state.lastNotifiedDepartureGate,
+    providerUnavailableWarned: state.providerUnavailableWarned,
+    cancellationNotified: state.cancellationNotified,
+    baggageWindowStartedAt: state.baggageWindowStartedAt,
+    baggageWindowEndsAt: state.baggageWindowEndsAt,
+    lastNotifiedBaggage: state.lastNotifiedBaggage,
+  };
 }
 
 function instant(value: string | null): Date | null {

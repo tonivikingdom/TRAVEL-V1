@@ -112,7 +112,9 @@ export function decideAcceptedFlightRefresh(input: {
   const wasCancelled =
     input.previous.status === 'CANCELLED' || input.state.cancellationNotified;
   const isCancelled = input.next.status === 'CANCELLED';
-  const isDeparted = ['DEPARTED', 'EN_ROUTE'].includes(input.next.status);
+  const isDeparted =
+    ['DEPARTED', 'EN_ROUTE'].includes(input.next.status) ||
+    input.next.departure.runwayUtc !== null;
   const isLanded =
     ['LANDED', 'ARRIVED'].includes(input.next.status) ||
     input.next.arrival.runwayUtc !== null;
@@ -222,7 +224,7 @@ export function decideAcceptedFlightRefresh(input: {
     }
   }
 
-  const observedDeparture = estimatedDeparture(input.next.departure);
+  const observedDeparture = revisedDeparture(input.next.departure);
   const isEarly =
     observedDeparture !== null &&
     observedDeparture.getTime() < scheduled.getTime();
@@ -371,19 +373,17 @@ export function decideProviderFailure(input: {
 
 function delayMinutes(movement: MonitorMovement): number | null {
   const scheduled = instant(movement.scheduledUtc);
-  const observed = estimatedDeparture(movement);
+  const observed = revisedDeparture(movement);
   if (scheduled === null || observed === null) return null;
   return Math.floor((observed.getTime() - scheduled.getTime()) / 60_000);
 }
 
-function estimatedDeparture(movement: MonitorMovement): Date | null {
-  return instant(
-    movement.runwayUtc ?? movement.revisedUtc ?? movement.predictedUtc,
-  );
+function revisedDeparture(movement: MonitorMovement): Date | null {
+  return instant(movement.revisedUtc);
 }
 
 export function nextDelayCheck(movement: MonitorMovement, now: Date): Date {
-  const revised = instant(movement.revisedUtc ?? movement.predictedUtc);
+  const revised = instant(movement.revisedUtc);
   const interval =
     revised === null
       ? 30 * 60_000
@@ -412,10 +412,9 @@ function summarize(
   delay: number | null,
   snapshot: MonitorSnapshot,
 ): string {
-  if (kinds.includes('RESTORED_AFTER_CANCELLATION')) {
-    return '航班已恢复执行，请查看最新起飞信息和后续安排。';
-  }
   const parts: string[] = [];
+  if (kinds.includes('RESTORED_AFTER_CANCELLATION'))
+    parts.push('航班已恢复执行');
   if (kinds.includes('DELAY') && delay !== null)
     parts.push(`航班当前延误约 ${delay} 分钟`);
   if (kinds.includes('DELAY_IMPROVED') && delay !== null)
@@ -430,6 +429,9 @@ function summarize(
   if (kinds.includes('TERMINAL_CHANGED'))
     parts.push(`出发航站楼现为 ${snapshot.departure.terminal}`);
   if (kinds.includes('BOARDING')) parts.push('航班已开始登机');
+  if (kinds.includes('RESTORED_AFTER_CANCELLATION') && parts.length === 1) {
+    parts.push('请查看最新起飞信息和后续安排');
+  }
   return `${parts.join('；')}。`;
 }
 

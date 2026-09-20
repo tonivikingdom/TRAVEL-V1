@@ -1,6 +1,5 @@
-import type { FlightBindingView } from '@travel/contracts';
+import type { FlightBindingView, FlightSnapshotView } from '@travel/contracts';
 import type {
-  FlightMonitorMode,
   FlightMonitorNotificationDecision,
   MonitorDecisionState,
 } from '@travel/domain';
@@ -29,12 +28,8 @@ export interface FlightMonitoringRepository {
   commitRefresh(input: {
     readonly flightBindingId: string;
     readonly acceptedFetchedAt: Date;
-    readonly mode: FlightMonitorMode;
-    readonly state: MonitorDecisionState;
-    readonly notification: FlightMonitorNotificationDecision | null;
+    readonly previousSnapshot: FlightSnapshotView;
     readonly hasDownstreamImpact: boolean;
-    readonly nextCheckAt: Date | null;
-    readonly replaceSchedule: boolean;
     readonly recordSuccessfulRefresh: boolean;
     readonly now: Date;
   }): Promise<NotificationRecord | null>;

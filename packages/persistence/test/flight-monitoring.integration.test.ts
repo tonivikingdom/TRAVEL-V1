@@ -166,6 +166,134 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     ).toBe(1);
   });
 
+  it('keeps predicted-only schedule data out of monitoring mode selection', async () => {
+    const fixture = await createFixture(managed);
+    const monitoring = await createMonitoring(
+      managed,
+      fixture,
+      [snapshot({ fetchedAt: '2030-01-01T12:00:01.000Z' })],
+      () => new Date('2030-01-01T12:00:00.000Z'),
+    );
+    const adopted = await monitoring.flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({
+        fetchedAt: '2030-01-01T11:00:00.000Z',
+        predictedDeparture: '2030-01-02T12:45:00.000Z',
+      }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+
+    await monitoring.service.ensureEligibleMonitoring();
+
+    expect(
+      await managed.client.flightMonitorState.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({ mode: 'NORMAL', lastNotifiedDelayMinutes: null });
+    expect(
+      await managed.client.job.count({
+        where: {
+          type: 'FLIGHT_MONITOR',
+          payloadRef: adopted.binding.id,
+          status: 'QUEUED',
+          uniqueKey: { contains: ':normal:' },
+        },
+      }),
+    ).toBe(8);
+  });
+
+  it('keeps the newest snapshot decision state under different-fetchedAt concurrency', async () => {
+    const fixture = await createFixture(managed);
+    const older = deferred<readonly FlightSnapshotView[]>();
+    const newer = snapshot({
+      status: 'DELAYED',
+      fetchedAt: '2030-01-01T12:02:00.000Z',
+      revisedDeparture: '2030-01-02T14:30:00.000Z',
+    });
+    let refreshCall = 0;
+    const provider: FlightSnapshotProvider = {
+      search: async () => [],
+      refresh: async () => {
+        refreshCall += 1;
+        return refreshCall === 1 ? older.promise : [newer];
+      },
+    };
+    const now = () => new Date('2030-01-01T12:00:00.000Z');
+    const flightRepository = new PrismaFlightRepository(managed.client);
+    const risk = new ExecutionRiskService(
+      new PrismaTripRepository(managed.client),
+      new PrismaExecutionRiskRepository(managed.client),
+      { now },
+    );
+    const service = new FlightMonitoringService(
+      new FlightService(provider, flightRepository, risk),
+      new PrismaFlightMonitoringRepository(managed.client),
+      { now },
+    );
+    const adopted = await flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await service.ensureEligibleMonitoring();
+
+    const olderRefresh = service.executeJob(adopted.binding.id);
+    await waitFor(() => refreshCall === 1);
+    const newerRefresh = service.executeJob(adopted.binding.id);
+    await newerRefresh;
+    older.resolve([
+      snapshot({
+        status: 'DELAYED',
+        fetchedAt: '2030-01-01T12:01:00.000Z',
+        revisedDeparture: '2030-01-02T12:45:00.000Z',
+      }),
+    ]);
+    await olderRefresh;
+
+    expect(
+      await managed.client.flightBinding.findUniqueOrThrow({
+        where: { id: adopted.binding.id },
+      }),
+    ).toMatchObject({
+      lastRefreshedAt: new Date('2030-01-01T12:02:00.000Z'),
+      latestSnapshot: expect.objectContaining({
+        departure: expect.objectContaining({
+          revisedUtc: '2030-01-02T14:30:00.000Z',
+        }),
+      }),
+    });
+    expect(
+      await managed.client.flightMonitorState.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({ mode: 'DELAYED', lastNotifiedDelayMinutes: 150 });
+    expect(
+      await managed.client.notificationEvent.count({
+        where: {
+          flightBindingId: adopted.binding.id,
+          kind: 'FLIGHT_IMPORTANT_CHANGE',
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.job.findMany({
+        where: {
+          type: 'FLIGHT_MONITOR',
+          payloadRef: adopted.binding.id,
+          status: 'QUEUED',
+          uniqueKey: { contains: ':delayed:' },
+        },
+        select: { runAt: true },
+      }),
+    ).toEqual([{ runAt: new Date('2030-01-01T13:00:00.000Z') }]);
+  });
+
   it('uses a new schedule generation when the same binding row is rebound', async () => {
     const fixture = await createFixture(managed);
     const monitoring = await createMonitoring(
@@ -400,11 +528,14 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       status: 'CANCELLED',
       fetchedAt: '2030-01-01T12:00:01.000Z',
       gate: 'A1',
+      terminal: 'T1',
     });
     const restored = snapshot({
-      status: 'SCHEDULED',
+      status: 'DELAYED',
       fetchedAt: '2030-01-01T12:01:00.000Z',
+      revisedDeparture: '2030-01-02T14:00:00.000Z',
       gate: 'B2',
+      terminal: 'T2',
     });
     const landed = snapshot({
       status: 'ARRIVED',
@@ -443,10 +574,10 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
           type: 'FLIGHT_MONITOR',
           payloadRef: adopted.binding.id,
           status: 'QUEUED',
-          uniqueKey: { contains: ':normal:' },
+          uniqueKey: { contains: ':delayed:' },
         },
       }),
-    ).toBe(7);
+    ).toBe(1);
     now = new Date('2030-01-02T14:01:00.000Z');
     await monitoring.service.trigger(
       monitoring.actor,
@@ -470,9 +601,18 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     ]);
     expect(notifications.map((item) => item.changeKinds)).toEqual([
       ['CANCELLED'],
-      expect.arrayContaining(['RESTORED_AFTER_CANCELLATION']),
+      [
+        'RESTORED_AFTER_CANCELLATION',
+        'DELAY',
+        'GATE_CHANGED',
+        'TERMINAL_CHANGED',
+      ],
       ['BAGGAGE_AVAILABLE'],
     ]);
+    expect(notifications[1]?.summary).toContain('航班已恢复执行');
+    expect(notifications[1]?.summary).toContain('延误约 120 分钟');
+    expect(notifications[1]?.summary).toContain('登机口现为 B2');
+    expect(notifications[1]?.summary).toContain('出发航站楼现为 T2');
     expect(
       await managed.client.flightMonitorState.findUniqueOrThrow({
         where: { flightBindingId: adopted.binding.id },
@@ -617,9 +757,11 @@ function snapshot(input: {
   readonly status?: FlightSnapshotView['status'];
   readonly fetchedAt: string;
   readonly revisedDeparture?: string | null;
+  readonly predictedDeparture?: string | null;
   readonly revisedArrival?: string | null;
   readonly runwayArrival?: string | null;
   readonly gate?: string | null;
+  readonly terminal?: string | null;
   readonly baggage?: string | null;
 }): FlightSnapshotView {
   const departure = movement('HND', '2030-01-02T12:00:00.000Z');
@@ -637,7 +779,10 @@ function snapshot(input: {
       ...departure,
       revisedUtc: input.revisedDeparture ?? null,
       revisedLocal: input.revisedDeparture ?? null,
+      predictedUtc: input.predictedDeparture ?? null,
+      predictedLocal: input.predictedDeparture ?? null,
       gate: input.gate ?? null,
+      terminal: input.terminal ?? null,
     },
     arrival: {
       ...arrival,
@@ -654,6 +799,23 @@ function snapshot(input: {
     arrivalDelayBasis: null,
     fetchedAt: input.fetchedAt,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline)
+      throw new Error('Timed out waiting for refresh');
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }
 
 function movement(iata: string, scheduledUtc: string) {

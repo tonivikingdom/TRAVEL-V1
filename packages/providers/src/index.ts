@@ -9,6 +9,10 @@ export {
 } from './synthetic-route-provider.js';
 export { UnconfiguredRouteProvider } from './unconfigured-route-provider.js';
 export {
+  GoogleConsumerExperimentalRouteProvider,
+  type GoogleConsumerExperimentalRouteProviderOptions,
+} from './google-consumer-transit-route-provider.js';
+export {
   AeroDataBoxFlightProvider,
   type AeroDataBoxFlightProviderOptions,
 } from './aerodatabox-flight-provider.js';

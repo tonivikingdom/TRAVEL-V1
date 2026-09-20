@@ -443,6 +443,106 @@ describe('RouteQueryService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
+  it('measures effective time from planning earliest departure and applies the 140% value pool', async () => {
+    findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...candidate(
+            '2030-10-01T10:50:00Z',
+            '2030-10-01T11:00:00Z',
+            'fastest',
+          ),
+          fare: { amount: '100', currency: 'CNY' },
+        },
+        {
+          ...candidate(
+            '2030-10-01T10:50:00Z',
+            '2030-10-01T11:20:00Z',
+            'outside-140-percent',
+          ),
+          fare: { amount: '1', currency: 'CNY' },
+        },
+        {
+          ...candidate(
+            '2030-10-01T10:50:00Z',
+            '2030-10-01T11:04:00Z',
+            'inside-140-percent',
+          ),
+          fare: { amount: '90', currency: 'CNY' },
+        },
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, request());
+
+    expect(result.candidates.map((item) => item.candidateId)).toEqual([
+      'fastest',
+      'inside-140-percent',
+      'outside-140-percent',
+    ]);
+    expect(
+      Object.fromEntries(
+        result.candidates.map((item) => [
+          item.candidateId,
+          item.planningAssessment,
+        ]),
+      ),
+    ).toMatchObject({
+      fastest: {
+        effectiveTotalTimeSeconds: 600,
+      },
+      'inside-140-percent': {
+        effectiveTotalTimeSeconds: 840,
+      },
+      'outside-140-percent': {
+        effectiveTotalTimeSeconds: 1_800,
+      },
+    });
+  });
+
+  it('keeps a lookback adjustment candidate visible but ranks a fully feasible candidate first', async () => {
+    findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        candidate(
+          '2030-10-01T10:45:00Z',
+          '2030-10-01T11:00:00Z',
+          'adjustment-fast',
+        ),
+        candidate(
+          '2030-10-01T10:50:00Z',
+          '2030-10-01T11:20:00Z',
+          'fully-feasible',
+        ),
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, request());
+
+    expect(result.candidates.map((item) => item.candidateId)).toEqual([
+      'fully-feasible',
+      'adjustment-fast',
+    ]);
+    expect(
+      Object.fromEntries(
+        result.candidates.map((item) => [
+          item.candidateId,
+          item.planningAssessment,
+        ]),
+      ),
+    ).toMatchObject({
+      'adjustment-fast': {
+        requiresUserAdjustment: true,
+      },
+      'fully-feasible': {
+        requiresUserAdjustment: false,
+      },
+    });
+  });
+
   function service(): RouteQueryService {
     return new RouteQueryService(repository, provider, planningRepository, {
       candidateSnapshotTtlSeconds: 900,
@@ -540,6 +640,56 @@ function tripWithBounds(
               : [pointIntent(to.id, 'ARRIVAL', 'NOT_AFTER', latestArrival)],
         },
       ]),
+    ],
+  };
+}
+
+function tripWithPlanningDeparture(): TripAggregateRecord {
+  const trip = baseTrip();
+  const occurrence = trip.dayOccurrences[0]!;
+  const from = occurrence.nodes[0]!;
+  return {
+    ...trip,
+    dayOccurrences: [
+      {
+        ...occurrence,
+        nodes: [
+          {
+            ...from,
+            timeValues: [
+              {
+                id: '00000000-0000-4000-8000-000000000031',
+                layer: 'PLANNED',
+                pointKind: 'ARRIVAL',
+                instant: new Date('2030-10-01T10:00:00Z'),
+                timeZone: 'UTC',
+                sourceKind: 'USER_VALUE',
+                sourceRef: null,
+                observedAt: null,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            timeIntents: [
+              {
+                id: '00000000-0000-4000-8000-000000000032',
+                tripId,
+                nodeId: fromNodeId,
+                kind: 'MIN_DWELL',
+                pointKind: null,
+                operator: 'MINIMUM',
+                instant: null,
+                timeZone: null,
+                durationSeconds: 3_000,
+                locked: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+          },
+        ],
+      },
+      trip.dayOccurrences[1]!,
     ],
   };
 }

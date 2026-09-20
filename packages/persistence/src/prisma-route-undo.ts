@@ -2,6 +2,7 @@ import type {
   OperationReceiptRecord,
   UndoRouteAdoptionResult,
 } from '@travel/application';
+import { compareCanonicalText } from '@travel/application';
 import type {
   RouteAdoptDeltaV2,
   RouteAdoptDeltaV3,
@@ -365,10 +366,10 @@ async function validateCurrentUndoState(
         durationSeconds: true,
         locked: true,
       },
-      orderBy: { id: 'asc' },
     });
+    intents.sort((left, right) => compareCanonicalText(left.id, right.id));
     const expected = [...delta.userDwellAdjustments].sort((left, right) =>
-      left.intentId.localeCompare(right.intentId),
+      compareCanonicalText(left.intentId, right.intentId),
     );
     if (
       intents.length !== expected.length ||

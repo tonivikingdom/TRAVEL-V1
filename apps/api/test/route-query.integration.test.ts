@@ -531,7 +531,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       '2030-10-01T10:35:00.000Z',
     );
     expect(route.candidates[0]?.planningAssessment).toMatchObject({
-      effectiveTotalTimeSeconds: 6_300,
+      effectiveTotalTimeSeconds: 3_300,
       requiresUserAdjustment: true,
       requiredUserAdjustments: [
         {
@@ -971,6 +971,166 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         where: { id: scenario.trip.id },
       }),
     ).toMatchObject({ version: scenario.trip.version + 1 });
+  });
+
+  it('canonically adopts, replays, and undoes two dwell adjustments whose UUID order opposes preview generation', async () => {
+    let trip = await tripWithVisits(userA, [
+      'Canonical from',
+      'Canonical downstream',
+      'Canonical final',
+    ]);
+    const [from, downstream, final] = trip.days[0]!.nodes;
+    const arrivalResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T10:00:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(arrivalResponse.statusCode).toBe(200);
+    trip = arrivalResponse.json() as TripView;
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: from!.id,
+      durationSeconds: 3_000,
+      locked: false,
+    });
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: downstream!.id,
+      durationSeconds: 2_400,
+      locked: false,
+    });
+    const generatedOrder = [
+      trip.days[0]!.nodes[0]!.timeIntents.find(
+        (intent) => intent.kind === 'MIN_DWELL',
+      )!.id,
+      trip.days[0]!.nodes[1]!.timeIntents.find(
+        (intent) => intent.kind === 'MIN_DWELL',
+      )!.id,
+    ];
+    const highIntentId = 'f0000000-0000-4000-8000-000000000018';
+    const lowIntentId = '10000000-0000-4000-8000-000000000019';
+    await managed.client.$transaction([
+      managed.client.userTimeIntent.update({
+        where: { id: generatedOrder[0]! },
+        data: { id: highIntentId },
+      }),
+      managed.client.userTimeIntent.update({
+        where: { id: generatedOrder[1]! },
+        data: { id: lowIntentId },
+      }),
+    ]);
+    trip = await new TripService(tripRepository).getTrip(userA.actor, trip.id);
+    trip = await command(userA, trip, {
+      type: 'SET_MANUAL_TRANSPORT',
+      fromNodeId: downstream!.id,
+      toNodeId: final!.id,
+      mode: 'TAXI',
+      fixedService: false,
+      serviceLabel: 'SYNTHETIC selected downstream transport',
+    });
+    const selectedEdge = await managed.client.transportEdge.findFirstOrThrow({
+      where: {
+        tripId: trip.id,
+        fromNodeId: downstream!.id,
+        toNodeId: final!.id,
+      },
+    });
+    const departureResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        subject: { type: 'TRANSPORT', transportEdgeId: selectedEdge.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'DEPARTURE',
+          instant: '2030-10-01T12:30:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(departureResponse.statusCode).toBe(200);
+    trip = departureResponse.json() as TripView;
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T10:45:00Z', '2030-10-01T12:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+
+    const preview = await createPreview(userA, trip, from!.id, downstream!.id);
+    const adjustments = preview.changeSummary.requiredUserAdjustments ?? [];
+    expect(adjustments).toEqual([
+      {
+        intentId: lowIntentId,
+        nodeId: downstream!.id,
+        fromDurationSeconds: 2_400,
+        toDurationSeconds: 1_800,
+      },
+      {
+        intentId: highIntentId,
+        nodeId: from!.id,
+        fromDurationSeconds: 3_000,
+        toDurationSeconds: 2_700,
+      },
+    ]);
+
+    const adoptKey = `p5c-two-adjustments-${randomUUID()}`;
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      adoptKey,
+      adjustments,
+    );
+    const replay = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      adoptKey,
+      adjustments,
+    );
+    expect(replay.operationReceipt.id).toBe(adopted.operationReceipt.id);
+    expect(replay.trip.version).toBe(adopted.trip.version);
+
+    const undoKey = `p5c-two-adjustments-undo-${randomUUID()}`;
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      undoKey,
+    );
+    const undoReplay = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      undoKey,
+    );
+    expect(undoReplay.operationReceipt.id).toBe(undone.operationReceipt.id);
+    expect(undoReplay.trip.version).toBe(undone.trip.version);
+    expect(
+      await managed.client.userTimeIntent.findMany({
+        where: { id: { in: [lowIntentId, highIntentId] } },
+        orderBy: { id: 'asc' },
+        select: { id: true, durationSeconds: true },
+      }),
+    ).toEqual([
+      { id: lowIntentId, durationSeconds: 2_400 },
+      { id: highIntentId, durationSeconds: 3_000 },
+    ]);
   });
 
   it('adopts a single leg atomically, archives the old transport, and replays one receipt', async () => {

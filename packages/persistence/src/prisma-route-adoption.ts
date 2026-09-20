@@ -1,6 +1,8 @@
 import {
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
+  compareCanonicalDwellAdjustments,
+  compareCanonicalText,
   type AdoptRoutePreviewResult,
   type OperationReceiptRecord,
   type StoredRoutePreviewPayload,
@@ -258,8 +260,8 @@ async function executeAdoption(
       durationSeconds: true,
       locked: true,
     },
-    orderBy: { id: 'asc' },
   });
+  adjustmentRows.sort((left, right) => compareCanonicalText(left.id, right.id));
   if (
     adjustmentRows.length !== plan.requiredUserAdjustments.length ||
     adjustmentRows.some((row, index) => {
@@ -632,7 +634,7 @@ function requireCurrentPlan(payload: StoredRoutePreviewPayload) {
     ),
     segments: [...summary.proposedSegments],
     requiredUserAdjustments: [...(summary.requiredUserAdjustments ?? [])].sort(
-      (left, right) => left.intentId.localeCompare(right.intentId),
+      compareCanonicalDwellAdjustments,
     ),
   };
 }
@@ -759,9 +761,7 @@ function sameAdjustments(
     readonly toDurationSeconds: number;
   }[],
 ): boolean {
-  const normalizedActual = [...actual].sort((left, right) =>
-    left.intentId.localeCompare(right.intentId),
-  );
+  const normalizedActual = [...actual].sort(compareCanonicalDwellAdjustments);
   return (
     expected.length === normalizedActual.length &&
     expected.every((value, index) => {

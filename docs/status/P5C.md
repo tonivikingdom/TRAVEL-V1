@@ -24,20 +24,26 @@
 - Route Query 默认从规划最早离开时刻向前扩展 15 分钟，但 ACTUAL、EXACT、NOT_BEFORE、固定班次事实
   等绝对硬边界仍不可突破。压缩用户最低停留的候选可以展示，但不能伪装为完全可行。
 - 内部第一顺位按最早到达选择，不按路线自身 duration；effective total time 从用户可开始选择该段交通的
-  时刻算到候选到达。第二顺位只在不超过第一顺位 effective time 的 140% 内选择同币种最低已知票价；
+  规划最早离开时刻算到候选到达，不把此前地点停留重复计入路线时间。第二顺位只在不超过第一顺位
+  effective time 的 140% 内选择同币种最低已知票价；
   `fare=null` 不参与最低价胜出，跨币种不直接比较金额。该排序不向产品 UI 暴露“最快/最优惠”标签。
+- 15 分钟 lookback 只扩大候选可见性。内部主排序池优先使用无需修改当前用户 `MIN_DWELL` 的候选；
+  需要用户调整的候选仍保留并携带结构化 adjustment，但不会自动成为主推荐。
 - Preview 只突出最近相关下游节点：没有下游 anchor 时按建议/用户最低值推导预计离开；有 anchor 时重新计算
   projected dwell，并区分正常、软偏离、用户要求调整与不可行。
 - Hardening 将 Provider 候选 canonical hash 限定为候选事实，不包含内部 `planningAssessment`；同一候选不会因
   系统建议或排序元数据变化而改变身份。票价仍做精确 decimal 比较，并把外部输入限制为最多 64 位整数、
   32 位小数，避免异常 scale 放大 BigInt 工作量；该上限是解析安全边界，不是币种精度规则。
-- 当前 downstream impact 只评估最近相关节点，不越过 USER_PLANNED 节点猜测更远 corridor。最近节点没有
-  约束、但更远节点有 anchor 的跨节点传播仍是明确 gap；本轮未新增未经确认的传播规则。
+- downstream impact 从新路线终点向后寻找第一个有时间意义的节点；若最近节点没有约束，会继续寻找下一处
+  当前计划或用户时间 anchor，但不会越过 ACTUAL 事实进行虚假传播，也不会自动修改后续计划。已选择
+  Transport 的 PLANNED 时间即使 `fixedService=false` 也作为 current-plan anchor；它不会因此升级成硬约束。
 
 ## Adopt、Undo 与兼容性
 
 - 用户明确接受 `MIN_DWELL` 降低后，调整和 Adopt 共用一个 PostgreSQL transaction、Trip version、
   idempotency boundary 与 OperationReceipt。新 Adopt 使用 `route-adopt-delta-v3` 保存可逆调整。
+- 多个 dwell adjustment 在 Preview、API normalize、Adopt persistence 与 Undo validation 中统一按 code-point
+  canonical order 比较，避免 locale 或数据库返回顺序改变幂等身份。
 - Undo 同一补偿事务恢复原路线与原用户最低停留，使用 `route-undo-delta-v2`。旧
   `route-adopt-delta-v2` / `route-undo-delta-v1` 仍可按既有语义读取和安全撤销，不伪造新 inverse data。
 

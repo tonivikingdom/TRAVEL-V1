@@ -26,6 +26,8 @@ const transportId = '00000000-0000-4000-8000-000000000008';
 const intentId = '00000000-0000-4000-8000-000000000009';
 const adoptedRouteId = '00000000-0000-4000-8000-000000000010';
 const staleRouteId = '00000000-0000-4000-8000-000000000011';
+const downstreamNodeId = '00000000-0000-4000-8000-000000000014';
+const finalNodeId = '00000000-0000-4000-8000-000000000015';
 const now = new Date('2030-01-01T00:00:00.000Z');
 
 const actor: Actor = {
@@ -207,6 +209,36 @@ describe('RoutePreviewService', () => {
       projectedDwellSeconds: 5_400,
       status: 'NORMAL',
       requiredUserAdjustments: [],
+    });
+  });
+
+  it('uses a selected non-fixed Transport planned departure as the current-plan anchor', async () => {
+    trip = withSelectedTransportAnchor({ atImmediateNode: true });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      nodeId: toNodeId,
+      arrival: '2030-01-01T02:00:00.000Z',
+      departure: '2030-01-01T03:20:00.000Z',
+      projectedDwellSeconds: 4_800,
+      status: 'NORMAL',
+    });
+  });
+
+  it('finds the first time-relevant node beyond an unconstrained immediate destination', async () => {
+    trip = withSelectedTransportAnchor({ atImmediateNode: false });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      nodeId: downstreamNodeId,
+      arrival: '2030-01-01T03:00:00.000Z',
+      departure: '2030-01-01T04:00:00.000Z',
+      projectedDwellSeconds: 3_600,
+      status: 'NORMAL',
     });
   });
 
@@ -905,6 +937,93 @@ function singleLegAdoptedTrip(): TripAggregateRecord {
         candidateSnapshotId: snapshotId,
         candidateHash: 'a'.repeat(64),
         policyVersion: 'route-adoption-preview-v2',
+        status: 'ACTIVE',
+        createdAt: now,
+        replacedAt: null,
+        undoneAt: null,
+      },
+    ],
+  };
+}
+
+function withSelectedTransportAnchor(input: {
+  readonly atImmediateNode: boolean;
+}): TripAggregateRecord {
+  const trip = baseTrip();
+  const occurrence = trip.dayOccurrences[0]!;
+  const downstream = {
+    ...node(downstreamNodeId, 2, 'Downstream'),
+    timeValues: [
+      {
+        id: '00000000-0000-4000-8000-000000000016',
+        layer: 'PLANNED' as const,
+        pointKind: 'ARRIVAL' as const,
+        instant: new Date('2030-01-01T03:00:00.000Z'),
+        timeZone: 'UTC',
+        sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+        sourceRef: null,
+        observedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  };
+  const final = node(finalNodeId, 3, 'Final');
+  const anchorFrom = input.atImmediateNode ? toNodeId : downstreamNodeId;
+  const anchorTo = input.atImmediateNode ? downstreamNodeId : finalNodeId;
+  const departure = input.atImmediateNode
+    ? '2030-01-01T03:20:00.000Z'
+    : '2030-01-01T04:00:00.000Z';
+  return {
+    ...trip,
+    dayOccurrences: [
+      {
+        ...occurrence,
+        nodes: [...occurrence.nodes, downstream, final],
+      },
+    ],
+    transportEdges: [
+      {
+        id: '00000000-0000-4000-8000-000000000017',
+        tripId,
+        fromNodeId: anchorFrom,
+        toNodeId: anchorTo,
+        mode: 'TAXI',
+        fixedService: false,
+        serviceLabel: null,
+        note: null,
+        source: 'ADOPTED_ROUTE',
+        adoptedRouteId,
+        provider: 'SYNTHETIC',
+        providerRef: 'selected-non-fixed',
+        createdAt: now,
+        updatedAt: now,
+        timeValues: [
+          {
+            id: '00000000-0000-4000-8000-000000000018',
+            layer: 'PLANNED',
+            pointKind: 'DEPARTURE',
+            instant: new Date(departure),
+            timeZone: 'UTC',
+            sourceKind: 'ADOPTED_TRANSPORT_FACT',
+            sourceRef: 'selected-non-fixed',
+            observedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+    ],
+    adoptedRoutes: [
+      {
+        id: adoptedRouteId,
+        tripId,
+        anchorFromNodeId: anchorFrom,
+        anchorToNodeId: anchorTo,
+        sourcePreviewId: previewId,
+        candidateSnapshotId: snapshotId,
+        candidateHash: 'b'.repeat(64),
+        policyVersion: 'route-adoption-preview-v3',
         status: 'ACTIVE',
         createdAt: now,
         replacedAt: null,

@@ -5,6 +5,7 @@ import type {
 } from '@travel/contracts';
 
 import { authorize, type Actor } from './authorization.js';
+import { compareCanonicalDwellAdjustments } from './canonical-order.js';
 import { ApplicationError } from './errors.js';
 import {
   systemClock,
@@ -191,7 +192,7 @@ function normalizeAdjustments(
         toDurationSeconds,
       };
     })
-    .sort((left, right) => left.intentId.localeCompare(right.intentId));
+    .sort(compareCanonicalDwellAdjustments);
 }
 
 function boundedKey(value: string): string {

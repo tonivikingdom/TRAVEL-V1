@@ -13,6 +13,10 @@ import {
 } from '@travel/domain';
 
 import { authorize, type Actor } from './authorization.js';
+import {
+  compareCanonicalDwellAdjustments,
+  compareCanonicalText,
+} from './canonical-order.js';
 import { ApplicationError } from './errors.js';
 import {
   systemClock,
@@ -120,7 +124,7 @@ export class RoutePreviewService {
         input.sameHubWalkingLegIndexes,
         candidate.legs.length,
       ),
-      toProjection,
+      schedule,
     );
     const expiresAt = earlier(
       snapshot.expiresAt,
@@ -269,7 +273,7 @@ function buildChangeSummary(
   trip: TripAggregateRecord,
   corridor: ReturnType<typeof requireCurrentCorridor>,
   userConfirmedSameHub: ReadonlySet<number>,
-  toProjection: ReturnType<typeof evaluateTripScheduleRecord>['nodes'][number],
+  schedule: ReturnType<typeof evaluateTripScheduleRecord>,
 ): RoutePreviewView['changeSummary'] {
   const boundaries: RouteLocationView[] = [];
   for (let index = 0; index + 1 < candidate.legs.length; index += 1) {
@@ -373,47 +377,16 @@ function buildChangeSummary(
       durationSeconds: leg.durationSeconds,
     });
   }
-  const downstreamNode = corridor.toNode;
-  const userMinimum = downstreamNode.timeIntents.find(
-    (intent) => intent.kind === 'MIN_DWELL',
+  const downstreamImpact = findNearestDownstreamImpact(
+    candidate,
+    trip,
+    corridor,
+    schedule,
   );
-  const downstreamDeparture =
-    toProjection.departure.effective?.value.instant ?? null;
-  const planningDuration =
-    userMinimum?.durationSeconds ??
-    downstreamNode.systemDwellSuggestion?.durationSeconds ??
-    null;
-  const projectedDeparture =
-    downstreamDeparture ??
-    (planningDuration === null
-      ? null
-      : new Date(
-          candidate.arrival.instant.getTime() + planningDuration * 1_000,
-        ));
-  const dwell = assessDwell({
-    arrival: candidate.arrival.instant,
-    departure: projectedDeparture,
-    systemSuggestedDurationSeconds:
-      downstreamNode.systemDwellSuggestion?.durationSeconds ?? null,
-    userMinimumDurationSeconds: userMinimum?.durationSeconds ?? null,
-  });
-  const downstreamAdjustments =
-    dwell.requiresUserAdjustment &&
-    userMinimum !== undefined &&
-    dwell.adjustedUserMinimumDurationSeconds !== null
-      ? [
-          {
-            intentId: userMinimum.id,
-            nodeId: downstreamNode.id,
-            fromDurationSeconds: userMinimum.durationSeconds!,
-            toDurationSeconds: dwell.adjustedUserMinimumDurationSeconds,
-          },
-        ]
-      : [];
   const requiredUserAdjustments = uniqueAdjustments([
     ...(snapshot.candidatePayload.planningAssessment?.requiredUserAdjustments ??
       []),
-    ...downstreamAdjustments,
+    ...(downstreamImpact?.requiredUserAdjustments ?? []),
   ]);
   return {
     transportAction:
@@ -465,16 +438,14 @@ function buildChangeSummary(
     temporalLayer: 'PLANNED',
     temporalSourceKind: 'ADOPTED_TRANSPORT_FACT',
     requiredUserAdjustments,
-    downstreamImpact: {
-      nodeId: downstreamNode.id,
-      arrival: candidate.arrival.instant.toISOString(),
-      departure: projectedDeparture?.toISOString() ?? null,
-      projectedDwellSeconds: dwell.projectedDwellSeconds,
-      systemSuggestedDwellSeconds: dwell.systemSuggestedDurationSeconds,
-      userMinimumDwellSeconds: dwell.userMinimumDurationSeconds,
-      status: dwell.status,
-      requiredUserAdjustments,
-    },
+    ...(downstreamImpact === null
+      ? {}
+      : {
+          downstreamImpact: {
+            ...downstreamImpact,
+            requiredUserAdjustments,
+          },
+        }),
   };
 }
 
@@ -486,7 +457,149 @@ function uniqueAdjustments(
     readonly toDurationSeconds: number;
   }[],
 ) {
-  return [...new Map(values.map((value) => [value.intentId, value])).values()];
+  return [
+    ...new Map(values.map((value) => [value.intentId, value])).values(),
+  ].sort(compareCanonicalDwellAdjustments);
+}
+
+function findNearestDownstreamImpact(
+  candidate: NormalizedRouteCandidate,
+  trip: TripAggregateRecord,
+  corridor: ReturnType<typeof requireCurrentCorridor>,
+  schedule: ReturnType<typeof evaluateTripScheduleRecord>,
+): NonNullable<RoutePreviewView['changeSummary']['downstreamImpact']> | null {
+  const nodes = orderedTripNodes(trip);
+  const startIndex = nodes.findIndex((node) => node.id === corridor.toNode.id);
+  if (startIndex < 0) return null;
+
+  for (let index = startIndex; index < nodes.length; index += 1) {
+    const node = nodes[index]!;
+    const projection = schedule.nodes.find((item) => item.nodeId === node.id);
+    if (projection === undefined) continue;
+    const arrival =
+      index === startIndex
+        ? candidate.arrival.instant
+        : currentPlanPoint(trip, node.id, 'ARRIVAL', projection.arrival);
+    const departure =
+      currentPlanPoint(trip, node.id, 'DEPARTURE', projection.departure) ??
+      projection.departure.requirementWindow.latest;
+    const userMinimum = node.timeIntents.find(
+      (intent) => intent.kind === 'MIN_DWELL',
+    );
+    const planningDuration =
+      userMinimum?.durationSeconds ??
+      node.systemDwellSuggestion?.durationSeconds ??
+      null;
+    const hasPointConstraint = node.timeIntents.some(
+      (intent) => intent.kind === 'POINT_TIME',
+    );
+    const timeRelevant =
+      departure !== null || planningDuration !== null || hasPointConstraint;
+    if (timeRelevant && arrival !== null) {
+      const projectedDeparture =
+        departure ??
+        (planningDuration === null
+          ? null
+          : new Date(arrival.getTime() + planningDuration * 1_000));
+      const dwell = assessDwell({
+        arrival,
+        departure: projectedDeparture,
+        systemSuggestedDurationSeconds:
+          node.systemDwellSuggestion?.durationSeconds ?? null,
+        userMinimumDurationSeconds: userMinimum?.durationSeconds ?? null,
+      });
+      const requiredUserAdjustments =
+        dwell.requiresUserAdjustment &&
+        userMinimum !== undefined &&
+        dwell.adjustedUserMinimumDurationSeconds !== null
+          ? [
+              {
+                intentId: userMinimum.id,
+                nodeId: node.id,
+                fromDurationSeconds: userMinimum.durationSeconds!,
+                toDurationSeconds: dwell.adjustedUserMinimumDurationSeconds,
+              },
+            ]
+          : [];
+      return {
+        nodeId: node.id,
+        arrival: arrival.toISOString(),
+        departure: projectedDeparture?.toISOString() ?? null,
+        projectedDwellSeconds: dwell.projectedDwellSeconds,
+        systemSuggestedDwellSeconds: dwell.systemSuggestedDurationSeconds,
+        userMinimumDwellSeconds: dwell.userMinimumDurationSeconds,
+        status: dwell.status,
+        requiredUserAdjustments,
+      };
+    }
+    if (
+      hasActualAtNode(trip, node.id, projection) ||
+      (index > startIndex && node.source === 'USER_PLANNED')
+    ) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function currentPlanPoint(
+  trip: TripAggregateRecord,
+  nodeId: string,
+  pointKind: 'ARRIVAL' | 'DEPARTURE',
+  projection: ReturnType<
+    typeof evaluateTripScheduleRecord
+  >['nodes'][number]['arrival'],
+): Date | null {
+  const selectedTransportValues = trip.transportEdges
+    .filter((edge) =>
+      pointKind === 'ARRIVAL'
+        ? edge.toNodeId === nodeId
+        : edge.fromNodeId === nodeId,
+    )
+    .flatMap((edge) =>
+      edge.timeValues
+        .filter((value) => value.pointKind === pointKind)
+        .map((value) => ({ edgeId: edge.id, value })),
+    )
+    .sort((left, right) => {
+      const layerOrder =
+        temporalLayerRank(right.value.layer) -
+        temporalLayerRank(left.value.layer);
+      return (
+        layerOrder ||
+        compareCanonicalText(left.edgeId, right.edgeId) ||
+        compareCanonicalText(left.value.id, right.value.id)
+      );
+    });
+  const selected = selectedTransportValues[0]?.value ?? null;
+  const nodeEffective = projection.effective?.value ?? null;
+  if (selected === null) return nodeEffective?.instant ?? null;
+  if (nodeEffective === null) return selected.instant;
+  const selectedRank = temporalLayerRank(selected.layer);
+  const nodeRank = temporalLayerRank(nodeEffective.layer);
+  if (selectedRank > nodeRank) return selected.instant;
+  if (selectedRank < nodeRank) return nodeEffective.instant;
+  return selected.layer === 'ACTUAL' ? nodeEffective.instant : selected.instant;
+}
+
+function hasActualAtNode(
+  trip: TripAggregateRecord,
+  nodeId: string,
+  projection: ReturnType<typeof evaluateTripScheduleRecord>['nodes'][number],
+): boolean {
+  return (
+    projection.arrival.actual !== null ||
+    projection.departure.actual !== null ||
+    trip.transportEdges.some(
+      (edge) =>
+        (edge.fromNodeId === nodeId || edge.toNodeId === nodeId) &&
+        edge.timeValues.some((value) => value.layer === 'ACTUAL'),
+    )
+  );
+}
+
+function temporalLayerRank(layer: 'PLANNED' | 'ESTIMATED' | 'ACTUAL'): number {
+  return layer === 'ACTUAL' ? 3 : layer === 'ESTIMATED' ? 2 : 1;
 }
 
 function sameTransferLocation(

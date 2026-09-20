@@ -12,6 +12,7 @@ import {
   ROUTE_QUERY_LOOKBACK_SECONDS,
   VALUE_EFFECTIVE_TIME_BASIS_POINTS,
   validateRouteCandidate,
+  type DwellPlanningAssessment,
   type NormalizedRouteCandidate,
   type RouteLocation,
 } from '@travel/domain';
@@ -232,8 +233,8 @@ export class RouteQueryService {
     }
 
     const availableStart =
-      arrival ??
       time.planningEarliestDeparture ??
+      arrival ??
       time.earliestDeparture ??
       accepted.reduce(
         (minimum, candidate) =>
@@ -242,12 +243,42 @@ export class RouteQueryService {
             : minimum,
         accepted[0]!.departure.instant,
       );
-    const ranked = rankRouteCandidates(
-      accepted,
-      availableStart,
+    const assessments = new Map(
+      accepted.map((candidate) => [
+        candidate.candidateId,
+        assessCandidateDwell(candidate, arrival, fromNode),
+      ]),
+    );
+    const fullyFeasible = accepted.filter(
+      (candidate) =>
+        !assessments.get(candidate.candidateId)!.requiresUserAdjustment &&
+        assessments.get(candidate.candidateId)!.status !== 'INFEASIBLE',
+    );
+    const adjustmentCandidates = accepted.filter(
+      (candidate) =>
+        assessments.get(candidate.candidateId)!.requiresUserAdjustment,
+    );
+    const valueBasisPoints =
       this.options.valueEffectiveTimeBasisPoints ??
-        VALUE_EFFECTIVE_TIME_BASIS_POINTS,
-    ).ordered;
+      VALUE_EFFECTIVE_TIME_BASIS_POINTS;
+    const ranked =
+      fullyFeasible.length === 0
+        ? rankRouteCandidates(accepted, availableStart, valueBasisPoints)
+            .ordered
+        : [
+            ...rankRouteCandidates(
+              fullyFeasible,
+              availableStart,
+              valueBasisPoints,
+            ).ordered,
+            ...(adjustmentCandidates.length === 0
+              ? []
+              : rankRouteCandidates(
+                  adjustmentCandidates,
+                  availableStart,
+                  valueBasisPoints,
+                ).ordered),
+          ];
     const timeCondition = toTimeConditionView(time);
     const payloads = ranked.map((candidate) =>
       toCandidatePayload(
@@ -255,7 +286,7 @@ export class RouteQueryService {
         trip.version,
         timeCondition,
         availableStart,
-        arrival,
+        assessments.get(candidate.candidateId)!,
         fromNode,
       ),
     );
@@ -460,19 +491,12 @@ function toCandidatePayload(
   basisVersion: number,
   timeCondition: RouteQueryTimeConditionView,
   availableStart: Date,
-  arrival: Date | null,
+  dwell: DwellPlanningAssessment,
   fromNode: ItineraryNodeRecord,
 ): RouteCandidatePayload {
   const minimumIntent = fromNode.timeIntents.find(
     (intent) => intent.kind === 'MIN_DWELL',
   );
-  const dwell = assessDwell({
-    arrival,
-    departure: candidate.departure.instant,
-    systemSuggestedDurationSeconds:
-      fromNode.systemDwellSuggestion?.durationSeconds ?? null,
-    userMinimumDurationSeconds: minimumIntent?.durationSeconds ?? null,
-  });
   return {
     candidateId: candidate.candidateId,
     provider: candidate.provider,
@@ -522,6 +546,23 @@ function toCandidatePayload(
           : [],
     },
   };
+}
+
+function assessCandidateDwell(
+  candidate: NormalizedRouteCandidate,
+  arrival: Date | null,
+  fromNode: ItineraryNodeRecord,
+): DwellPlanningAssessment {
+  const minimumIntent = fromNode.timeIntents.find(
+    (intent) => intent.kind === 'MIN_DWELL',
+  );
+  return assessDwell({
+    arrival,
+    departure: candidate.departure.instant,
+    systemSuggestedDurationSeconds:
+      fromNode.systemDwellSuggestion?.durationSeconds ?? null,
+    userMinimumDurationSeconds: minimumIntent?.durationSeconds ?? null,
+  });
 }
 
 function absoluteDepartureFloor(

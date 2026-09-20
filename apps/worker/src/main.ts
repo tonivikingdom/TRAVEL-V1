@@ -93,7 +93,6 @@ const jobRunner = createJobRunner({
 });
 
 async function heartbeat(): Promise<void> {
-  await flightMonitoringService.ensureEligibleMonitoring();
   const database = await managedProbe.probe.check();
   const payload = createWorkerHeartbeat(database, new Date());
 
@@ -102,6 +101,10 @@ async function heartbeat(): Promise<void> {
     flag: 'w',
   });
   process.stdout.write(`${JSON.stringify(payload)}\n`);
+
+  if (database.status === 'READY') {
+    await flightMonitoringService.ensureEligibleMonitoring();
+  }
 }
 
 const runtime = createWorkerRuntime({

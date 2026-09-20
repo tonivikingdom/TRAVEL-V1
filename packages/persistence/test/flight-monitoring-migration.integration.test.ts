@@ -127,8 +127,8 @@ async function seedPopulatedP5d2(client: Client) {
         ('40000000-0000-4000-8000-000000000032', '10000000-0000-4000-8000-000000000031', '20000000-0000-4000-8000-000000000031', 'PLACE_VISIT', 1, '30000000-0000-4000-8000-000000000032', CURRENT_TIMESTAMP);
       INSERT INTO "TransportEdge" ("id", "tripId", "fromNodeId", "toNodeId", "mode", "fixedService", "serviceLabel", "source", "provider", "providerRef", "updatedAt") VALUES
         ('50000000-0000-4000-8000-000000000031', '10000000-0000-4000-8000-000000000031', '40000000-0000-4000-8000-000000000031', '40000000-0000-4000-8000-000000000032', 'FLIGHT', true, 'NH 53', 'MANUAL', 'aerodatabox', 'aerodatabox:migration-nh53', CURRENT_TIMESTAMP);
-      INSERT INTO "NotificationEvent" ("ownerUserId", "kind", "dedupeKey", "title", "body", "occurredAt") VALUES
-        ('00000000-0000-4000-8000-000000000031', 'SYNTHETIC', 'p5d3-before', 'Before', 'Before migration', CURRENT_TIMESTAMP);
+      INSERT INTO "NotificationEvent" ("id", "ownerUserId", "kind", "dedupeKey", "title", "body", "occurredAt") VALUES
+        ('70000000-0000-4000-8000-000000000031', '00000000-0000-4000-8000-000000000031', 'SYNTHETIC', 'p5d3-before', 'Before', 'Before migration', CURRENT_TIMESTAMP);
     `);
   await client.query(
     `INSERT INTO "FlightBinding" ("id", "ownerUserId", "tripId", "transportEdgeId", "provider", "providerFlightRef", "canonicalFlightNumber", "displayFlightNumber", "serviceDate", "selectedSnapshot", "latestSnapshot", "status", "lastRefreshedAt", "updatedAt") VALUES

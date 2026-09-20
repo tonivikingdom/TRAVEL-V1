@@ -14,6 +14,10 @@ const migrationsPath = fileURLToPath(
   new URL('../../../prisma/migrations/', import.meta.url),
 );
 const flightMigration = '20260922130000_p5d2_flight_binding';
+const statementByStatementMigrations = new Set([
+  '20260920110000_p4b2_route_adoption',
+  '20260920150000_p4b3_route_undo',
+]);
 
 describe('P5D2 FlightBinding migration', () => {
   it('migrates a populated P5D1 database without changing existing facts or inventing bindings', async () => {
@@ -33,9 +37,7 @@ describe('P5D2 FlightBinding migration', () => {
           .filter((name) => name < flightMigration)
           .sort();
         for (const name of migrationNames) {
-          await target.query(
-            await readFile(`${migrationsPath}/${name}/migration.sql`, 'utf8'),
-          );
+          await applyMigration(target, name);
         }
         await seedPopulatedP5d1(target);
         const before = await counts(target);
@@ -71,6 +73,22 @@ describe('P5D2 FlightBinding migration', () => {
     }
   });
 });
+
+async function applyMigration(target: Client, name: string) {
+  const sql = await readFile(`${migrationsPath}/${name}/migration.sql`, 'utf8');
+  if (!statementByStatementMigrations.has(name)) {
+    await target.query(sql);
+    return;
+  }
+  // These historical migrations add enum values and then reference them in
+  // later constraints. Match Prisma deploy by committing each statement.
+  for (const statement of sql
+    .split(';')
+    .map((value) => value.trim())
+    .filter((value) => value !== '')) {
+    await target.query(statement);
+  }
+}
 
 async function seedPopulatedP5d1(client: Client) {
   await client.query(`

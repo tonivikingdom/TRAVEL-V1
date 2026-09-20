@@ -113,6 +113,9 @@ export function expandRouteQueryStart(input: {
 
 export interface RouteRecommendationResult {
   readonly ordered: readonly NormalizedRouteCandidate[];
+  /** Primary candidate for the active query mode. */
+  readonly primaryCandidateId: string;
+  /** @deprecated Retained for internal DEPART_AT compatibility. */
   readonly fastestCandidateId: string;
   readonly valueCandidateId: string | null;
 }
@@ -167,8 +170,38 @@ export function rankRouteCandidates(
     .sort(primaryComparator);
   return {
     ordered: [fastest, ...(value === null ? [] : [value]), ...references],
+    primaryCandidateId: fastest.candidateId,
     fastestCandidateId: fastest.candidateId,
     valueCandidateId: value?.candidateId ?? null,
+  };
+}
+
+/**
+ * Ranks candidates for an ARRIVE_BY query. This is intentionally independent
+ * from the DEPART_AT fastest/value policy: arrival-by has no 140% value pool
+ * and never promotes a value candidate.
+ */
+export function rankArriveByCandidates(
+  candidates: readonly NormalizedRouteCandidate[],
+): RouteRecommendationResult {
+  if (candidates.length === 0) {
+    throw new Error('At least one route candidate is required');
+  }
+  for (const candidate of candidates) {
+    if (candidate.fare !== null) {
+      parseDecimal(candidate.fare.amount);
+      if (!/^[A-Z]{3}$/u.test(candidate.fare.currency)) {
+        throw new Error('fare currency must be a canonical ISO-style code');
+      }
+    }
+  }
+  const ordered = [...candidates].sort(arriveByComparator);
+  const primary = ordered[0]!;
+  return {
+    ordered,
+    primaryCandidateId: primary.candidateId,
+    fastestCandidateId: primary.candidateId,
+    valueCandidateId: null,
   };
 }
 
@@ -289,6 +322,22 @@ function primaryComparator(
 ): number {
   return (
     left.arrival.instant.getTime() - right.arrival.instant.getTime() ||
+    compareComparableFare(left, right) ||
+    transferCount(left) - transferCount(right) ||
+    walkingSeconds(left) - walkingSeconds(right) ||
+    compareCodePoints(left.candidateId, right.candidateId)
+  );
+}
+
+function arriveByComparator(
+  left: NormalizedRouteCandidate,
+  right: NormalizedRouteCandidate,
+): number {
+  // For ARRIVE_BY, leaving later is preferable when the arrival requirement
+  // is already satisfied. All comparisons use absolute instants.
+  return (
+    right.departure.instant.getTime() - left.departure.instant.getTime() ||
+    left.durationSeconds - right.durationSeconds ||
     compareComparableFare(left, right) ||
     transferCount(left) - transferCount(right) ||
     walkingSeconds(left) - walkingSeconds(right) ||

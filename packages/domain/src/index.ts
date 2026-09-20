@@ -55,6 +55,7 @@ export {
   assessDwell,
   evaluateBuffer,
   expandRouteQueryStart,
+  rankArriveByCandidates,
   rankRouteCandidates,
   ROUTE_QUERY_LOOKBACK_SECONDS,
   suggestedExternalBoardingBufferSeconds,

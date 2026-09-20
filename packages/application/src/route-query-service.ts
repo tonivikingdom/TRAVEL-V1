@@ -8,6 +8,7 @@ import type {
 import {
   assessDwell,
   expandRouteQueryStart,
+  rankArriveByCandidates,
   rankRouteCandidates,
   ROUTE_QUERY_LOOKBACK_SECONDS,
   VALUE_EFFECTIVE_TIME_BASIS_POINTS,
@@ -261,23 +262,18 @@ export class RouteQueryService {
     const valueBasisPoints =
       this.options.valueEffectiveTimeBasisPoints ??
       VALUE_EFFECTIVE_TIME_BASIS_POINTS;
+    const rank = (items: readonly NormalizedRouteCandidate[]) =>
+      time.preference.type === 'ARRIVE_BY'
+        ? rankArriveByCandidates(items).ordered
+        : rankRouteCandidates(items, availableStart, valueBasisPoints).ordered;
     const ranked =
       fullyFeasible.length === 0
-        ? rankRouteCandidates(accepted, availableStart, valueBasisPoints)
-            .ordered
+        ? rank(accepted)
         : [
-            ...rankRouteCandidates(
-              fullyFeasible,
-              availableStart,
-              valueBasisPoints,
-            ).ordered,
+            ...rank(fullyFeasible),
             ...(adjustmentCandidates.length === 0
               ? []
-              : rankRouteCandidates(
-                  adjustmentCandidates,
-                  availableStart,
-                  valueBasisPoints,
-                ).ordered),
+              : rank(adjustmentCandidates)),
           ];
     const timeCondition = toTimeConditionView(time);
     const payloads = ranked.map((candidate) =>

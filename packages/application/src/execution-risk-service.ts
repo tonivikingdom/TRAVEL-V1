@@ -244,6 +244,18 @@ function toNotificationView(record: NotificationRecord): NotificationView {
     occurredAt: record.occurredAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
     dismissedAt: record.dismissedAt?.toISOString() ?? null,
+    tripId: record.tripId,
+    flightBindingId: record.flightBindingId,
+    flightNumber: record.flightNumber,
+    priority: record.priority,
+    summary: record.summary,
+    changeKinds: Array.isArray(record.changeKinds)
+      ? record.changeKinds.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [],
+    hasDownstreamImpact: record.hasDownstreamImpact,
+    viewedAt: record.viewedAt?.toISOString() ?? null,
   };
 }
 

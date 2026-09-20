@@ -19,6 +19,7 @@
     "@prisma/client": "7.10.0",
     "@travel/application": "workspace:*",
     "@travel/contracts": "workspace:*",
+    "@travel/domain": "workspace:*",
     "pg": "8.23.0"
   },
   "devDependencies": {

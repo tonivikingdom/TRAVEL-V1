@@ -83,3 +83,21 @@ export {
   type ExecutionRiskTemporalValue,
   type ExecutionRiskTransport,
 } from './execution-risk.js';
+export {
+  decideAcceptedFlightRefresh,
+  decideProviderFailure,
+  futureNormalCheckpoints,
+  nextCancellationCheck,
+  nextDelayCheck,
+  NORMAL_PREFLIGHT_OFFSETS_MS,
+  shouldRefreshFlightDetail,
+  shouldSkipFixedRefresh,
+  type FlightMonitorDecision,
+  type FlightMonitorMode,
+  type FlightMonitorNotificationDecision,
+  type FlightNotificationChangeKind,
+  type FlightNotificationPriority,
+  type MonitorDecisionState,
+  type MonitorMovement,
+  type MonitorSnapshot,
+} from './flight-monitoring.js';

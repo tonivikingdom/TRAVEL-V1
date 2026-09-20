@@ -17,7 +17,7 @@ export interface JobRunnerConfig {
 
 export interface JobRunnerDependencies {
   readonly repository: JobRepository;
-  readonly handlers: Readonly<Record<JobType, JobHandler>>;
+  readonly handlers: Readonly<Partial<Record<JobType, JobHandler>>>;
   readonly workerId: string;
   readonly config: JobRunnerConfig;
   readonly now?: () => Date;
@@ -105,11 +105,12 @@ export function createJobRunner(
         dependencies.config.executionTimeoutMs,
       );
       try {
+        const handler = dependencies.handlers[job.type];
+        if (handler === undefined) {
+          throw new Error('JOB_HANDLER_UNAVAILABLE');
+        }
         await Promise.race([
-          dependencies.handlers[job.type].execute(
-            job.payloadRef,
-            controller.signal,
-          ),
+          handler.execute(job.payloadRef, controller.signal),
           new Promise<never>((_resolve, reject) => {
             controller.signal.addEventListener(
               'abort',

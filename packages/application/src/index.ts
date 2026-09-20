@@ -16,6 +16,14 @@ export {
   normalizeFlightNumber,
   selectRefreshCandidate,
 } from './flight-service.js';
+export {
+  FlightMonitoringService,
+  type FlightMonitoringServiceOptions,
+} from './flight-monitoring-service.js';
+export type {
+  FlightMonitorContext,
+  FlightMonitoringRepository,
+} from './flight-monitoring-ports.js';
 export type {
   FlightAdoptRepositoryResult,
   FlightLookupInput,

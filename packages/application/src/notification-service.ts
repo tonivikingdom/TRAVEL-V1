@@ -28,6 +28,13 @@ export class NotificationService {
     readonly title: string;
     readonly body: string;
     readonly occurredAt: Date;
+    readonly tripId?: string | null;
+    readonly flightBindingId?: string | null;
+    readonly flightNumber?: string | null;
+    readonly priority?: 'NORMAL' | 'STRONG';
+    readonly summary?: string | null;
+    readonly changeKinds?: readonly string[];
+    readonly hasDownstreamImpact?: boolean;
   }): Promise<NotificationView> {
     requireUuid(input.ownerUserId, 'ownerUserId');
     const record = await this.repository.create({
@@ -37,6 +44,21 @@ export class NotificationService {
       title: boundedText(input.title, 'title', 1, 200),
       body: boundedText(input.body, 'body', 1, 4_000),
       occurredAt: validDate(input.occurredAt, 'occurredAt'),
+      ...(input.tripId === undefined ? {} : { tripId: input.tripId }),
+      ...(input.flightBindingId === undefined
+        ? {}
+        : { flightBindingId: input.flightBindingId }),
+      ...(input.flightNumber === undefined
+        ? {}
+        : { flightNumber: input.flightNumber }),
+      ...(input.priority === undefined ? {} : { priority: input.priority }),
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
+      ...(input.changeKinds === undefined
+        ? {}
+        : { changeKinds: input.changeKinds }),
+      ...(input.hasDownstreamImpact === undefined
+        ? {}
+        : { hasDownstreamImpact: input.hasDownstreamImpact }),
     });
     return toNotificationView(record);
   }
@@ -93,6 +115,26 @@ export class NotificationService {
     }
     return toNotificationView(notification);
   }
+
+  async viewNotification(
+    actor: Actor,
+    notificationId: string,
+  ): Promise<NotificationView> {
+    requireUuid(notificationId, 'notificationId');
+    authorize(actor, 'WRITE_PRIVATE_RESOURCE', {
+      kind: 'PRIVATE_RESOURCE',
+      ownerUserId: actor.userId,
+    });
+    const notification = await this.repository.viewOwned({
+      ownerUserId: actor.userId,
+      notificationId,
+      now: this.now(),
+    });
+    if (notification === null) {
+      throw new ApplicationError('NOT_FOUND', '通知不存在。', 404);
+    }
+    return toNotificationView(notification);
+  }
 }
 
 function toNotificationView(record: NotificationRecord): NotificationView {
@@ -104,7 +146,21 @@ function toNotificationView(record: NotificationRecord): NotificationView {
     occurredAt: record.occurredAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
     dismissedAt: record.dismissedAt?.toISOString() ?? null,
+    tripId: record.tripId,
+    flightBindingId: record.flightBindingId,
+    flightNumber: record.flightNumber,
+    priority: record.priority,
+    summary: record.summary,
+    changeKinds: stringArray(record.changeKinds),
+    hasDownstreamImpact: record.hasDownstreamImpact,
+    viewedAt: record.viewedAt?.toISOString() ?? null,
   };
+}
+
+function stringArray(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 function encodeCursor(record: NotificationRecord): string {

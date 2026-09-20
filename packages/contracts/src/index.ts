@@ -115,3 +115,19 @@ export type {
   UserTimeIntentView,
   SystemDwellSuggestionView,
 } from './trips.js';
+export type {
+  AdoptFlightRequest,
+  AdoptFlightResponse,
+  FlightActualConflictView,
+  FlightBindingView,
+  FlightChangeKind,
+  FlightChangeSummaryView,
+  FlightDelayBasis,
+  FlightFieldChange,
+  FlightMovementView,
+  FlightSearchRequest,
+  FlightSearchResponse,
+  FlightSnapshotView,
+  FlightStatus,
+  RefreshFlightResponse,
+} from './flights.js';

@@ -5,11 +5,16 @@ import type {
   ExecutionRiskEvaluationResponse,
   ExecutionRiskListResponse,
   ExecutionRiskView,
+  AdoptFlightResponse,
+  FlightBindingView,
+  FlightSnapshotView,
+  FlightSearchResponse,
   LivenessResponse,
   NotificationListResponse,
   NotificationView,
   OperationReceiptView,
   ReadinessResponse,
+  RefreshFlightResponse,
   RouteCandidateView,
   RoutePreviewView,
   RouteQueryResponse,
@@ -57,6 +62,9 @@ interface DebugState {
   receipt: OperationReceiptView | null;
   history: readonly TransportHistoryView[];
   executionRisks: readonly ExecutionRiskView[];
+  flightCandidates: readonly FlightSnapshotView[];
+  flightBinding: FlightBindingView | null;
+  flightRefresh: RefreshFlightResponse | null;
 }
 
 const root = requiredElement<HTMLDivElement>('app');
@@ -80,6 +88,9 @@ const state: DebugState = {
   receipt: store.getLastReceipt(store.getSelectedTripId()),
   history: [],
   executionRisks: [],
+  flightCandidates: [],
+  flightBinding: null,
+  flightRefresh: null,
 };
 
 root.addEventListener('submit', (event) => {
@@ -259,6 +270,12 @@ async function handleForm(form: HTMLFormElement): Promise<void> {
     case 'preview-form':
       await createPreview(data);
       break;
+    case 'flight-search-form':
+      await searchFlights(data);
+      break;
+    case 'flight-adopt-form':
+      await adoptFlight(data);
+      break;
   }
 }
 
@@ -351,6 +368,9 @@ async function handleAction(element: HTMLElement): Promise<void> {
     case 'load-more-notifications':
       await loadNotifications(true);
       break;
+    case 'refresh-flight':
+      await refreshFlight();
+      break;
   }
 }
 
@@ -368,6 +388,9 @@ async function loadTrip(id: string): Promise<void> {
   state.receipt = store.getLastReceipt(id);
   state.schedule = null;
   state.history = [];
+  state.flightCandidates = [];
+  state.flightBinding = null;
+  state.flightRefresh = null;
   await loadExecutionRisks(id);
   Object.assign(state, invalidateRouteArtifacts());
   render();
@@ -827,6 +850,7 @@ function tripWorkspace(trip: TripView): string {
       <section class="panel"><h2>UserTimeIntent</h2>${intentForms(trip)}</section>
       <section class="panel span-2"><h2>Schedule Projection</h2><button data-action="evaluate">重新评估时间约束</button>${scheduleView()}</section>
       <section class="panel span-2"><h2>Execution Risk（P5D1 手工测试）</h2><button data-action="evaluate-execution">触发执行风险评估</button>${executionRiskView()}</section>
+      <section class="panel span-2"><h2>Flight Operational Facts（P5D2 手工测试）</h2>${flightPanel(trip)}</section>
       <section class="panel span-2"><h2>Route Query / Candidate</h2>${routeQueryForm(trip)}${candidateView()}</section>
       <section class="panel span-2"><h2>Preview / Adopt / Undo</h2>${previewForm()}${previewView()}${receiptView(trip)}</section>
       <section class="panel span-2"><h2>Transport History</h2><button data-action="load-history">加载历史</button>${historyView()}</section>
@@ -843,6 +867,89 @@ function executionRiskView(): string {
         `<article class="notification"><strong>${esc(risk.kind)} · ${esc(risk.severity)}</strong><small>${esc(risk.status)} · last seen ${esc(risk.lastSeenAt)}</small><pre>${esc(JSON.stringify({ sourceNodeId: risk.sourceNodeId, sourceTransportEdgeId: risk.sourceTransportEdgeId, protectedNodeId: risk.protectedNodeId, protectedTransportEdgeId: risk.protectedTransportEdgeId, evidenceRefs: risk.evidenceRefs, requiresRouteReevaluation: risk.requiresRouteReevaluation, acknowledgedAt: risk.acknowledgedAt, snoozedUntil: risk.snoozedUntil }, null, 2))}</pre><div class="actions"><button data-action="acknowledge-risk" data-id="${attr(risk.id)}">确认风险</button><button data-action="snooze-risk" data-id="${attr(risk.id)}">暂停提醒 15 分钟</button></div></article>`,
     )
     .join('')}</div>`;
+}
+
+function flightPanel(trip: TripView): string {
+  const flightEdges = trip.connections.flatMap((connection) =>
+    connection.transport?.mode === 'FLIGHT' ? [connection.transport] : [],
+  );
+  const candidates = state.flightCandidates
+    .map(
+      (flight, index) =>
+        `<option value="${index}">${esc(flight.displayFlightNumber)} ${esc(flight.departure.airportIata ?? '?')}→${esc(flight.arrival.airportIata ?? '?')} ${esc(flight.status)}</option>`,
+    )
+    .join('');
+  const edges = flightEdges
+    .map(
+      (edge) =>
+        `<option value="${attr(edge.id)}">${esc(edge.id.slice(0, 8))} ${esc(edge.serviceLabel ?? 'FLIGHT')}</option>`,
+    )
+    .join('');
+  return `<div class="synthetic-banner">真实 AeroDataBox 调用只在服务端显式启用；本面板不显示凭证，不后台轮询。</div>
+    <form id="flight-search-form" class="inline-form"><label>航班号<input name="flightNumber" placeholder="NH53" required /></label><label>服务日期<input type="date" name="date" required /></label><button type="submit">搜索航班</button></form>
+    ${candidates === '' ? '<p class="muted">尚无航班候选。</p>' : `<form id="flight-adopt-form" class="inline-form"><label>候选<select name="candidateIndex">${candidates}</select></label><label>FLIGHT TransportEdge<select name="transportEdgeId">${edges}</select></label><button type="submit" ${edges === '' ? 'disabled' : ''}>绑定到已有 FLIGHT 交通段</button></form>`}
+    ${state.flightBinding === null ? '' : `<article class="candidate"><h3>${esc(state.flightBinding.displayFlightNumber)} · ${esc(state.flightBinding.status)}</h3><p>binding ${esc(state.flightBinding.id)} · refreshed ${esc(state.flightBinding.lastRefreshedAt)}</p><button data-action="refresh-flight">手工刷新运行事实</button><pre>${esc(JSON.stringify({ latestSnapshot: state.flightBinding.latestSnapshot, refreshResult: state.flightRefresh }, null, 2))}</pre></article>`}`;
+}
+
+async function searchFlights(data: FormData): Promise<void> {
+  await run(async () => {
+    const response = await api.post<FlightSearchResponse>('/flights/search', {
+      flightNumber: requiredFormString(data, 'flightNumber'),
+      date: requiredFormString(data, 'date'),
+    });
+    state.flightCandidates = response.flights;
+    state.flightRefresh = null;
+    state.message = `找到 ${response.flights.length} 个航班候选。`;
+  });
+}
+
+async function adoptFlight(data: FormData): Promise<void> {
+  const trip = requireTrip();
+  const candidate = state.flightCandidates[formNumber(data, 'candidateIndex')];
+  if (candidate === undefined) throw new Error('航班候选无效。');
+  await run(async () => {
+    const response = await api.post<AdoptFlightResponse>(
+      `/trips/${encodeURIComponent(trip.id)}/flights/adopt`,
+      {
+        baseTripVersion: trip.version,
+        transportEdgeId: requiredFormString(data, 'transportEdgeId'),
+        flight: candidate,
+      },
+    );
+    state.flightBinding = response.flightBinding;
+    await loadTripPreservingFlight(trip.id, response.flightBinding);
+    state.message = `航班已绑定，Trip v${response.resultingTripVersion}。`;
+  });
+}
+
+async function refreshFlight(): Promise<void> {
+  const trip = requireTrip();
+  const binding = state.flightBinding;
+  if (binding === null) return;
+  await run(async () => {
+    const response = await api.post<RefreshFlightResponse>(
+      `/trips/${encodeURIComponent(trip.id)}/flights/${encodeURIComponent(binding.id)}/refresh`,
+      {},
+    );
+    state.flightBinding = response.flightBinding;
+    state.flightRefresh = response;
+    await loadTripPreservingFlight(trip.id, response.flightBinding, response);
+    state.message = `航班已手工刷新；事实变更=${response.factsChanged}，ACTUAL 冲突=${response.actualConflicts.length}。`;
+  });
+}
+
+async function loadTripPreservingFlight(
+  tripIdValue: string,
+  binding: FlightBindingView,
+  refresh: RefreshFlightResponse | null = null,
+) {
+  state.currentTrip = await api.get<TripView>(
+    `/trips/${encodeURIComponent(tripIdValue)}`,
+  );
+  state.flightBinding = binding;
+  state.flightRefresh = refresh;
+  await loadExecutionRisks(tripIdValue);
+  render();
 }
 
 function timeline(trip: TripView): string {

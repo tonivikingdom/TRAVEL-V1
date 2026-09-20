@@ -7,6 +7,19 @@ export {
 } from './authorization.js';
 export { ApplicationError, isApplicationError } from './errors.js';
 export {
+  FlightService,
+  computeFlightChanges,
+  normalizeFlightNumber,
+  selectRefreshCandidate,
+} from './flight-service.js';
+export type {
+  FlightAdoptRepositoryResult,
+  FlightLookupInput,
+  FlightRefreshRepositoryResult,
+  FlightRepository,
+  FlightSnapshotProvider,
+} from './flight-ports.js';
+export {
   ExecutionRiskService,
   type ExecutionRiskServiceOptions,
 } from './execution-risk-service.js';

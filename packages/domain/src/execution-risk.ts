@@ -92,6 +92,13 @@ interface ProtectedTarget {
   readonly evidenceRefs: readonly string[];
 }
 
+interface ExecutionBoundaryEvidence {
+  readonly value: ExecutionRiskTemporalValue;
+  readonly sourceNodeId: string;
+  readonly sourceTransportEdgeId: string | null;
+  readonly evidenceRefs: readonly string[];
+}
+
 const LAYER_PRIORITY: Readonly<Record<ExecutionRiskTemporalLayer, number>> = {
   PLANNED: 1,
   ESTIMATED: 2,
@@ -115,7 +122,7 @@ export function evaluateExecutionRisks(
     (target) => executionFrontier === null || target.index >= executionFrontier,
   );
   if (nearestTarget !== undefined) {
-    const risk = evaluateTarget(nearestTarget, nodes);
+    const risk = evaluateTarget(nearestTarget, nodes, input.transports);
     if (risk !== null) risks.push(risk);
   }
 
@@ -140,11 +147,13 @@ function protectedTargets(
     const actualDeparture = selectValue(edge.timeValues, 'DEPARTURE', [
       'ACTUAL',
     ]);
-    const departure =
-      actualDeparture ??
-      (edge.fixedService
-        ? selectValue(edge.timeValues, 'DEPARTURE', ['PLANNED'])
-        : null);
+    const departure = edge.fixedService
+      ? selectValue(edge.timeValues, 'DEPARTURE', [
+          'ACTUAL',
+          'ESTIMATED',
+          'PLANNED',
+        ])
+      : actualDeparture;
     if (index === undefined || departure === null) continue;
     targets.push({
       index,
@@ -161,10 +170,9 @@ function protectedTargets(
   for (const node of nodes) {
     const index = nodeIndex.get(node.id)!;
     for (const pointKind of ['ARRIVAL', 'DEPARTURE'] as const) {
-      const current = selectValue(node.timeValues, pointKind, [
-        'ACTUAL',
-        'ESTIMATED',
-      ]);
+      const current =
+        resolveExecutionBoundary(node.id, pointKind, nodes, transports)
+          ?.value ?? null;
       const protectedIntents = node.intents
         .filter(
           (intent) =>
@@ -241,19 +249,22 @@ function findExecutionFrontier(
 function evaluateTarget(
   target: ProtectedTarget,
   nodes: readonly ExecutionRiskNode[],
+  transports: readonly ExecutionRiskTransport[],
 ): EvaluatedExecutionRisk | null {
   const node = nodes.find((candidate) => candidate.id === target.nodeId);
   if (node === undefined) return null;
 
   if (target.kind === 'POINT_TIME') {
-    const current = selectValue(node.timeValues, target.pointKind, [
-      'ACTUAL',
-      'ESTIMATED',
-    ]);
+    const current = resolveExecutionBoundary(
+      target.nodeId,
+      target.pointKind,
+      nodes,
+      transports,
+    );
     if (current === null) {
       return unknownRisk(target, null, null);
     }
-    const currentMilliseconds = current.instant.getTime();
+    const currentMilliseconds = current.value.instant.getTime();
     const targetMilliseconds = target.instant.getTime();
     const violated =
       target.pointOperator === 'EXACT'
@@ -263,7 +274,7 @@ function evaluateTarget(
           : currentMilliseconds > targetMilliseconds;
     if (!violated) return null;
     const executable =
-      current.layer !== 'ACTUAL' &&
+      current.value.layer !== 'ACTUAL' &&
       (target.pointOperator === 'NOT_BEFORE' ||
         (target.pointOperator === 'EXACT' &&
           currentMilliseconds < targetMilliseconds));
@@ -271,13 +282,13 @@ function evaluateTarget(
       fingerprintParts: protectedTargetFingerprint(target),
       kind: executable ? 'PROTECTED_TIME_AT_RISK' : 'PROTECTED_TIME_INFEASIBLE',
       severity: executable ? 'EXECUTABLE_RISK' : 'INFEASIBLE',
-      sourceNodeId: target.nodeId,
-      sourceTransportEdgeId: null,
+      sourceNodeId: current.sourceNodeId,
+      sourceTransportEdgeId: current.sourceTransportEdgeId,
       protectedNodeId: target.nodeId,
       protectedTransportEdgeId: null,
       evidenceRefs: sortedUnique([
         ...target.evidenceRefs,
-        `temporal:${current.id}`,
+        ...current.evidenceRefs,
       ]),
       explanation: executable
         ? '当前预计时间偏离已锁定的用户时间要求，但仍可由用户决定如何处理。'
@@ -286,15 +297,17 @@ function evaluateTarget(
     };
   }
 
-  const arrival = selectValue(node.timeValues, 'ARRIVAL', [
-    'ACTUAL',
-    'ESTIMATED',
-  ]);
+  const arrival = resolveExecutionBoundary(
+    target.nodeId,
+    'ARRIVAL',
+    nodes,
+    transports,
+  );
   if (arrival === null) {
     return unknownRisk(target, target.nodeId, null);
   }
   const marginSeconds = Math.floor(
-    (target.instant.getTime() - arrival.instant.getTime()) / 1_000,
+    (target.instant.getTime() - arrival.value.instant.getTime()) / 1_000,
   );
   if (marginSeconds < 0) {
     return {
@@ -304,13 +317,13 @@ function evaluateTarget(
           ? 'FIXED_SERVICE_MISSED'
           : 'PROTECTED_TIME_INFEASIBLE',
       severity: 'INFEASIBLE',
-      sourceNodeId: target.nodeId,
-      sourceTransportEdgeId: null,
+      sourceNodeId: arrival.sourceNodeId,
+      sourceTransportEdgeId: arrival.sourceTransportEdgeId,
       protectedNodeId: target.nodeId,
       protectedTransportEdgeId: target.transportEdgeId,
       evidenceRefs: sortedUnique([
         ...target.evidenceRefs,
-        `temporal:${arrival.id}`,
+        ...arrival.evidenceRefs,
       ]),
       explanation: '当前可靠到达时间已经晚于固定班次出发时间。',
       requiresRouteReevaluation: true,
@@ -336,14 +349,14 @@ function evaluateTarget(
           : 'PROTECTED_TIME_AT_RISK',
       severity:
         target.kind === 'ACTUAL_TRANSPORT' ? 'INFEASIBLE' : 'EXECUTABLE_RISK',
-      sourceNodeId: target.nodeId,
-      sourceTransportEdgeId: null,
+      sourceNodeId: arrival.sourceNodeId,
+      sourceTransportEdgeId: arrival.sourceTransportEdgeId,
       protectedNodeId: target.nodeId,
       protectedTransportEdgeId: target.transportEdgeId,
       evidenceRefs: sortedUnique([
         ...target.evidenceRefs,
         `intent:${minimum.id}`,
-        `temporal:${arrival.id}`,
+        ...arrival.evidenceRefs,
       ]),
       explanation: `当前只剩 ${marginSeconds} 秒，少于用户要求的 ${minimum.durationSeconds} 秒停留；需要用户决定。`,
       requiresRouteReevaluation: target.kind === 'ACTUAL_TRANSPORT',
@@ -360,13 +373,13 @@ function evaluateTarget(
       fingerprintParts: protectedTargetFingerprint(target),
       kind: 'PROTECTED_TIME_AT_RISK',
       severity: 'EXECUTABLE_RISK',
-      sourceNodeId: target.nodeId,
-      sourceTransportEdgeId: null,
+      sourceNodeId: arrival.sourceNodeId,
+      sourceTransportEdgeId: arrival.sourceTransportEdgeId,
       protectedNodeId: target.nodeId,
       protectedTransportEdgeId: target.transportEdgeId,
       evidenceRefs: sortedUnique([
         ...target.evidenceRefs,
-        `temporal:${arrival.id}`,
+        ...arrival.evidenceRefs,
         `suggestion:${target.nodeId}`,
       ]),
       explanation: `当前只剩 ${marginSeconds} 秒，低于系统建议的 ${suggestion} 秒停留。`,
@@ -471,6 +484,64 @@ function selectValue(
           LAYER_PRIORITY[right.layer] - LAYER_PRIORITY[left.layer] ||
           compareText(left.id, right.id),
       )[0] ?? null
+  );
+}
+
+function resolveExecutionBoundary(
+  nodeId: string,
+  pointKind: ExecutionRiskPointKind,
+  nodes: readonly ExecutionRiskNode[],
+  transports: readonly ExecutionRiskTransport[],
+): ExecutionBoundaryEvidence | null {
+  const candidates: ExecutionBoundaryEvidence[] = [];
+  const node = nodes.find((candidate) => candidate.id === nodeId);
+  if (node !== undefined) {
+    for (const value of node.timeValues) {
+      if (value.pointKind !== pointKind || !isExecutionEvidence(value)) {
+        continue;
+      }
+      candidates.push({
+        value,
+        sourceNodeId: nodeId,
+        sourceTransportEdgeId: null,
+        evidenceRefs: [`temporal:${value.id}`],
+      });
+    }
+  }
+
+  for (const edge of transports) {
+    const matchesBoundary =
+      pointKind === 'ARRIVAL'
+        ? edge.toNodeId === nodeId
+        : edge.fromNodeId === nodeId;
+    if (!matchesBoundary) continue;
+    for (const value of edge.timeValues) {
+      if (value.pointKind !== pointKind || !isExecutionEvidence(value)) {
+        continue;
+      }
+      candidates.push({
+        value,
+        sourceNodeId: nodeId,
+        sourceTransportEdgeId: edge.id,
+        evidenceRefs: [`temporal:${value.id}`, `transport:${edge.id}`],
+      });
+    }
+  }
+
+  return (
+    candidates.sort(
+      (left, right) =>
+        LAYER_PRIORITY[right.value.layer] - LAYER_PRIORITY[left.value.layer] ||
+        // At the same evidence layer, the node's direct boundary fact wins;
+        // remaining ties use stable subject/value identifiers.
+        Number(left.sourceTransportEdgeId !== null) -
+          Number(right.sourceTransportEdgeId !== null) ||
+        compareText(
+          left.sourceTransportEdgeId ?? left.sourceNodeId,
+          right.sourceTransportEdgeId ?? right.sourceNodeId,
+        ) ||
+        compareText(left.value.id, right.value.id),
+    )[0] ?? null
   );
 }
 

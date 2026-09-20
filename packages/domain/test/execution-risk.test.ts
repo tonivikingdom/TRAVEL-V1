@@ -166,6 +166,245 @@ describe('execution risk evaluator', () => {
     expect(risk?.evidenceRefs).toContain('temporal:actual-arrival');
   });
 
+  it('uses an incoming transport ESTIMATED arrival for fixed-service margin and provenance', () => {
+    const [risk] = evaluateExecutionRisks(
+      boundaryInput({
+        incomingArrival: at(40),
+        fixedPlannedDeparture: at(60),
+        minimum: 30 * 60,
+      }),
+    );
+    expect(risk).toMatchObject({
+      kind: 'PROTECTED_TIME_AT_RISK',
+      severity: 'EXECUTABLE_RISK',
+      sourceNodeId: 'node-connection',
+      sourceTransportEdgeId: 'edge-incoming',
+    });
+    expect(risk?.evidenceRefs).toEqual([
+      'intent:min-dwell',
+      'temporal:fixed-planned-departure',
+      'temporal:incoming-arrival',
+      'transport:edge-fixed',
+      'transport:edge-incoming',
+    ]);
+  });
+
+  it('uses an incoming transport ACTUAL arrival to detect a missed fixed service', () => {
+    const [risk] = evaluateExecutionRisks(
+      boundaryInput({
+        incomingArrival: at(65),
+        incomingArrivalLayer: 'ACTUAL',
+        fixedPlannedDeparture: at(60),
+      }),
+    );
+    expect(risk).toMatchObject({
+      kind: 'FIXED_SERVICE_MISSED',
+      severity: 'INFEASIBLE',
+      sourceTransportEdgeId: 'edge-incoming',
+      requiresRouteReevaluation: true,
+    });
+  });
+
+  it('uses a later fixed-service ESTIMATED departure over PLANNED', () => {
+    expect(
+      evaluateExecutionRisks(
+        boundaryInput({
+          incomingArrival: at(50),
+          fixedPlannedDeparture: at(60),
+          fixedEstimatedDeparture: at(90),
+          minimum: 30 * 60,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('uses an earlier fixed-service ESTIMATED departure over PLANNED', () => {
+    const [risk] = evaluateExecutionRisks(
+      boundaryInput({
+        incomingArrival: at(40),
+        fixedPlannedDeparture: at(60),
+        fixedEstimatedDeparture: at(45),
+        minimum: 30 * 60,
+      }),
+    );
+    expect(risk).toMatchObject({
+      kind: 'PROTECTED_TIME_AT_RISK',
+      severity: 'EXECUTABLE_RISK',
+      protectedTransportEdgeId: 'edge-fixed',
+    });
+    expect(risk?.evidenceRefs).toContain('temporal:fixed-estimated-departure');
+    expect(risk?.evidenceRefs).not.toContain(
+      'temporal:fixed-planned-departure',
+    );
+  });
+
+  it('uses fixed-service ACTUAL departure over ESTIMATED and PLANNED', () => {
+    const scenario = boundaryInput({
+      incomingArrival: at(40),
+      fixedPlannedDeparture: at(60),
+      fixedEstimatedDeparture: at(90),
+    });
+    const [risk] = evaluateExecutionRisks({
+      ...scenario,
+      transports: scenario.transports.map((edge) =>
+        edge.id === 'edge-fixed'
+          ? {
+              ...edge,
+              timeValues: [
+                ...edge.timeValues,
+                value('fixed-actual-departure', 'ACTUAL', 'DEPARTURE', at(35)),
+              ],
+            }
+          : edge,
+      ),
+    });
+    expect(risk).toMatchObject({
+      kind: 'FIXED_SERVICE_MISSED',
+      severity: 'INFEASIBLE',
+    });
+    expect(risk?.evidenceRefs).toContain('temporal:fixed-actual-departure');
+  });
+
+  it('evaluates ARRIVAL point-time intent from incoming transport evidence', () => {
+    const scenario = boundaryInput({ incomingArrival: at(70) });
+    const [risk] = evaluateExecutionRisks({
+      ...scenario,
+      nodes: scenario.nodes.map((node) =>
+        node.id === 'node-connection'
+          ? {
+              ...node,
+              intents: [
+                {
+                  ...pointIntent('arrival-deadline', 'NOT_AFTER', at(60)),
+                  pointKind: 'ARRIVAL' as const,
+                },
+              ],
+            }
+          : node,
+      ),
+    });
+    expect(risk).toMatchObject({
+      kind: 'PROTECTED_TIME_INFEASIBLE',
+      sourceTransportEdgeId: 'edge-incoming',
+    });
+    expect(risk?.evidenceRefs).toEqual([
+      'intent:arrival-deadline',
+      'temporal:incoming-arrival',
+      'transport:edge-incoming',
+    ]);
+  });
+
+  it('evaluates DEPARTURE point-time intent from outgoing transport evidence', () => {
+    const [risk] = evaluateExecutionRisks({
+      nodes: [
+        {
+          id: 'node-connection',
+          sequence: 0,
+          position: 0,
+          timeValues: [],
+          intents: [pointIntent('departure-deadline', 'NOT_AFTER', at(60))],
+        },
+      ],
+      transports: [
+        {
+          id: 'edge-outgoing',
+          fromNodeId: 'node-connection',
+          toNodeId: 'node-after',
+          fixedService: false,
+          timeValues: [
+            value(
+              'outgoing-estimated-departure',
+              'ESTIMATED',
+              'DEPARTURE',
+              at(70),
+            ),
+          ],
+        },
+      ],
+    });
+    expect(risk).toMatchObject({
+      kind: 'PROTECTED_TIME_INFEASIBLE',
+      sourceTransportEdgeId: 'edge-outgoing',
+    });
+    expect(risk?.evidenceRefs).toContain(
+      'temporal:outgoing-estimated-departure',
+    );
+  });
+
+  it('prefers node ACTUAL over incoming transport ESTIMATED evidence', () => {
+    const scenario = boundaryInput({
+      incomingArrival: at(70),
+      fixedPlannedDeparture: at(60),
+    });
+    const [risk] = evaluateExecutionRisks({
+      ...scenario,
+      nodes: scenario.nodes.map((node) =>
+        node.id === 'node-connection'
+          ? {
+              ...node,
+              timeValues: [
+                value('node-actual-arrival', 'ACTUAL', 'ARRIVAL', at(40)),
+              ],
+            }
+          : node,
+      ),
+    });
+    expect(risk).toBeUndefined();
+  });
+
+  it('prefers incoming transport ACTUAL over node ESTIMATED evidence', () => {
+    const scenario = boundaryInput({
+      incomingArrival: at(65),
+      incomingArrivalLayer: 'ACTUAL',
+      fixedPlannedDeparture: at(60),
+    });
+    const [risk] = evaluateExecutionRisks({
+      ...scenario,
+      nodes: scenario.nodes.map((node) =>
+        node.id === 'node-connection'
+          ? {
+              ...node,
+              timeValues: [
+                value('node-estimated-arrival', 'ESTIMATED', 'ARRIVAL', at(40)),
+              ],
+            }
+          : node,
+      ),
+    });
+    expect(risk).toMatchObject({
+      kind: 'FIXED_SERVICE_MISSED',
+      sourceTransportEdgeId: 'edge-incoming',
+    });
+    expect(risk?.evidenceRefs).toContain('temporal:incoming-arrival');
+  });
+
+  it('deterministically prefers direct node evidence over transport evidence at the same layer', () => {
+    const scenario = boundaryInput({
+      incomingArrival: at(65),
+      fixedPlannedDeparture: at(60),
+    });
+    const withNodeEvidence = {
+      ...scenario,
+      nodes: scenario.nodes.map((node) =>
+        node.id === 'node-connection'
+          ? {
+              ...node,
+              timeValues: [
+                value('node-estimated-arrival', 'ESTIMATED', 'ARRIVAL', at(40)),
+              ],
+            }
+          : node,
+      ),
+    };
+    expect(evaluateExecutionRisks(withNodeEvidence)).toEqual(
+      evaluateExecutionRisks({
+        ...withNodeEvidence,
+        transports: [...withNodeEvidence.transports].reverse(),
+      }),
+    );
+    expect(evaluateExecutionRisks(withNodeEvidence)).toEqual([]);
+  });
+
   it('evaluates the strongest explicit point-time deadline deterministically', () => {
     const node = {
       id: 'node-a',
@@ -497,6 +736,97 @@ function input(options: {
             },
           ],
     ...(options.buffers === undefined ? {} : { buffers: options.buffers }),
+  };
+}
+
+function boundaryInput(options: {
+  incomingArrival: Date;
+  incomingArrivalLayer?: 'ESTIMATED' | 'ACTUAL';
+  fixedPlannedDeparture?: Date;
+  fixedEstimatedDeparture?: Date;
+  minimum?: number;
+}): ExecutionRiskEvaluationInput {
+  return {
+    nodes: [
+      {
+        id: 'node-before',
+        sequence: 0,
+        position: 0,
+        timeValues: [],
+        intents: [],
+      },
+      {
+        id: 'node-connection',
+        sequence: 0,
+        position: 1,
+        timeValues: [],
+        intents:
+          options.minimum === undefined
+            ? []
+            : [
+                {
+                  id: 'min-dwell',
+                  kind: 'MIN_DWELL',
+                  pointKind: null,
+                  operator: 'MINIMUM',
+                  instant: null,
+                  durationSeconds: options.minimum,
+                  locked: false,
+                },
+              ],
+      },
+      {
+        id: 'node-after',
+        sequence: 0,
+        position: 2,
+        timeValues: [],
+        intents: [],
+      },
+    ],
+    transports: [
+      {
+        id: 'edge-incoming',
+        fromNodeId: 'node-before',
+        toNodeId: 'node-connection',
+        fixedService: false,
+        timeValues: [
+          value(
+            'incoming-arrival',
+            options.incomingArrivalLayer ?? 'ESTIMATED',
+            'ARRIVAL',
+            options.incomingArrival,
+          ),
+        ],
+      },
+      ...(options.fixedPlannedDeparture === undefined
+        ? []
+        : [
+            {
+              id: 'edge-fixed',
+              fromNodeId: 'node-connection',
+              toNodeId: 'node-after',
+              fixedService: true,
+              timeValues: [
+                value(
+                  'fixed-planned-departure',
+                  'PLANNED',
+                  'DEPARTURE',
+                  options.fixedPlannedDeparture,
+                ),
+                ...(options.fixedEstimatedDeparture === undefined
+                  ? []
+                  : [
+                      value(
+                        'fixed-estimated-departure',
+                        'ESTIMATED',
+                        'DEPARTURE',
+                        options.fixedEstimatedDeparture,
+                      ),
+                    ]),
+              ],
+            },
+          ]),
+    ],
   };
 }
 

@@ -115,6 +115,57 @@ describe('P5D1 execution-risk API with PostgreSQL', () => {
     ).toBe(fixture.version);
   });
 
+  it('evaluates transport-only arrival evidence and tracks fixed departure estimate escalation without duplicate notifications', async () => {
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          nodeId: fixture.connectionNodeId,
+          pointKind: 'ARRIVAL',
+        },
+      }),
+    ).toBe(0);
+
+    const initial = (
+      await evaluate(userA)
+    ).json<ExecutionRiskEvaluationResponse>();
+    expect(initial.risks[0]).toMatchObject({
+      kind: 'PROTECTED_TIME_AT_RISK',
+      severity: 'EXECUTABLE_RISK',
+      sourceNodeId: fixture.connectionNodeId,
+      sourceTransportEdgeId: fixture.incomingEdgeId,
+      protectedTransportEdgeId: fixture.fixedEdgeId,
+    });
+    expect(initial.risks[0]?.evidenceRefs).toEqual(
+      expect.arrayContaining([
+        `temporal:${fixture.arrivalValueId}`,
+        `transport:${fixture.incomingEdgeId}`,
+        `transport:${fixture.fixedEdgeId}`,
+      ]),
+    );
+    expect(await managed.client.notificationEvent.count()).toBe(1);
+
+    const estimatedDepartureId = await setFixedEstimatedDeparture(
+      '2030-01-01T10:35:00.000Z',
+    );
+    const escalated = (
+      await evaluate(userA)
+    ).json<ExecutionRiskEvaluationResponse>();
+    expect(escalated.risks[0]).toMatchObject({
+      id: initial.risks[0]?.id,
+      kind: 'FIXED_SERVICE_MISSED',
+      severity: 'INFEASIBLE',
+      sourceTransportEdgeId: fixture.incomingEdgeId,
+      requiresRouteReevaluation: true,
+    });
+    expect(escalated.risks[0]?.evidenceRefs).toContain(
+      `temporal:${estimatedDepartureId}`,
+    );
+    expect(await managed.client.notificationEvent.count()).toBe(2);
+
+    await evaluate(userA);
+    expect(await managed.client.notificationEvent.count()).toBe(2);
+  });
+
   it('keeps acknowledged risk quiet, allows severity escalation, and snoozes for 15 minutes', async () => {
     const initial = (
       await evaluate(userA)
@@ -235,6 +286,42 @@ describe('P5D1 execution-risk API with PostgreSQL', () => {
     ]);
   }
 
+  async function setFixedEstimatedDeparture(instant: string): Promise<string> {
+    const existing = await managed.client.temporalValue.findFirst({
+      where: {
+        transportEdgeId: fixture.fixedEdgeId,
+        pointKind: 'DEPARTURE',
+        layer: 'ESTIMATED',
+      },
+      select: { id: true },
+    });
+    const id = existing?.id ?? randomUUID();
+    await managed.client.$transaction([
+      existing === null
+        ? managed.client.temporalValue.create({
+            data: {
+              id,
+              transportEdgeId: fixture.fixedEdgeId,
+              layer: 'ESTIMATED',
+              pointKind: 'DEPARTURE',
+              instant: new Date(instant),
+              timeZone: 'UTC',
+              sourceKind: 'PROVIDER_OBSERVATION',
+              observedAt: now,
+            },
+          })
+        : managed.client.temporalValue.update({
+            where: { id },
+            data: { instant: new Date(instant), observedAt: now },
+          }),
+      managed.client.trip.update({
+        where: { id: fixture.tripId },
+        data: { version: { increment: 1 } },
+      }),
+    ]);
+    return id;
+  }
+
   function evaluate(identity: SyntheticIdentity) {
     return app.inject({
       method: 'POST',
@@ -275,6 +362,9 @@ interface SyntheticIdentity {
 
 interface RiskFixture {
   readonly tripId: string;
+  readonly connectionNodeId: string;
+  readonly incomingEdgeId: string;
+  readonly fixedEdgeId: string;
   readonly arrivalValueId: string;
   readonly version: number;
 }
@@ -308,11 +398,14 @@ async function createRiskFixture(
 ): Promise<RiskFixture> {
   const tripId = randomUUID();
   const occurrenceId = randomUUID();
+  const placeOriginId = randomUUID();
   const placeAId = randomUUID();
   const placeBId = randomUUID();
+  const nodeOriginId = randomUUID();
   const nodeAId = randomUUID();
   const nodeBId = randomUUID();
-  const edgeId = randomUUID();
+  const incomingEdgeId = randomUUID();
+  const fixedEdgeId = randomUUID();
   const arrivalValueId = randomUUID();
   await managed.client.$transaction(async (transaction) => {
     await transaction.trip.create({
@@ -337,6 +430,13 @@ async function createRiskFixture(
     await transaction.place.createMany({
       data: [
         {
+          id: placeOriginId,
+          ownerUserId,
+          name: 'SYNTHETIC Origin',
+          latitude: 34,
+          longitude: 138,
+        },
+        {
           id: placeAId,
           ownerUserId,
           name: 'SYNTHETIC Connection',
@@ -355,11 +455,19 @@ async function createRiskFixture(
     await transaction.itineraryNode.createMany({
       data: [
         {
-          id: nodeAId,
+          id: nodeOriginId,
           tripId,
           dayOccurrenceId: occurrenceId,
           kind: 'PLACE_VISIT',
           position: 0,
+          placeId: placeOriginId,
+        },
+        {
+          id: nodeAId,
+          tripId,
+          dayOccurrenceId: occurrenceId,
+          kind: 'PLACE_VISIT',
+          position: 1,
           placeId: placeAId,
         },
         {
@@ -367,7 +475,7 @@ async function createRiskFixture(
           tripId,
           dayOccurrenceId: occurrenceId,
           kind: 'PLACE_VISIT',
-          position: 1,
+          position: 2,
           placeId: placeBId,
         },
       ],
@@ -382,22 +490,33 @@ async function createRiskFixture(
         locked: false,
       },
     });
-    await transaction.transportEdge.create({
-      data: {
-        id: edgeId,
-        tripId,
-        fromNodeId: nodeAId,
-        toNodeId: nodeBId,
-        mode: 'RAIL',
-        fixedService: true,
-        source: 'MANUAL',
-      },
+    await transaction.transportEdge.createMany({
+      data: [
+        {
+          id: incomingEdgeId,
+          tripId,
+          fromNodeId: nodeOriginId,
+          toNodeId: nodeAId,
+          mode: 'RAIL',
+          fixedService: false,
+          source: 'MANUAL',
+        },
+        {
+          id: fixedEdgeId,
+          tripId,
+          fromNodeId: nodeAId,
+          toNodeId: nodeBId,
+          mode: 'RAIL',
+          fixedService: true,
+          source: 'MANUAL',
+        },
+      ],
     });
     await transaction.temporalValue.createMany({
       data: [
         {
           id: arrivalValueId,
-          nodeId: nodeAId,
+          transportEdgeId: incomingEdgeId,
           layer: 'ESTIMATED',
           pointKind: 'ARRIVAL',
           instant: new Date('2030-01-01T10:40:00.000Z'),
@@ -406,7 +525,7 @@ async function createRiskFixture(
           observedAt: INITIAL_NOW,
         },
         {
-          transportEdgeId: edgeId,
+          transportEdgeId: fixedEdgeId,
           layer: 'PLANNED',
           pointKind: 'DEPARTURE',
           instant: new Date('2030-01-01T11:00:00.000Z'),
@@ -416,7 +535,14 @@ async function createRiskFixture(
       ],
     });
   });
-  return { tripId, arrivalValueId, version: 1 };
+  return {
+    tripId,
+    connectionNodeId: nodeAId,
+    incomingEdgeId,
+    fixedEdgeId,
+    arrivalValueId,
+    version: 1,
+  };
 }
 
 function bearer(credential: string) {

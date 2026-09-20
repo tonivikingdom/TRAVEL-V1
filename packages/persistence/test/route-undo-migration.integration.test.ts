@@ -16,6 +16,7 @@ const migrationsPath = fileURLToPath(
 const p4b2Migration = '20260920110000_p4b2_route_adoption';
 const p4b3Migration = '20260920150000_p4b3_route_undo';
 const p5cMigration = '20260921100000_p5c_planning_policy';
+const p5d1Migration = '20260922100000_p5d1_execution_risk';
 
 describe('P4B3 route Undo migration', () => {
   it('applies every migration to a clean database', async () => {
@@ -158,6 +159,82 @@ describe('P4B3 route Undo migration', () => {
              CURRENT_TIMESTAMP)
         `),
       ).rejects.toThrow();
+    });
+  });
+
+  it('migrates a populated P5C baseline without inventing risks or changing facts', async () => {
+    await withDatabase('p5d1_populated', async (target) => {
+      await applyMigrations(target, p5d1Migration);
+      await seedP4b2Data(target);
+      await seedP5bExtendedData(target);
+      await target.query(`
+        INSERT INTO "SystemDwellSuggestion"
+          ("id", "tripId", "nodeId", "durationSeconds", "updatedAt")
+        VALUES
+          ('99000000-0000-4000-8000-000000000001',
+           '10000000-0000-4000-8000-000000000001',
+           '30000000-0000-4000-8000-000000000001', 3600,
+           CURRENT_TIMESTAMP);
+
+        INSERT INTO "NotificationEvent"
+          ("id", "ownerUserId", "kind", "dedupeKey", "title", "body", "occurredAt")
+        VALUES
+          ('98000000-0000-4000-8000-000000000001',
+           '00000000-0000-4000-8000-000000000001',
+           'SYNTHETIC_P5C', 'synthetic:p5c:preserved',
+           'SYNTHETIC preserved', 'SYNTHETIC preserved notification',
+           '2030-01-01T00:00:00Z');
+      `);
+      const before = await officialCounts(target);
+      const beforeP5c = await target.query<Record<string, string>>(`
+        SELECT
+          (SELECT COUNT(*)::text FROM "SystemDwellSuggestion") AS suggestions,
+          (SELECT COUNT(*)::text FROM "NotificationEvent") AS notifications
+      `);
+
+      await applyMigration(target, p5d1Migration);
+
+      expect(await officialCounts(target)).toEqual(before);
+      expect(
+        await target.query<Record<string, string>>(`
+          SELECT
+            (SELECT COUNT(*)::text FROM "SystemDwellSuggestion") AS suggestions,
+            (SELECT COUNT(*)::text FROM "NotificationEvent") AS notifications
+        `),
+      ).toMatchObject({ rows: beforeP5c.rows });
+      expect(
+        (
+          await target.query<{ count: string }>(
+            'SELECT COUNT(*)::text AS count FROM "ExecutionRisk"',
+          )
+        ).rows[0]?.count,
+      ).toBe('0');
+      const preserved = await target.query<{
+        version: number;
+        durationSeconds: number;
+        actualInstant: Date;
+      }>(`
+        SELECT t."version", i."durationSeconds",
+          v."instant" AS "actualInstant"
+        FROM "Trip" t
+        JOIN "UserTimeIntent" i ON i."tripId" = t."id"
+        JOIN "TemporalValue" v ON v."nodeId" = i."nodeId"
+          AND v."layer" = 'ACTUAL' AND v."pointKind" = 'ARRIVAL'
+        WHERE t."id" = '10000000-0000-4000-8000-000000000001'
+      `);
+      expect(preserved.rows[0]).toMatchObject({
+        version: 4,
+        durationSeconds: 2_400,
+        actualInstant: new Date('2030-01-01T00:30:00.000Z'),
+      });
+      const partialIndex = await target.query<{ definition: string }>(`
+        SELECT pg_get_indexdef(indexrelid) AS definition
+        FROM pg_index
+        WHERE indexrelid = '"ExecutionRisk_one_active_fingerprint_key"'::regclass
+      `);
+      expect(partialIndex.rows[0]?.definition).toContain(
+        'WHERE ("resolvedAt" IS NULL)',
+      );
     });
   });
 });

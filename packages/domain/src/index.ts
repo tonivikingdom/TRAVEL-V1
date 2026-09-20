@@ -67,3 +67,18 @@ export {
   type ExternalBoardingScenario,
   type RouteRecommendationResult,
 } from './planning-policy.js';
+export {
+  evaluateExecutionRisks,
+  type EvaluatedExecutionRisk,
+  type ExecutionBufferEvidence,
+  type ExecutionBufferKind,
+  type ExecutionRiskEvaluationInput,
+  type ExecutionRiskIntent,
+  type ExecutionRiskKind,
+  type ExecutionRiskNode,
+  type ExecutionRiskPointKind,
+  type ExecutionRiskSeverity,
+  type ExecutionRiskTemporalLayer,
+  type ExecutionRiskTemporalValue,
+  type ExecutionRiskTransport,
+} from './execution-risk.js';

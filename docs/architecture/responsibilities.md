@@ -172,7 +172,7 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   自动触发。
 - 生命周期自动迁移尚未实现，本次不修改 P2A/P2B 业务代码。
 
-## 实时监控与提醒（O-08 产品规则已确认，仅规格）
+## 实时监控与提醒（O-08 产品规则已确认，P5D1 仅实现显式风险评估 foundation）
 
 - application 将用户开关与 OFF/IDLE/RUNNING/LIMITED 分开；定位权限丢失进入 LIMITED，不改
   `userEnabled`。恢复时重新同步，旧位置和中断过程不能伪造成当前事实。
@@ -182,7 +182,13 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   固定提醒，但动态推断保持 unknown。过期固定提醒不补发旧指令。
 - presentation/notification adapter 负责相同目的去重、关键事项优先及“关键提醒 + N 个待办”摘要；
   低优先级待办仍保留。任何投递 adapter 都不能承诺 100% 到达。
-- O-08 尚未实现；P1B2 `NotificationEvent` 基础不等于实时监控、客户端通知或 Push 已完成。
+- P5D1 新增只读确定性 evaluator、持久 `ExecutionRisk` 生命周期和显式 evaluate API。风险与
+  `NotificationEvent` 分离；acknowledge 不消除事实，15 分钟 snooze、严重度升级和 resolved 后重现
+  由事务内 fingerprint/generation 去重。风险 bookkeeping 不增加 Trip version。
+- P5D1 只从现有 ACTUAL/ESTIMATED、固定班次 PLANNED、用户 POINT_TIME/MIN_DWELL 与已有系统建议读取
+  证据，只检查最近的 downstream protected anchor；UNKNOWN 不降成 safe，也不猜下一班或 Provider 事实。
+- O-08 的后台实时监控、定位采集、Push、固定提醒调度与客户端投递仍未实现；P1B2
+  `NotificationEvent` 和 P5D1 手工评估都不等于这些能力已完成。
 
 ## Provider 与核心故障边界（O-10 产品规则已确认，仅规格）
 

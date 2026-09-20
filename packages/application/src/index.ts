@@ -7,6 +7,16 @@ export {
 } from './authorization.js';
 export { ApplicationError, isApplicationError } from './errors.js';
 export {
+  ExecutionRiskService,
+  type ExecutionRiskServiceOptions,
+} from './execution-risk-service.js';
+export type {
+  DesiredExecutionRisk,
+  ExecutionRiskRecord,
+  ExecutionRiskRepository,
+  ReconcileExecutionRisksResult,
+} from './execution-risk-ports.js';
+export {
   compareCanonicalDwellAdjustments,
   compareCanonicalText,
   type CanonicalDwellAdjustment,

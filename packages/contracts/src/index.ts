@@ -22,6 +22,14 @@ export type {
   NotificationView,
 } from './notifications.js';
 export type {
+  ExecutionRiskEvaluationResponse,
+  ExecutionRiskKind,
+  ExecutionRiskListResponse,
+  ExecutionRiskSeverity,
+  ExecutionRiskStatus,
+  ExecutionRiskView,
+} from './execution.js';
+export type {
   CreateRoutePreviewRequest,
   AdoptRoutePreviewRequest,
   AdoptRoutePreviewResponse,

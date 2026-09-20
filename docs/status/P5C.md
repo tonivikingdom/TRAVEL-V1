@@ -1,8 +1,10 @@
 # P5C Planning Policy
 
-- 当前状态：Draft PR #18 已创建并保持 Draft，等待人工审查
-- 正式基线 main：`49a76517ef7917678c8d2133977435a1854edd07`
-- 基线 main CI：Run `35439640209`，三个核心 job 均为 success
+- 当前状态：已通过 PR #18 Squash Merge 到 main
+- P5C 正式 main：`7b069707ed67fe539adea373b642041cce1820ac`
+- 最终 PR CI：Run `35479025186`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
+- 后续 Provider Probe PR #19 已合并；P5D1 开工基线 main 为
+  `663a7b77f430d40fea77de0767b5dc6f927b05a9`，main CI Run `35486059281` 三个核心 job 均为 success
 - 实现验证 CI：Run `35453749282`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
 - Hardening 验证 CI：Run `35456782636`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
 - 自动化结果：Unit 28 files / 246 tests；PostgreSQL integration 15 files / 169 tests；clean migration、

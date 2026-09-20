@@ -1,5 +1,6 @@
 import {
   AuthService,
+  ExecutionRiskService,
   NotificationService,
   RouteAdoptionService,
   RoutePreviewService,
@@ -11,6 +12,7 @@ import {
   createPostgresReadiness,
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaExecutionRiskRepository,
   PrismaNotificationRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
@@ -33,6 +35,7 @@ const managedProbe = createPostgresReadiness(databaseUrl);
 let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
+let executionRiskService: ExecutionRiskService | undefined;
 let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
@@ -50,6 +53,10 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     new PrismaNotificationRepository(managedPrisma.client),
   );
   const tripRepository = new PrismaTripRepository(managedPrisma.client);
+  executionRiskService = new ExecutionRiskService(
+    tripRepository,
+    new PrismaExecutionRiskRepository(managedPrisma.client),
+  );
   const planningRepository = new PrismaRoutePlanningRepository(
     managedPrisma.client,
   );
@@ -86,6 +93,7 @@ const app = buildApi({
   readinessProbe: managedProbe.probe,
   ...(authService === undefined ? {} : { authService }),
   ...(notificationService === undefined ? {} : { notificationService }),
+  ...(executionRiskService === undefined ? {} : { executionRiskService }),
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(routePreviewService === undefined ? {} : { routePreviewService }),
   ...(routeAdoptionService === undefined ? {} : { routeAdoptionService }),

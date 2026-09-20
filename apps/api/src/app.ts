@@ -1,6 +1,7 @@
 import {
   ApplicationError,
   AuthService,
+  ExecutionRiskService,
   NotificationService,
   RouteAdoptionService,
   RoutePreviewService,
@@ -33,6 +34,7 @@ export interface ApiDependencies {
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
   readonly notificationService?: NotificationService;
+  readonly executionRiskService?: ExecutionRiskService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
   readonly routeAdoptionService?: RouteAdoptionService;
@@ -342,6 +344,68 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
   );
 
   app.post<{ Params: { id: string } }>(
+    '/trips/:id/execution/evaluate',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionRiskService(dependencies).evaluateTripRisks(
+        authenticated.actor,
+        request.params.id,
+      );
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/trips/:id/execution/risks',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionRiskService(dependencies).listRisks(
+        authenticated.actor,
+        request.params.id,
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string; riskId: string } }>(
+    '/trips/:id/execution/risks/:riskId/acknowledge',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionRiskService(dependencies).acknowledgeRisk(
+        authenticated.actor,
+        request.params.id,
+        request.params.riskId,
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string; riskId: string } }>(
+    '/trips/:id/execution/risks/:riskId/snooze',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionRiskService(dependencies).snoozeRisk(
+        authenticated.actor,
+        request.params.id,
+        request.params.riskId,
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
     '/trips/:id/temporal-values',
     async (request) => {
       const authenticated = await authenticate(
@@ -510,6 +574,20 @@ function requireNotificationService(
     );
   }
   return dependencies.notificationService;
+}
+
+function requireExecutionRiskService(
+  dependencies: ApiDependencies,
+): ExecutionRiskService {
+  if (dependencies.executionRiskService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '执行风险服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.executionRiskService;
 }
 
 function requireTripService(dependencies: ApiDependencies): TripService {

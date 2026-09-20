@@ -141,6 +141,27 @@ enum DwellSuggestionSource {
   SYSTEM_SUGGESTION
 }
 
+enum ExecutionRiskKind {
+  PROTECTED_TIME_AT_RISK
+  PROTECTED_TIME_INFEASIBLE
+  FIXED_SERVICE_MISSED
+  BUFFER_BELOW_SYSTEM_MINIMUM
+  UNKNOWN_EXECUTION_MARGIN
+}
+
+enum ExecutionRiskSeverity {
+  EXECUTABLE_RISK
+  INFEASIBLE
+  UNKNOWN
+}
+
+enum ExecutionRiskStatus {
+  OPEN
+  ACKNOWLEDGED
+  SNOOZED
+  RESOLVED
+}
+
 model User {
   id                      String                   @id @default(uuid()) @db.Uuid
   email                   String
@@ -161,6 +182,7 @@ model User {
   routeCandidateSnapshots RouteCandidateSnapshot[]
   routePreviews           RoutePreview[]
   operationReceipts       OperationReceipt[]
+  executionRisks          ExecutionRisk[]
 
   @@index([status])
 }
@@ -322,9 +344,43 @@ model Trip {
   transportDayProjections TransportDayProjection[]
   operationReceipts       OperationReceipt[]
   outboxEvents            OutboxEvent[]
+  executionRisks          ExecutionRisk[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
+}
+
+model ExecutionRisk {
+  id                         String                @id @default(uuid()) @db.Uuid
+  ownerUserId                String                @db.Uuid
+  tripId                     String                @db.Uuid
+  fingerprint                String                @db.VarChar(64)
+  lifecycleGeneration        Int                   @default(1)
+  kind                       ExecutionRiskKind
+  severity                   ExecutionRiskSeverity
+  status                     ExecutionRiskStatus   @default(OPEN)
+  sourceNodeId               String?               @db.Uuid
+  sourceTransportEdgeId      String?               @db.Uuid
+  protectedNodeId            String?               @db.Uuid
+  protectedTransportEdgeId   String?               @db.Uuid
+  firstSeenAt                DateTime              @db.Timestamptz(3)
+  lastSeenAt                 DateTime              @db.Timestamptz(3)
+  acknowledgedAt             DateTime?             @db.Timestamptz(3)
+  snoozedUntil               DateTime?             @db.Timestamptz(3)
+  resolvedAt                 DateTime?             @db.Timestamptz(3)
+  evaluationBasisTripVersion Int
+  lastEvidenceHash           String                @db.VarChar(64)
+  evidenceRefs               Json                  @db.JsonB
+  requiresRouteReevaluation  Boolean               @default(false)
+  notificationGeneration     Int                   @default(0)
+  createdAt                  DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt                  DateTime              @updatedAt @db.Timestamptz(3)
+  owner                      User                  @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                       Trip                  @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@unique([ownerUserId, tripId, fingerprint, lifecycleGeneration])
+  @@index([ownerUserId, tripId, status, lastSeenAt(sort: Desc)])
+  @@index([tripId, fingerprint, resolvedAt])
 }
 
 model DayOccurrence {

@@ -1,4 +1,5 @@
 import { TripGoProbeAdapter } from './providers/tripgo.js';
+import { GoogleRoutesProbeAdapter } from './providers/google-routes.js';
 import {
   printHumanReport,
   sanitizeEvidence,
@@ -9,7 +10,10 @@ import { japanCoreScenarios } from './scenarios/japan-core.js';
 import type { ProviderProbeAdapter } from './types.js';
 
 const options = parseArgs(process.argv.slice(2));
-const adapters = registry(process.env.TRIPGO_API_KEY);
+const adapters = registry({
+  tripgo: process.env.TRIPGO_API_KEY,
+  google: process.env.GOOGLE_MAPS_SERVER_KEY,
+});
 const requestedProviders = options.providers.map((id) => {
   const adapter = adapters.get(id);
   if (!adapter) {
@@ -33,16 +37,18 @@ for (const adapter of requestedProviders) {
     mode: options.mode,
     scenarios,
   });
-  const sanitized = sanitizeEvidence(run, [process.env.TRIPGO_API_KEY ?? '']);
+  const secrets = [
+    process.env.TRIPGO_API_KEY ?? '',
+    process.env.GOOGLE_MAPS_SERVER_KEY ?? '',
+  ];
+  const sanitized = sanitizeEvidence(run, secrets);
   if (options.json) {
     console.log(JSON.stringify(sanitized, null, 2));
   } else {
     printHumanReport(sanitized as typeof run);
   }
   if (options.output !== null) {
-    const directory = await writeProbeArtifacts(run, options.output, [
-      process.env.TRIPGO_API_KEY ?? '',
-    ]);
+    const directory = await writeProbeArtifacts(run, options.output, secrets);
     if (!options.json) console.log(`Artifacts: ${directory}`);
   }
   failed ||=
@@ -51,10 +57,14 @@ for (const adapter of requestedProviders) {
 }
 process.exitCode = failed ? 1 : 0;
 
-function registry(
-  apiKey: string | undefined,
-): ReadonlyMap<string, ProviderProbeAdapter> {
-  return new Map([['tripgo', new TripGoProbeAdapter(apiKey)]]);
+function registry(keys: {
+  readonly tripgo: string | undefined;
+  readonly google: string | undefined;
+}): ReadonlyMap<string, ProviderProbeAdapter> {
+  return new Map<string, ProviderProbeAdapter>([
+    ['tripgo', new TripGoProbeAdapter(keys.tripgo)],
+    ['google', new GoogleRoutesProbeAdapter(keys.google)],
+  ]);
 }
 
 function parseArgs(args: readonly string[]): {

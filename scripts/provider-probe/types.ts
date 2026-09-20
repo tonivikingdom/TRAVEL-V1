@@ -3,7 +3,9 @@ export type ProbeProviderStatus =
   | 'NO_ROUTE'
   | 'UNSUPPORTED'
   | 'AUTH_ERROR'
+  | 'AUTH_OR_SERVICE_CONFIGURATION_ERROR'
   | 'RATE_LIMITED'
+  | 'MALFORMED_REQUEST'
   | 'PROVIDER_ERROR'
   | 'MALFORMED_RESPONSE';
 
@@ -80,14 +82,14 @@ export interface ProbeLeg {
 
 export interface ProbeRoute {
   readonly providerRef: string | null;
-  readonly departure: string;
-  readonly arrival: string;
+  readonly departure: string | null;
+  readonly arrival: string | null;
   readonly totalDurationSeconds: number;
   readonly fare: ProbeFare | null;
   readonly legs: readonly ProbeLeg[];
   readonly transferCount: number;
   readonly walkingSeconds: number;
-  readonly timeConstraintSatisfied: boolean;
+  readonly timeConstraintSatisfied: boolean | null;
 }
 
 export interface ProbeFactMatrix {

@@ -44,7 +44,7 @@ export function buildJapanScenarioQueries(
   arriveBySupported: boolean,
   now: Date,
 ): readonly RouteProbeQuery[] {
-  const departure = nextJapanDateAt(now, 9);
+  const departure = nextJapanDateAt(now, 10);
   const queries: RouteProbeQuery[] = [
     {
       origin: scenario.origin,
@@ -59,7 +59,7 @@ export function buildJapanScenarioQueries(
       origin: scenario.origin,
       destination: scenario.destination,
       mode: 'ARRIVE_BY',
-      instant: nextJapanDateAt(now, 20).toISOString(),
+      instant: nextJapanDateAt(now, 13).toISOString(),
       timeZone: 'Asia/Tokyo',
     });
   }
@@ -76,7 +76,7 @@ export function buildJapanScenarioQueries(
 }
 
 function nextJapanDateAt(now: Date, hour: number): Date {
-  const future = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1_000);
+  const future = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1_000);
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',

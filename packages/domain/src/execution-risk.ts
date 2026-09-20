@@ -147,7 +147,7 @@ function protectedTargets(
     if (index === undefined || departure === null) continue;
     targets.push({
       index,
-      kind: actualDeparture === null ? 'FIXED_SERVICE' : 'ACTUAL_TRANSPORT',
+      kind: edge.fixedService ? 'FIXED_SERVICE' : 'ACTUAL_TRANSPORT',
       nodeId: edge.fromNodeId,
       transportEdgeId: edge.id,
       instant: departure.instant,

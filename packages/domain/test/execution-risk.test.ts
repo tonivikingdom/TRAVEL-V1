@@ -113,6 +113,38 @@ describe('execution risk evaluator', () => {
     });
   });
 
+  it('keeps a fixed service classified as missed when its departure is ACTUAL', () => {
+    const [risk] = evaluateExecutionRisks({
+      nodes: [
+        {
+          id: 'node-a',
+          sequence: 0,
+          position: 0,
+          timeValues: [
+            value('estimated-arrival', 'ESTIMATED', 'ARRIVAL', at(65)),
+          ],
+          intents: [],
+        },
+      ],
+      transports: [
+        {
+          id: 'edge-fixed-actual',
+          fromNodeId: 'node-a',
+          toNodeId: 'node-b',
+          fixedService: true,
+          timeValues: [
+            value('actual-departure', 'ACTUAL', 'DEPARTURE', at(60)),
+          ],
+        },
+      ],
+    });
+    expect(risk).toMatchObject({
+      kind: 'FIXED_SERVICE_MISSED',
+      severity: 'INFEASIBLE',
+      requiresRouteReevaluation: true,
+    });
+  });
+
   it('uses ACTUAL over ESTIMATED as current execution evidence', () => {
     const scenario = input({ fixedDeparture: at(60), minimum: 30 * 60 });
     const [risk] = evaluateExecutionRisks({

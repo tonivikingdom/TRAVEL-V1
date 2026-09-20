@@ -196,6 +196,69 @@ describe('execution risk evaluator', () => {
     });
   });
 
+  it('treats a locked NOT_BEFORE estimate as executable risk and ACTUAL as infeasible', () => {
+    const lockedIntent = {
+      id: 'locked-lower-bound',
+      kind: 'POINT_TIME',
+      pointKind: 'DEPARTURE',
+      operator: 'NOT_BEFORE',
+      instant: at(60),
+      durationSeconds: null,
+      locked: true,
+    } as const;
+    const scenario = (layer: 'ESTIMATED' | 'ACTUAL') =>
+      evaluateExecutionRisks({
+        nodes: [
+          {
+            id: 'node-a',
+            sequence: 0,
+            position: 0,
+            timeValues: [
+              value(`${layer}-departure`, layer, 'DEPARTURE', at(50)),
+            ],
+            intents: [lockedIntent],
+          },
+        ],
+        transports: [],
+      })[0];
+    expect(scenario('ESTIMATED')).toMatchObject({
+      kind: 'PROTECTED_TIME_AT_RISK',
+      severity: 'EXECUTABLE_RISK',
+      requiresRouteReevaluation: false,
+    });
+    expect(scenario('ACTUAL')).toMatchObject({
+      kind: 'PROTECTED_TIME_INFEASIBLE',
+      severity: 'INFEASIBLE',
+      requiresRouteReevaluation: true,
+    });
+  });
+
+  it('distinguishes recoverable early and infeasible late EXACT estimates', () => {
+    const evaluate = (current: Date) =>
+      evaluateExecutionRisks({
+        nodes: [
+          {
+            id: 'node-a',
+            sequence: 0,
+            position: 0,
+            timeValues: [
+              value('estimated-departure', 'ESTIMATED', 'DEPARTURE', current),
+            ],
+            intents: [pointIntent('exact', 'EXACT', at(60))],
+          },
+        ],
+        transports: [],
+      })[0];
+    expect(evaluate(at(50))).toMatchObject({
+      kind: 'PROTECTED_TIME_AT_RISK',
+      severity: 'EXECUTABLE_RISK',
+    });
+    expect(evaluate(at(70))).toMatchObject({
+      kind: 'PROTECTED_TIME_INFEASIBLE',
+      severity: 'INFEASIBLE',
+    });
+  });
+
   it('treats a system suggestion breach as executable rather than infeasible', () => {
     const [risk] = evaluateExecutionRisks(
       input({

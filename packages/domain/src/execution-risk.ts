@@ -88,6 +88,7 @@ interface ProtectedTarget {
   readonly transportEdgeId: string | null;
   readonly instant: Date;
   readonly pointKind: ExecutionRiskPointKind;
+  readonly pointOperator: 'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER' | null;
   readonly evidenceRefs: readonly string[];
 }
 
@@ -152,6 +153,7 @@ function protectedTargets(
       transportEdgeId: edge.id,
       instant: departure.instant,
       pointKind: 'DEPARTURE',
+      pointOperator: null,
       evidenceRefs: [`temporal:${departure.id}`, `transport:${edge.id}`],
     });
   }
@@ -159,17 +161,28 @@ function protectedTargets(
   for (const node of nodes) {
     const index = nodeIndex.get(node.id)!;
     for (const pointKind of ['ARRIVAL', 'DEPARTURE'] as const) {
+      const current = selectValue(node.timeValues, pointKind, [
+        'ACTUAL',
+        'ESTIMATED',
+      ]);
       const protectedIntents = node.intents
         .filter(
           (intent) =>
             intent.kind === 'POINT_TIME' &&
             intent.pointKind === pointKind &&
             intent.instant !== null &&
-            (intent.operator === 'EXACT' || intent.operator === 'NOT_AFTER'),
+            (intent.operator === 'EXACT' ||
+              intent.operator === 'NOT_AFTER' ||
+              (intent.locked && intent.operator === 'NOT_BEFORE')),
         )
         .sort(
           (left, right) =>
-            left.instant!.getTime() - right.instant!.getTime() ||
+            Number(pointIntentViolated(right, current)) -
+              Number(pointIntentViolated(left, current)) ||
+            pointOperatorRank(left.operator) -
+              pointOperatorRank(right.operator) ||
+            (left.operator === 'NOT_BEFORE' ? -1 : 1) *
+              (left.instant!.getTime() - right.instant!.getTime()) ||
             compareText(left.id, right.id),
         );
       const strongest = protectedIntents[0];
@@ -181,6 +194,8 @@ function protectedTargets(
         transportEdgeId: null,
         instant: strongest.instant,
         pointKind,
+        pointOperator: strongest.operator as
+          'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER',
         evidenceRefs: protectedIntents.map((intent) => `intent:${intent.id}`),
       });
     }
@@ -238,11 +253,24 @@ function evaluateTarget(
     if (current === null) {
       return unknownRisk(target, null, null);
     }
-    if (current.instant.getTime() <= target.instant.getTime()) return null;
+    const currentMilliseconds = current.instant.getTime();
+    const targetMilliseconds = target.instant.getTime();
+    const violated =
+      target.pointOperator === 'EXACT'
+        ? currentMilliseconds !== targetMilliseconds
+        : target.pointOperator === 'NOT_BEFORE'
+          ? currentMilliseconds < targetMilliseconds
+          : currentMilliseconds > targetMilliseconds;
+    if (!violated) return null;
+    const executable =
+      current.layer !== 'ACTUAL' &&
+      (target.pointOperator === 'NOT_BEFORE' ||
+        (target.pointOperator === 'EXACT' &&
+          currentMilliseconds < targetMilliseconds));
     return {
       fingerprintParts: protectedTargetFingerprint(target),
-      kind: 'PROTECTED_TIME_INFEASIBLE',
-      severity: 'INFEASIBLE',
+      kind: executable ? 'PROTECTED_TIME_AT_RISK' : 'PROTECTED_TIME_INFEASIBLE',
+      severity: executable ? 'EXECUTABLE_RISK' : 'INFEASIBLE',
       sourceNodeId: target.nodeId,
       sourceTransportEdgeId: null,
       protectedNodeId: target.nodeId,
@@ -251,8 +279,10 @@ function evaluateTarget(
         ...target.evidenceRefs,
         `temporal:${current.id}`,
       ]),
-      explanation: '当前可靠时间已经晚于受保护的用户时间要求。',
-      requiresRouteReevaluation: true,
+      explanation: executable
+        ? '当前预计时间偏离已锁定的用户时间要求，但仍可由用户决定如何处理。'
+        : '当前可靠时间已经无法满足受保护的用户时间要求。',
+      requiresRouteReevaluation: !executable,
     };
   }
 
@@ -369,6 +399,38 @@ function protectedTargetFingerprint(
   target: ProtectedTarget,
 ): readonly string[] {
   return ['protected-target', targetKey(target)];
+}
+
+function pointIntentViolated(
+  intent: ExecutionRiskIntent,
+  current: ExecutionRiskTemporalValue | null,
+): boolean {
+  if (intent.instant === null || current === null) return false;
+  const currentMilliseconds = current.instant.getTime();
+  const intentMilliseconds = intent.instant.getTime();
+  switch (intent.operator) {
+    case 'EXACT':
+      return currentMilliseconds !== intentMilliseconds;
+    case 'NOT_BEFORE':
+      return currentMilliseconds < intentMilliseconds;
+    case 'NOT_AFTER':
+      return currentMilliseconds > intentMilliseconds;
+    case 'MINIMUM':
+      return false;
+  }
+}
+
+function pointOperatorRank(operator: ExecutionRiskIntent['operator']): number {
+  switch (operator) {
+    case 'EXACT':
+      return 0;
+    case 'NOT_AFTER':
+      return 1;
+    case 'NOT_BEFORE':
+      return 2;
+    case 'MINIMUM':
+      return 3;
+  }
 }
 
 function evaluateBufferEvidence(

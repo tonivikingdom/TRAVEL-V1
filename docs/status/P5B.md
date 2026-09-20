@@ -1,8 +1,8 @@
 # P5B Internal Acceptance & Environment Guardrails
 
-- 当前状态：Draft PR #17 已创建，保持 Draft，不合并
-- 正式基线 main：`cbf9fe2a727011e4708585ef259c3324c05b4362`
-- 基线 main CI：Run `35435976817`，`verify` 与 `Compose verification` 均为 success
+- 当前状态：已通过 PR #17 Squash Merge 到 main，P5B completed
+- 正式基线 main：`49a76517ef7917678c8d2133977435a1854edd07`
+- main CI：Run `35439640209`，`verify`、`Compose verification` 与 `P5B acceptance` 均为 success
 - 模型建议：Sol / High；备选 Terra / High
 - 实际使用模型与强度：未知（仓库无法确认客户端配置）
 

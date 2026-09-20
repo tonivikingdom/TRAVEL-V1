@@ -1,6 +1,8 @@
 import {
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
+  compareCanonicalDwellAdjustments,
+  compareCanonicalText,
   type AdoptRoutePreviewResult,
   type OperationReceiptRecord,
   type StoredRoutePreviewPayload,
@@ -8,7 +10,7 @@ import {
 import type {
   RouteAdoptDayOccurrenceSnapshot,
   RouteAdoptDayProjectionSnapshot,
-  RouteAdoptDeltaV2,
+  RouteAdoptDeltaV3,
   RouteAdoptGeneratedNodeSnapshot,
   RouteAdoptNodePlacementSnapshot,
   RoutePreviewGeneratedNodePlanView,
@@ -36,12 +38,18 @@ interface AdoptionInput {
   readonly baseTripVersion: number;
   readonly idempotencyKey: string;
   readonly requestHash: string;
+  readonly acceptedUserAdjustments: readonly {
+    readonly intentId: string;
+    readonly nodeId: string;
+    readonly fromDurationSeconds: number;
+    readonly toDurationSeconds: number;
+  }[];
   readonly now: Date;
   readonly undoExpiresAt: Date;
 }
 
 interface ReceiptDelta {
-  schemaVersion: 'route-adopt-delta-v2';
+  schemaVersion: 'route-adopt-delta-v3';
   createdNodeIds: string[];
   reusedNodeIds: string[];
   removedGeneratedNodes: RouteAdoptGeneratedNodeSnapshot[];
@@ -61,6 +69,13 @@ interface ReceiptDelta {
   previousActiveAdoptedRouteId: string | null;
   createdPlaceIds: string[];
   createdDayOccurrenceIds: string[];
+  userDwellAdjustments: {
+    intentId: string;
+    nodeId: string;
+    beforeDurationSeconds: number;
+    afterDurationSeconds: number;
+    beforeLocked: boolean;
+  }[];
 }
 
 export async function adoptRoutePreview(
@@ -131,7 +146,7 @@ async function executeAdoption(
   });
   if (preview === null) return { status: 'NOT_FOUND' };
   if (
-    preview.policyVersion !== 'route-adoption-preview-v2' ||
+    preview.policyVersion !== 'route-adoption-preview-v3' ||
     preview.expiresAt <= input.now ||
     preview.candidateSnapshot.expiresAt <= input.now ||
     (preview.candidateSnapshot.providerValidUntil !== null &&
@@ -147,7 +162,7 @@ async function executeAdoption(
   if (
     preview.previewHash === null ||
     hashRoutePreviewPayload(payload) !== preview.previewHash ||
-    payload.policyVersion !== 'route-adoption-preview-v2' ||
+    payload.policyVersion !== 'route-adoption-preview-v3' ||
     payload.tripId !== input.tripId ||
     payload.basisVersion !== input.baseTripVersion ||
     payload.candidateSnapshotId !== preview.candidateSnapshotId ||
@@ -166,7 +181,7 @@ async function executeAdoption(
     return { status: 'PREVIEW_STALE' };
   }
 
-  const plan = requireV2Plan(payload);
+  const plan = requireCurrentPlan(payload);
   if (plan.protectedBlockingNodes.length > 0) {
     return { status: 'PREVIEW_BLOCKED' };
   }
@@ -222,6 +237,44 @@ async function executeAdoption(
     )
   ) {
     return { status: 'PREVIEW_BLOCKED' };
+  }
+
+  if (
+    !sameAdjustments(
+      plan.requiredUserAdjustments,
+      input.acceptedUserAdjustments,
+    )
+  ) {
+    return { status: 'USER_ADJUSTMENT_REQUIRED' };
+  }
+  const adjustmentRows = await transaction.userTimeIntent.findMany({
+    where: {
+      id: { in: plan.requiredUserAdjustments.map((item) => item.intentId) },
+      tripId: input.tripId,
+      kind: 'MIN_DWELL',
+      operator: 'MINIMUM',
+    },
+    select: {
+      id: true,
+      nodeId: true,
+      durationSeconds: true,
+      locked: true,
+    },
+  });
+  adjustmentRows.sort((left, right) => compareCanonicalText(left.id, right.id));
+  if (
+    adjustmentRows.length !== plan.requiredUserAdjustments.length ||
+    adjustmentRows.some((row, index) => {
+      const expected = plan.requiredUserAdjustments[index];
+      return (
+        expected === undefined ||
+        row.id !== expected.intentId ||
+        row.nodeId !== expected.nodeId ||
+        row.durationSeconds !== expected.fromDurationSeconds
+      );
+    })
+  ) {
+    return { status: 'PREVIEW_STALE' };
   }
   if (
     beforeGeneratedRows.some((node) =>
@@ -319,7 +372,7 @@ async function executeAdoption(
   });
 
   const delta: ReceiptDelta = {
-    schemaVersion: 'route-adopt-delta-v2',
+    schemaVersion: 'route-adopt-delta-v3',
     createdNodeIds: [],
     reusedNodeIds: [],
     removedGeneratedNodes: beforeGeneratedNodes.filter((node) =>
@@ -363,7 +416,22 @@ async function executeAdoption(
     previousActiveAdoptedRouteId: plan.currentAdoptedRouteId,
     createdPlaceIds: [],
     createdDayOccurrenceIds: [],
+    userDwellAdjustments: adjustmentRows.map((row, index) => ({
+      intentId: row.id,
+      nodeId: row.nodeId,
+      beforeDurationSeconds: row.durationSeconds!,
+      afterDurationSeconds:
+        plan.requiredUserAdjustments[index]!.toDurationSeconds,
+      beforeLocked: row.locked,
+    })),
   };
+
+  for (const adjustment of delta.userDwellAdjustments) {
+    await transaction.userTimeIntent.update({
+      where: { id: adjustment.intentId },
+      data: { durationSeconds: adjustment.afterDurationSeconds },
+    });
+  }
 
   for (const edge of oldEdges) {
     const history = await transaction.transportEdgeHistory.create({
@@ -512,7 +580,7 @@ async function executeAdoption(
     plan.anchorToNodeId,
   ];
   delta.affectedDayOccurrenceIds = [...new Set(delta.affectedDayOccurrenceIds)];
-  const completeDelta: RouteAdoptDeltaV2 = delta;
+  const completeDelta: RouteAdoptDeltaV3 = delta;
   const finalReceipt = await transaction.operationReceipt.update({
     where: { id: receipt.id },
     data: { delta: completeDelta as unknown as Prisma.InputJsonValue },
@@ -540,7 +608,7 @@ async function executeAdoption(
   };
 }
 
-function requireV2Plan(payload: StoredRoutePreviewPayload) {
+function requireCurrentPlan(payload: StoredRoutePreviewPayload) {
   const summary = payload.changeSummary;
   if (
     summary.routeCorridor === undefined ||
@@ -565,13 +633,16 @@ function requireV2Plan(payload: StoredRoutePreviewPayload) {
       (left, right) => refIndex(left.ref) - refIndex(right.ref),
     ),
     segments: [...summary.proposedSegments],
+    requiredUserAdjustments: [...(summary.requiredUserAdjustments ?? [])].sort(
+      compareCanonicalDwellAdjustments,
+    ),
   };
 }
 
 async function validateCurrentCorridor(
   transaction: Transaction,
   tripId: string,
-  plan: ReturnType<typeof requireV2Plan>,
+  plan: ReturnType<typeof requireCurrentPlan>,
 ): Promise<{ readonly nodeIds: string[] } | null> {
   const nodes = await transaction.itineraryNode.findMany({
     where: { tripId },
@@ -674,6 +745,36 @@ async function validateCurrentCorridor(
     return null;
   }
   return { nodeIds: corridor.map((node) => node.id) };
+}
+
+function sameAdjustments(
+  expected: readonly {
+    readonly intentId: string;
+    readonly nodeId: string;
+    readonly fromDurationSeconds: number;
+    readonly toDurationSeconds: number;
+  }[],
+  actual: readonly {
+    readonly intentId: string;
+    readonly nodeId: string;
+    readonly fromDurationSeconds: number;
+    readonly toDurationSeconds: number;
+  }[],
+): boolean {
+  const normalizedActual = [...actual].sort(compareCanonicalDwellAdjustments);
+  return (
+    expected.length === normalizedActual.length &&
+    expected.every((value, index) => {
+      const candidate = normalizedActual[index];
+      return (
+        candidate !== undefined &&
+        candidate.intentId === value.intentId &&
+        candidate.nodeId === value.nodeId &&
+        candidate.fromDurationSeconds === value.fromDurationSeconds &&
+        candidate.toDurationSeconds === value.toDurationSeconds
+      );
+    })
+  );
 }
 
 async function resolveGeneratedNodes(

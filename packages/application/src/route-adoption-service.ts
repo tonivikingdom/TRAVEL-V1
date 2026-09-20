@@ -5,6 +5,7 @@ import type {
 } from '@travel/contracts';
 
 import { authorize, type Actor } from './authorization.js';
+import { compareCanonicalDwellAdjustments } from './canonical-order.js';
 import { ApplicationError } from './errors.js';
 import {
   systemClock,
@@ -41,6 +42,9 @@ export class RouteAdoptionService {
       'baseTripVersion',
     );
     const idempotencyKey = boundedKey(input.idempotencyKey);
+    const acceptedUserAdjustments = normalizeAdjustments(
+      input.acceptedUserAdjustments,
+    );
     authorize(actor, 'WRITE_PRIVATE_RESOURCE', {
       kind: 'PRIVATE_RESOURCE',
       ownerUserId: actor.userId,
@@ -64,7 +68,9 @@ export class RouteAdoptionService {
         tripId,
         previewId,
         baseTripVersion,
+        acceptedUserAdjustments,
       }),
+      acceptedUserAdjustments,
       now,
       undoExpiresAt: new Date(now.getTime() + this.undoWindowSeconds * 1_000),
     });
@@ -103,6 +109,7 @@ function adoptionError(
     | 'IDEMPOTENCY_CONFLICT'
     | 'PREVIEW_STALE'
     | 'PREVIEW_BLOCKED'
+    | 'USER_ADJUSTMENT_REQUIRED'
     | 'FACT_PROTECTED'
     | 'DATE_OWNED',
 ): ApplicationError {
@@ -133,6 +140,12 @@ function adoptionError(
         '路线预览包含不能自动移除的受保护节点。',
         409,
       );
+    case 'USER_ADJUSTMENT_REQUIRED':
+      return new ApplicationError(
+        'USER_ADJUSTMENT_REQUIRED',
+        '采用该路线需要明确确认并同步修改用户最低停留时间。',
+        409,
+      );
     case 'FACT_PROTECTED':
       return new ApplicationError(
         'FACT_PROTECTED',
@@ -142,6 +155,44 @@ function adoptionError(
     case 'DATE_OWNED':
       return new ApplicationError('DATE_OWNED', '日期已属于另一趟行程。', 409);
   }
+}
+
+function normalizeAdjustments(
+  values: AdoptRoutePreviewRequest['acceptedUserAdjustments'],
+) {
+  if (values === undefined) return [];
+  const seen = new Set<string>();
+  return values
+    .map((value) => {
+      requireUuid(value.intentId, 'acceptedUserAdjustments.intentId');
+      requireUuid(value.nodeId, 'acceptedUserAdjustments.nodeId');
+      const fromDurationSeconds = positiveInteger(
+        value.fromDurationSeconds,
+        'acceptedUserAdjustments.fromDurationSeconds',
+      );
+      const toDurationSeconds = positiveInteger(
+        value.toDurationSeconds,
+        'acceptedUserAdjustments.toDurationSeconds',
+      );
+      if (
+        toDurationSeconds >= fromDurationSeconds ||
+        seen.has(value.intentId)
+      ) {
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '用户停留时间调整无效。',
+          400,
+        );
+      }
+      seen.add(value.intentId);
+      return {
+        intentId: value.intentId,
+        nodeId: value.nodeId,
+        fromDurationSeconds,
+        toDurationSeconds,
+      };
+    })
+    .sort(compareCanonicalDwellAdjustments);
 }
 
 function boundedKey(value: string): string {

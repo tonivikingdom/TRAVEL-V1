@@ -15,6 +15,7 @@ const migrationsPath = fileURLToPath(
 );
 const p4b2Migration = '20260920110000_p4b2_route_adoption';
 const p4b3Migration = '20260920150000_p4b3_route_undo';
+const p5cMigration = '20260921100000_p5c_planning_policy';
 
 describe('P4B3 route Undo migration', () => {
   it('applies every migration to a clean database', async () => {
@@ -88,6 +89,75 @@ describe('P4B3 route Undo migration', () => {
         'targetOperationReceiptId',
         'undoExpiresAt',
       ]);
+    });
+  });
+
+  it('migrates a populated P5B database without changing official facts', async () => {
+    await withDatabase('p5c_populated', async (target) => {
+      await applyMigrations(target, p5cMigration);
+      await seedP4b2Data(target);
+      await seedP5bExtendedData(target);
+      const before = await officialCounts(target);
+
+      await applyMigration(target, p5cMigration);
+
+      expect(await officialCounts(target)).toEqual(before);
+      expect(before).toMatchObject({
+        intents: '1',
+        temporalValues: '4',
+        transportHistory: '1',
+        ownership: '1',
+      });
+      expect(
+        (
+          await target.query<{ count: string }>(
+            'SELECT COUNT(*)::text AS count FROM "SystemDwellSuggestion"',
+          )
+        ).rows[0]?.count,
+      ).toBe('0');
+      const preserved = await target.query<{
+        version: number;
+        durationSeconds: number;
+        actualInstant: Date;
+      }>(`
+        SELECT t."version", i."durationSeconds",
+          v."instant" AS "actualInstant"
+        FROM "Trip" t
+        JOIN "UserTimeIntent" i ON i."tripId" = t."id"
+        JOIN "TemporalValue" v ON v."nodeId" = i."nodeId"
+          AND v."layer" = 'ACTUAL' AND v."pointKind" = 'ARRIVAL'
+        WHERE t."id" = '10000000-0000-4000-8000-000000000001'
+      `);
+      expect(preserved.rows[0]).toMatchObject({
+        version: 4,
+        durationSeconds: 2_400,
+        actualInstant: new Date('2030-01-01T00:30:00.000Z'),
+      });
+      const table = await target.query<{ source: string; duration: number }>(`
+        INSERT INTO "SystemDwellSuggestion"
+          ("id", "tripId", "nodeId", "durationSeconds", "updatedAt")
+        VALUES
+          ('99000000-0000-4000-8000-000000000001',
+           '10000000-0000-4000-8000-000000000001',
+           '30000000-0000-4000-8000-000000000001', 3600,
+           CURRENT_TIMESTAMP)
+        RETURNING "source"::text AS source, "durationSeconds" AS duration
+      `);
+      expect(table.rows[0]).toEqual({
+        source: 'SYSTEM_SUGGESTION',
+        duration: 3600,
+      });
+      await expect(
+        target.query(`
+          INSERT INTO "SystemDwellSuggestion"
+            ("id", "tripId", "nodeId", "durationSeconds", "updatedAt")
+          VALUES
+            ('99000000-0000-4000-8000-000000000002',
+             '10000000-0000-4000-8000-000000000001',
+             '30000000-0000-4000-8000-000000000002', 0,
+             CURRENT_TIMESTAMP)
+        `),
+      ).rejects.toThrow();
     });
   });
 });
@@ -169,7 +239,10 @@ async function officialCounts(client: Client) {
       (SELECT COUNT(*)::text FROM "DayOccurrence") AS occurrences,
       (SELECT COUNT(*)::text FROM "ItineraryNode") AS nodes,
       (SELECT COUNT(*)::text FROM "TransportEdge") AS transports,
-      (SELECT COUNT(*)::text FROM "TemporalValue") AS temporal_values,
+      (SELECT COUNT(*)::text FROM "TemporalValue") AS "temporalValues",
+      (SELECT COUNT(*)::text FROM "UserTimeIntent") AS intents,
+      (SELECT COUNT(*)::text FROM "TransportEdgeHistory") AS "transportHistory",
+      (SELECT COUNT(*)::text FROM "DateOwnership") AS ownership,
       (SELECT COUNT(*)::text FROM "RouteCandidateSnapshot") AS snapshots,
       (SELECT COUNT(*)::text FROM "RoutePreview") AS previews,
       (SELECT COUNT(*)::text FROM "AdoptedRoute") AS adopted_routes,
@@ -177,6 +250,46 @@ async function officialCounts(client: Client) {
       (SELECT COUNT(*)::text FROM "OutboxEvent") AS outbox
   `);
   return result.rows[0];
+}
+
+async function seedP5bExtendedData(client: Client): Promise<void> {
+  await client.query(`
+    INSERT INTO "UserTimeIntent"
+      ("id", "tripId", "nodeId", "kind", "operator",
+       "durationSeconds", "locked", "updatedAt")
+    VALUES ('56000000-0000-4000-8000-000000000001',
+            '10000000-0000-4000-8000-000000000001',
+            '30000000-0000-4000-8000-000000000001',
+            'MIN_DWELL', 'MINIMUM', 2400, FALSE, CURRENT_TIMESTAMP);
+
+    INSERT INTO "TemporalValue"
+      ("id", "nodeId", "layer", "pointKind", "instant", "timeZone",
+       "sourceKind", "observedAt", "updatedAt")
+    VALUES
+      ('55000000-0000-4000-8000-000000000002',
+       '30000000-0000-4000-8000-000000000001', 'PLANNED', 'ARRIVAL',
+       '2030-01-01T00:20:00Z', 'UTC', 'USER_VALUE', NULL, CURRENT_TIMESTAMP),
+      ('55000000-0000-4000-8000-000000000003',
+       '30000000-0000-4000-8000-000000000001', 'ESTIMATED', 'ARRIVAL',
+       '2030-01-01T00:25:00Z', 'UTC', 'PROVIDER_OBSERVATION',
+       '2030-01-01T00:10:00Z', CURRENT_TIMESTAMP),
+      ('55000000-0000-4000-8000-000000000004',
+       '30000000-0000-4000-8000-000000000001', 'ACTUAL', 'ARRIVAL',
+       '2030-01-01T00:30:00Z', 'UTC', 'PROVIDER_OBSERVATION',
+       '2030-01-01T00:30:00Z', CURRENT_TIMESTAMP);
+
+    INSERT INTO "TransportEdgeHistory"
+      ("id", "originalTransportEdgeId", "tripId", "originalFromNodeId",
+       "originalToNodeId", "mode", "fixedService", "source",
+       "originalCreatedAt", "invalidatedAt", "invalidationReason")
+    VALUES ('57000000-0000-4000-8000-000000000001',
+            '57000000-0000-4000-8000-000000000002',
+            '10000000-0000-4000-8000-000000000001',
+            '30000000-0000-4000-8000-000000000001',
+            '30000000-0000-4000-8000-000000000002',
+            'TAXI', FALSE, 'MANUAL', '2029-12-31T23:00:00Z',
+            '2030-01-01T00:00:00Z', 'USER_REPLACED');
+  `);
 }
 
 async function seedP4b2Data(client: Client): Promise<void> {

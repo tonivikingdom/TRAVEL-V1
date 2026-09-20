@@ -26,6 +26,8 @@ const transportId = '00000000-0000-4000-8000-000000000008';
 const intentId = '00000000-0000-4000-8000-000000000009';
 const adoptedRouteId = '00000000-0000-4000-8000-000000000010';
 const staleRouteId = '00000000-0000-4000-8000-000000000011';
+const downstreamNodeId = '00000000-0000-4000-8000-000000000014';
+const finalNodeId = '00000000-0000-4000-8000-000000000015';
 const now = new Date('2030-01-01T00:00:00.000Z');
 
 const actor: Actor = {
@@ -82,7 +84,7 @@ describe('RoutePreviewService', () => {
       previewId,
       candidateSnapshotId: snapshotId,
       candidateHash: snapshot.candidateHash,
-      policyVersion: 'route-adoption-preview-v2',
+      policyVersion: 'route-adoption-preview-v3',
       adoptable: true,
       status: 'ACTIVE',
       currentConnection: { state: 'MISSING', transport: null },
@@ -100,6 +102,144 @@ describe('RoutePreviewService', () => {
     expect(tripRepository.executeCommand).not.toHaveBeenCalled();
     expect(tripRepository.setTemporalValue).not.toHaveBeenCalled();
     expect(trip.version).toBe(3);
+  });
+
+  it('projects the nearest downstream departure from a soft system suggestion when no anchor exists', async () => {
+    trip = withDownstreamDwell({ suggestionSeconds: 3_600 });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      nodeId: toNodeId,
+      arrival: '2030-01-01T02:00:00.000Z',
+      departure: '2030-01-01T03:00:00.000Z',
+      projectedDwellSeconds: 3_600,
+      systemSuggestedDwellSeconds: 3_600,
+      status: 'NORMAL',
+    });
+  });
+
+  it('reports system suggestion compression as a soft deviation', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      plannedDeparture: '2030-01-01T02:45:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 2_700,
+      status: 'SOFT_DEVIATION',
+      requiredUserAdjustments: [],
+    });
+  });
+
+  it('reports a structured user minimum adjustment', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      minimumSeconds: 3_000,
+      plannedDeparture: '2030-01-01T02:45:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 2_700,
+      status: 'USER_REQUIREMENT_VIOLATION',
+      requiredUserAdjustments: [
+        {
+          intentId,
+          nodeId: toNodeId,
+          fromDurationSeconds: 3_000,
+          toDurationSeconds: 2_700,
+        },
+      ],
+    });
+  });
+
+  it('marks arrival after the nearest downstream departure as infeasible', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      plannedDeparture: '2030-01-01T01:55:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(false);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: -300,
+      status: 'INFEASIBLE',
+    });
+  });
+
+  it('marks zero dwell against a positive requirement as infeasible', async () => {
+    trip = withDownstreamDwell({
+      minimumSeconds: 600,
+      plannedDeparture: '2030-01-01T02:00:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.adoptable).toBe(false);
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 0,
+      status: 'INFEASIBLE',
+      requiredUserAdjustments: [],
+    });
+  });
+
+  it('does not warn when projected dwell exceeds suggestion and user minimum', async () => {
+    trip = withDownstreamDwell({
+      suggestionSeconds: 3_600,
+      minimumSeconds: 3_000,
+      plannedDeparture: '2030-01-01T03:30:00.000Z',
+    });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      projectedDwellSeconds: 5_400,
+      status: 'NORMAL',
+      requiredUserAdjustments: [],
+    });
+  });
+
+  it('uses a selected non-fixed Transport planned departure as the current-plan anchor', async () => {
+    trip = withSelectedTransportAnchor({ atImmediateNode: true });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      nodeId: toNodeId,
+      arrival: '2030-01-01T02:00:00.000Z',
+      departure: '2030-01-01T03:20:00.000Z',
+      projectedDwellSeconds: 4_800,
+      status: 'NORMAL',
+    });
+  });
+
+  it('finds the first time-relevant node beyond an unconstrained immediate destination', async () => {
+    trip = withSelectedTransportAnchor({ atImmediateNode: false });
+    vi.mocked(tripRepository.findOwnedById).mockResolvedValue(trip);
+
+    const preview = await service().createPreview(actor, tripId, request());
+
+    expect(preview.changeSummary.downstreamImpact).toMatchObject({
+      nodeId: downstreamNodeId,
+      arrival: '2030-01-01T03:00:00.000Z',
+      departure: '2030-01-01T04:00:00.000Z',
+      projectedDwellSeconds: 3_600,
+      status: 'NORMAL',
+    });
   });
 
   it('identifies a directly adjacent ACTIVE adopted route from its current edge', async () => {
@@ -302,27 +442,30 @@ describe('RoutePreviewService', () => {
     expect(fetched).toMatchObject({ status: 'EXPIRED', adoptable: false });
   });
 
-  it('keeps a v1 preview readable but marks it SUPERSEDED_POLICY', async () => {
-    const active = await service().createPreview(actor, tripId, request());
-    const persisted = await vi.mocked(planningRepository.createPreview).mock
-      .results[0]!.value;
-    if (persisted.status !== 'SUCCESS') throw new Error('expected preview');
-    vi.mocked(planningRepository.findPreviewOwned).mockResolvedValue({
-      ...persisted.preview,
-      policyVersion: 'route-adoption-preview-v1',
-      previewPayload: {
-        ...persisted.preview.previewPayload,
-        policyVersion: 'route-adoption-preview-v1',
-      },
-    });
+  it.each(['route-adoption-preview-v1', 'route-adoption-preview-v2'])(
+    'keeps an old %s preview readable but marks it SUPERSEDED_POLICY',
+    async (policyVersion) => {
+      const active = await service().createPreview(actor, tripId, request());
+      const persisted = await vi.mocked(planningRepository.createPreview).mock
+        .results[0]!.value;
+      if (persisted.status !== 'SUCCESS') throw new Error('expected preview');
+      vi.mocked(planningRepository.findPreviewOwned).mockResolvedValue({
+        ...persisted.preview,
+        policyVersion,
+        previewPayload: {
+          ...persisted.preview.previewPayload,
+          policyVersion,
+        },
+      });
 
-    await expect(
-      service().getPreview(actor, tripId, active.previewId),
-    ).resolves.toMatchObject({
-      status: 'SUPERSEDED_POLICY',
-      adoptable: false,
-    });
-  });
+      await expect(
+        service().getPreview(actor, tripId, active.previewId),
+      ).resolves.toMatchObject({
+        status: 'SUPERSEDED_POLICY',
+        adoptable: false,
+      });
+    },
+  );
 
   it('collapses a structured same-hub walking transfer without creating a formal segment', async () => {
     const from = location('From', 35, 139, 'from');
@@ -688,6 +831,79 @@ function baseTrip(
   };
 }
 
+function withDownstreamDwell(input: {
+  readonly suggestionSeconds?: number;
+  readonly minimumSeconds?: number;
+  readonly plannedDeparture?: string;
+}): TripAggregateRecord {
+  const current = baseTrip();
+  const occurrence = current.dayOccurrences[0]!;
+  const from = occurrence.nodes[0]!;
+  const to = occurrence.nodes[1]!;
+  return {
+    ...current,
+    dayOccurrences: [
+      {
+        ...occurrence,
+        nodes: [
+          from,
+          {
+            ...to,
+            systemDwellSuggestion:
+              input.suggestionSeconds === undefined
+                ? null
+                : {
+                    id: '00000000-0000-4000-8000-000000000012',
+                    tripId,
+                    nodeId: toNodeId,
+                    durationSeconds: input.suggestionSeconds,
+                    source: 'SYSTEM_SUGGESTION',
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+            timeIntents:
+              input.minimumSeconds === undefined
+                ? []
+                : [
+                    {
+                      id: intentId,
+                      tripId,
+                      nodeId: toNodeId,
+                      kind: 'MIN_DWELL',
+                      pointKind: null,
+                      operator: 'MINIMUM',
+                      instant: null,
+                      timeZone: null,
+                      durationSeconds: input.minimumSeconds,
+                      locked: false,
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                  ],
+            timeValues:
+              input.plannedDeparture === undefined
+                ? []
+                : [
+                    {
+                      id: '00000000-0000-4000-8000-000000000013',
+                      layer: 'PLANNED',
+                      pointKind: 'DEPARTURE',
+                      instant: new Date(input.plannedDeparture),
+                      timeZone: 'UTC',
+                      sourceKind: 'USER_VALUE',
+                      sourceRef: null,
+                      observedAt: null,
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                  ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function singleLegAdoptedTrip(): TripAggregateRecord {
   const trip = baseTrip();
   return {
@@ -721,6 +937,93 @@ function singleLegAdoptedTrip(): TripAggregateRecord {
         candidateSnapshotId: snapshotId,
         candidateHash: 'a'.repeat(64),
         policyVersion: 'route-adoption-preview-v2',
+        status: 'ACTIVE',
+        createdAt: now,
+        replacedAt: null,
+        undoneAt: null,
+      },
+    ],
+  };
+}
+
+function withSelectedTransportAnchor(input: {
+  readonly atImmediateNode: boolean;
+}): TripAggregateRecord {
+  const trip = baseTrip();
+  const occurrence = trip.dayOccurrences[0]!;
+  const downstream = {
+    ...node(downstreamNodeId, 2, 'Downstream'),
+    timeValues: [
+      {
+        id: '00000000-0000-4000-8000-000000000016',
+        layer: 'PLANNED' as const,
+        pointKind: 'ARRIVAL' as const,
+        instant: new Date('2030-01-01T03:00:00.000Z'),
+        timeZone: 'UTC',
+        sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+        sourceRef: null,
+        observedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  };
+  const final = node(finalNodeId, 3, 'Final');
+  const anchorFrom = input.atImmediateNode ? toNodeId : downstreamNodeId;
+  const anchorTo = input.atImmediateNode ? downstreamNodeId : finalNodeId;
+  const departure = input.atImmediateNode
+    ? '2030-01-01T03:20:00.000Z'
+    : '2030-01-01T04:00:00.000Z';
+  return {
+    ...trip,
+    dayOccurrences: [
+      {
+        ...occurrence,
+        nodes: [...occurrence.nodes, downstream, final],
+      },
+    ],
+    transportEdges: [
+      {
+        id: '00000000-0000-4000-8000-000000000017',
+        tripId,
+        fromNodeId: anchorFrom,
+        toNodeId: anchorTo,
+        mode: 'TAXI',
+        fixedService: false,
+        serviceLabel: null,
+        note: null,
+        source: 'ADOPTED_ROUTE',
+        adoptedRouteId,
+        provider: 'SYNTHETIC',
+        providerRef: 'selected-non-fixed',
+        createdAt: now,
+        updatedAt: now,
+        timeValues: [
+          {
+            id: '00000000-0000-4000-8000-000000000018',
+            layer: 'PLANNED',
+            pointKind: 'DEPARTURE',
+            instant: new Date(departure),
+            timeZone: 'UTC',
+            sourceKind: 'ADOPTED_TRANSPORT_FACT',
+            sourceRef: 'selected-non-fixed',
+            observedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+    ],
+    adoptedRoutes: [
+      {
+        id: adoptedRouteId,
+        tripId,
+        anchorFromNodeId: anchorFrom,
+        anchorToNodeId: anchorTo,
+        sourcePreviewId: previewId,
+        candidateSnapshotId: snapshotId,
+        candidateHash: 'b'.repeat(64),
+        policyVersion: 'route-adoption-preview-v3',
         status: 'ACTIVE',
         createdAt: now,
         replacedAt: null,

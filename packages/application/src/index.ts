@@ -7,6 +7,11 @@ export {
 } from './authorization.js';
 export { ApplicationError, isApplicationError } from './errors.js';
 export {
+  compareCanonicalDwellAdjustments,
+  compareCanonicalText,
+  type CanonicalDwellAdjustment,
+} from './canonical-order.js';
+export {
   MagicLinkEmailHandler,
   type MagicLinkEmailHandlerConfig,
   type MagicLinkEmailHandlerOptions,

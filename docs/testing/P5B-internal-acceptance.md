@@ -23,6 +23,9 @@ Magic Link token、capture mail 或私有 payload。
 - Worker 停止后持久 Job 恢复，PostgreSQL outage 期间 live/ready 分离与数据恢复。
 - unconfigured Route Provider 只导致 Route Query 局部错误，不使整个 Trip API 不可用。
 - 每用户 10 轮轻量 `/me`、Trip、schedule evaluate 和 notifications 并发观察。
+- P5C 跨层回归：synthetic system dwell suggestion → 15 分钟 lookback Route Query →
+  `USER_REQUIREMENT_VIOLATION` adjustment → Adopt → MIN_DWELL 更新 → Undo 恢复，并验证 Adopt/Undo replay
+  幂等及跨 owner 隔离。Suggestion 由隔离验收栈建立为系统侧 synthetic fixture，不新增用户可写 API。
 
 ## Reset
 

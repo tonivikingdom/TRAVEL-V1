@@ -1,6 +1,7 @@
 import type {
   FlightActualConflictView,
   FlightBindingView,
+  FlightObservationDisposition,
   FlightSnapshotView,
 } from '@travel/contracts';
 
@@ -36,6 +37,8 @@ export type FlightRefreshRepositoryResult =
       readonly resultingTripVersion: number;
       readonly factsChanged: boolean;
       readonly actualConflicts: readonly FlightActualConflictView[];
+      readonly observationDisposition: FlightObservationDisposition;
+      readonly previousSnapshot: FlightSnapshotView;
     }
   | { readonly status: 'NOT_FOUND' | 'FLIGHT_MISMATCH' };
 

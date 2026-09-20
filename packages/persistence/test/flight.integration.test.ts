@@ -1,4 +1,9 @@
-import { ExecutionRiskService, type Actor } from '@travel/application';
+import {
+  ExecutionRiskService,
+  FlightService,
+  type Actor,
+  type FlightSnapshotProvider,
+} from '@travel/application';
 import type { FlightSnapshotView } from '@travel/contracts';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -88,7 +93,10 @@ describe('P5D2 flight facts with PostgreSQL', () => {
       flight: snapshot(),
     });
     expect(adopted.status).toBe('SUCCESS');
-    const delayed = snapshot({ status: 'DELAYED' });
+    const delayed = snapshot({
+      status: 'DELAYED',
+      fetchedAt: '2030-01-01T09:31:00.000Z',
+    });
     delayed.arrival = {
       ...delayed.arrival,
       revisedUtc: '2030-01-01T10:45:00.000Z',
@@ -105,6 +113,7 @@ describe('P5D2 flight facts with PostgreSQL', () => {
       status: 'SUCCESS',
       factsChanged: true,
       resultingTripVersion: 3,
+      observationDisposition: 'APPLIED',
     });
     const risks = await new ExecutionRiskService(
       new PrismaTripRepository(managed.client),
@@ -130,7 +139,7 @@ describe('P5D2 flight facts with PostgreSQL', () => {
       flight: snapshot(),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
-    const first = snapshot();
+    const first = snapshot({ fetchedAt: '2030-01-01T09:31:00.000Z' });
     first.arrival = {
       ...first.arrival,
       runwayUtc: '2030-01-01T10:42:00.000Z',
@@ -146,8 +155,9 @@ describe('P5D2 flight facts with PostgreSQL', () => {
       status: 'SUCCESS',
       factsChanged: true,
       actualConflicts: [],
+      observationDisposition: 'APPLIED',
     });
-    const second = snapshot();
+    const second = snapshot({ fetchedAt: '2030-01-01T09:32:00.000Z' });
     second.arrival = {
       ...second.arrival,
       runwayUtc: '2030-01-01T10:50:00.000Z',
@@ -162,6 +172,7 @@ describe('P5D2 flight facts with PostgreSQL', () => {
     expect(conflicted).toMatchObject({
       status: 'SUCCESS',
       factsChanged: false,
+      observationDisposition: 'APPLIED',
       actualConflicts: [
         {
           pointKind: 'ARRIVAL',
@@ -182,7 +193,7 @@ describe('P5D2 flight facts with PostgreSQL', () => {
       flight: snapshot(),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
-    const changed = snapshot();
+    const changed = snapshot({ fetchedAt: '2030-01-01T09:31:00.000Z' });
     changed.arrival = {
       ...changed.arrival,
       scheduledUtc: '2030-01-01T11:00:00.000Z',
@@ -204,6 +215,345 @@ describe('P5D2 flight facts with PostgreSQL', () => {
       },
     });
     expect(planned.instant.toISOString()).toBe('2030-01-01T10:30:00.000Z');
+  });
+
+  it('ignores stale metadata, ESTIMATED and runway observations without changing facts', async () => {
+    const repository = new PrismaFlightRepository(managed.client);
+    const adopted = await repository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot(),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    const newer = observedSnapshot({
+      candidateId: 'aerodatabox:newer-id',
+      fetchedAt: '2030-01-01T13:01:00.000Z',
+      revisedArrival: '2030-01-01T10:40:00.000Z',
+      status: 'DELAYED',
+      gate: 'G2',
+    });
+    expect(
+      await repository.refresh({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId: adopted.binding.id,
+        flight: newer,
+      }),
+    ).toMatchObject({
+      status: 'SUCCESS',
+      resultingTripVersion: 3,
+      factsChanged: true,
+      observationDisposition: 'APPLIED',
+    });
+
+    const stale = observedSnapshot({
+      candidateId: 'aerodatabox:stale-id',
+      fetchedAt: '2030-01-01T13:00:00.000Z',
+      revisedArrival: '2030-01-01T10:20:00.000Z',
+      runwayArrival: '2030-01-01T10:25:00.000Z',
+      status: 'CANCELLED',
+      gate: 'G1',
+    });
+    const ignored = await repository.refresh({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      flightBindingId: adopted.binding.id,
+      flight: stale,
+    });
+
+    expect(ignored).toMatchObject({
+      status: 'SUCCESS',
+      resultingTripVersion: 3,
+      factsChanged: false,
+      actualConflicts: [],
+      observationDisposition: 'STALE_IGNORED',
+      binding: {
+        providerFlightRef: 'aerodatabox:newer-id',
+        status: 'DELAYED',
+        lastRefreshedAt: '2030-01-01T13:01:00.000Z',
+        latestSnapshot: {
+          fetchedAt: '2030-01-01T13:01:00.000Z',
+          arrival: { revisedUtc: '2030-01-01T10:40:00.000Z', gate: 'G2' },
+        },
+      },
+    });
+    expect(
+      await managed.client.temporalValue.findUniqueOrThrow({
+        where: {
+          transportEdgeId_pointKind_layer: {
+            transportEdgeId: fixture.flightEdgeId,
+            pointKind: 'ARRIVAL',
+            layer: 'ESTIMATED',
+          },
+        },
+      }),
+    ).toMatchObject({ instant: new Date('2030-01-01T10:40:00.000Z') });
+    expect(
+      await managed.client.temporalValue.count({
+        where: { transportEdgeId: fixture.flightEdgeId, layer: 'ACTUAL' },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.transportEdge.findUniqueOrThrow({
+        where: { id: fixture.flightEdgeId },
+        select: { providerRef: true },
+      }),
+    ).toEqual({ providerRef: 'aerodatabox:newer-id' });
+    expect(
+      await managed.client.trip.findUniqueOrThrow({
+        where: { id: fixture.tripId },
+        select: { version: true },
+      }),
+    ).toEqual({ version: 3 });
+  });
+
+  it('handles equal fetchedAt deterministically as idempotent or stale', async () => {
+    const repository = new PrismaFlightRepository(managed.client);
+    const accepted = observedSnapshot({
+      fetchedAt: '2030-01-01T13:01:00.000Z',
+      revisedArrival: '2030-01-01T10:40:00.000Z',
+      gate: 'G2',
+    });
+    const adopted = await repository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot(),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await repository.refresh({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      flightBindingId: adopted.binding.id,
+      flight: accepted,
+    });
+
+    expect(
+      await repository.refresh({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId: adopted.binding.id,
+        flight: accepted,
+      }),
+    ).toMatchObject({
+      status: 'SUCCESS',
+      resultingTripVersion: 3,
+      factsChanged: false,
+      observationDisposition: 'IDEMPOTENT',
+    });
+    const ambiguous = {
+      ...accepted,
+      arrival: { ...accepted.arrival, gate: 'G3' },
+    };
+    expect(
+      await repository.refresh({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId: adopted.binding.id,
+        flight: ambiguous,
+      }),
+    ).toMatchObject({
+      status: 'SUCCESS',
+      resultingTripVersion: 3,
+      factsChanged: false,
+      observationDisposition: 'STALE_IGNORED',
+      binding: { latestSnapshot: { arrival: { gate: 'G2' } } },
+    });
+  });
+
+  it('accepts a newer metadata-only snapshot without bumping Trip version', async () => {
+    const repository = new PrismaFlightRepository(managed.client);
+    const adopted = await repository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot(),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    const metadataOnly = snapshot({
+      fetchedAt: '2030-01-01T13:02:00.000Z',
+      status: 'BOARDING',
+    });
+    metadataOnly.departure = { ...metadataOnly.departure, gate: 'G4' };
+
+    expect(
+      await repository.refresh({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId: adopted.binding.id,
+        flight: metadataOnly,
+      }),
+    ).toMatchObject({
+      status: 'SUCCESS',
+      resultingTripVersion: 2,
+      factsChanged: false,
+      observationDisposition: 'APPLIED',
+      binding: {
+        status: 'BOARDING',
+        lastRefreshedAt: '2030-01-01T13:02:00.000Z',
+        latestSnapshot: { departure: { gate: 'G4' } },
+      },
+    });
+  });
+
+  it('keeps the newer observation and risk evidence when concurrent refreshes complete out of order', async () => {
+    const repository = new PrismaFlightRepository(managed.client);
+    const adopted = await repository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot(),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    const oldObservation = observedSnapshot({
+      fetchedAt: '2030-01-01T13:00:00.000Z',
+      revisedArrival: '2030-01-01T10:20:00.000Z',
+    });
+    const newObservation = observedSnapshot({
+      fetchedAt: '2030-01-01T13:01:00.000Z',
+      revisedArrival: '2030-01-01T10:40:00.000Z',
+    });
+    const oldStarted = deferred<void>();
+    const oldResponse = deferred<readonly FlightSnapshotView[]>();
+    let refreshCalls = 0;
+    const provider: FlightSnapshotProvider = {
+      search: async () => [],
+      refresh: async () => {
+        refreshCalls += 1;
+        if (refreshCalls === 1) {
+          oldStarted.resolve();
+          return oldResponse.promise;
+        }
+        return [newObservation];
+      },
+    };
+    const riskService = new ExecutionRiskService(
+      new PrismaTripRepository(managed.client),
+      new PrismaExecutionRiskRepository(managed.client),
+      { now: () => new Date('2030-01-01T13:02:00Z') },
+    );
+    const service = new FlightService(provider, repository, riskService);
+
+    const oldRequest = service.refresh(
+      actor,
+      fixture.tripId,
+      adopted.binding.id,
+    );
+    await oldStarted.promise;
+    const newResult = await service.refresh(
+      actor,
+      fixture.tripId,
+      adopted.binding.id,
+    );
+    oldResponse.resolve([oldObservation]);
+    const oldResult = await oldRequest;
+
+    expect(newResult.observationDisposition).toBe('APPLIED');
+    expect(oldResult).toMatchObject({
+      observationDisposition: 'STALE_IGNORED',
+      resultingTripVersion: 3,
+      changes: { changeTypes: [] },
+      riskEvaluation: { evaluationBasisTripVersion: 3 },
+    });
+    const finalBinding = await managed.client.flightBinding.findUniqueOrThrow({
+      where: { id: adopted.binding.id },
+    });
+    expect(finalBinding.lastRefreshedAt.toISOString()).toBe(
+      '2030-01-01T13:01:00.000Z',
+    );
+    expect(finalBinding.latestSnapshot).toMatchObject({
+      fetchedAt: '2030-01-01T13:01:00.000Z',
+      arrival: { revisedUtc: '2030-01-01T10:40:00.000Z' },
+    });
+    expect(
+      await managed.client.temporalValue.findUniqueOrThrow({
+        where: {
+          transportEdgeId_pointKind_layer: {
+            transportEdgeId: fixture.flightEdgeId,
+            pointKind: 'ARRIVAL',
+            layer: 'ESTIMATED',
+          },
+        },
+      }),
+    ).toMatchObject({ instant: new Date('2030-01-01T10:40:00.000Z') });
+    expect(
+      await managed.client.trip.findUniqueOrThrow({
+        where: { id: fixture.tripId },
+        select: { version: true },
+      }),
+    ).toEqual({ version: 3 });
+    expect(oldResult.riskEvaluation.risks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceTransportEdgeId: fixture.flightEdgeId,
+        }),
+      ]),
+    );
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { ownerUserId: fixture.ownerUserId },
+      }),
+    ).toBe(1);
+  });
+
+  it('rejects an old in-flight refresh after the edge is rebound to another flight', async () => {
+    const repository = new PrismaFlightRepository(managed.client);
+    const original = await repository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot(),
+    });
+    if (original.status !== 'SUCCESS') throw new Error('adopt failed');
+    const replacement = snapshot({
+      candidateId: 'aerodatabox:nh99',
+      canonicalFlightNumber: 'NH99',
+      displayFlightNumber: 'NH 99',
+      fetchedAt: '2030-01-01T12:00:00.000Z',
+    });
+    replacement.departure = movement('HND', '2030-01-01T12:00:00.000Z');
+    replacement.arrival = movement('CTS', '2030-01-01T13:30:00.000Z');
+    expect(
+      await repository.adopt({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        baseTripVersion: 2,
+        transportEdgeId: fixture.flightEdgeId,
+        flight: replacement,
+      }),
+    ).toMatchObject({ status: 'SUCCESS', resultingTripVersion: 3 });
+
+    expect(
+      await repository.refresh({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId: original.binding.id,
+        flight: observedSnapshot({
+          fetchedAt: '2030-01-01T13:01:00.000Z',
+          revisedArrival: '2030-01-01T10:40:00.000Z',
+        }),
+      }),
+    ).toEqual({ status: 'FLIGHT_MISMATCH' });
+    expect(
+      await managed.client.flightBinding.findUniqueOrThrow({
+        where: { id: original.binding.id },
+        select: {
+          providerFlightRef: true,
+          canonicalFlightNumber: true,
+          lastRefreshedAt: true,
+        },
+      }),
+    ).toEqual({
+      providerFlightRef: 'aerodatabox:nh99',
+      canonicalFlightNumber: 'NH99',
+      lastRefreshedAt: new Date('2030-01-01T12:00:00.000Z'),
+    });
   });
 
   it('hides a binding from another owner and rejects concurrent stale replacement', async () => {
@@ -391,6 +741,41 @@ function snapshot(
     fetchedAt: '2030-01-01T09:30:00.000Z',
     ...overrides,
   };
+}
+
+function observedSnapshot(input: {
+  readonly candidateId?: string;
+  readonly fetchedAt: string;
+  readonly revisedArrival: string;
+  readonly runwayArrival?: string;
+  readonly status?: FlightSnapshotView['status'];
+  readonly gate?: string;
+}): ReturnType<typeof snapshot> {
+  const result = snapshot({
+    candidateId: input.candidateId ?? 'aerodatabox:nh53',
+    fetchedAt: input.fetchedAt,
+    status: input.status ?? 'DELAYED',
+  });
+  result.arrival = {
+    ...result.arrival,
+    revisedUtc: input.revisedArrival,
+    revisedLocal: input.revisedArrival,
+    runwayUtc: input.runwayArrival ?? null,
+    runwayLocal: input.runwayArrival ?? null,
+    gate: input.gate ?? null,
+  };
+  return result;
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function movement(iata: string, scheduledUtc: string) {

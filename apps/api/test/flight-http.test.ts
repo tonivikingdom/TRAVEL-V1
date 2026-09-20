@@ -68,6 +68,7 @@ describe('P5D2 flight HTTP surface', () => {
       flightBinding: { id: bindingId },
       resultingTripVersion: 2,
       factsChanged: false,
+      observationDisposition: 'IDEMPOTENT',
       actualConflict: false,
       actualConflicts: [],
       changes: { changeTypes: [] },

@@ -7,6 +7,10 @@ export {
 } from './authorization.js';
 export { ApplicationError, isApplicationError } from './errors.js';
 export {
+  parseAbsoluteInstantInput,
+  validateIanaTimeZoneInput,
+} from './time-input.js';
+export {
   FlightService,
   computeFlightChanges,
   normalizeFlightNumber,

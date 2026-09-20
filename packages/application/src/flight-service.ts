@@ -53,6 +53,7 @@ export class FlightService {
     });
     const parsed = parseLookup(input);
     const flights = await this.provider.search(parsed);
+    for (const flight of flights) validateSnapshot(flight, false);
     if (flights.length === 0) throw flightNotFound();
     return { flights };
   }
@@ -124,8 +125,8 @@ export class FlightService {
       flightNumber: current.canonicalFlightNumber,
       date: current.serviceDate,
     });
+    for (const candidate of candidates) validateSnapshot(candidate, false);
     const flight = selectRefreshCandidate(current.selectedSnapshot, candidates);
-    const changes = computeFlightChanges(current.latestSnapshot, flight);
     const result = await this.repository.refresh({
       ownerUserId: actor.userId,
       tripId,
@@ -142,24 +143,48 @@ export class FlightService {
     }
     if (result.status !== 'SUCCESS')
       throw new Error('Unhandled refresh status');
+    const changes =
+      result.observationDisposition === 'APPLIED'
+        ? computeFlightChanges(
+            result.previousSnapshot,
+            result.binding.latestSnapshot,
+          )
+        : emptyFlightChanges();
     const riskEvaluation = await this.executionRiskService.evaluateTripRisks(
       actor,
       tripId,
     );
+    const acceptedStatus = result.binding.latestSnapshot.status;
     const requiresAttention =
-      flight.status === 'CANCELLED' || flight.status === 'DIVERTED';
+      acceptedStatus === 'CANCELLED' || acceptedStatus === 'DIVERTED';
     return {
       flightBinding: result.binding,
       resultingTripVersion: result.resultingTripVersion,
       factsChanged: result.factsChanged,
       actualConflicts: result.actualConflicts,
       actualConflict: result.actualConflicts.length > 0,
+      observationDisposition: result.observationDisposition,
       changes,
       requiresAttention,
       requiresRouteReevaluation: requiresAttention,
       riskEvaluation,
     };
   }
+}
+
+export function emptyFlightChanges(): FlightChangeSummaryView {
+  return {
+    changeTypes: [],
+    status: null,
+    departureTime: null,
+    arrivalTime: null,
+    departureGate: null,
+    arrivalGate: null,
+    departureTerminal: null,
+    arrivalTerminal: null,
+    baggage: null,
+    aircraft: null,
+  };
 }
 
 function parseLookup(value: unknown) {

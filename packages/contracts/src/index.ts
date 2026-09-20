@@ -119,6 +119,7 @@ export type {
   AdoptFlightRequest,
   AdoptFlightResponse,
   FlightActualConflictView,
+  FlightObservationDisposition,
   FlightBindingView,
   FlightChangeKind,
   FlightChangeSummaryView,

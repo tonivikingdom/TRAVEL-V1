@@ -134,12 +134,16 @@ export interface FlightActualConflictView {
   readonly observedAt: string;
 }
 
+export type FlightObservationDisposition =
+  'APPLIED' | 'IDEMPOTENT' | 'STALE_IGNORED';
+
 export interface RefreshFlightResponse {
   readonly flightBinding: FlightBindingView;
   readonly resultingTripVersion: number;
   readonly factsChanged: boolean;
   readonly actualConflicts: readonly FlightActualConflictView[];
   readonly actualConflict: boolean;
+  readonly observationDisposition: FlightObservationDisposition;
   readonly changes: FlightChangeSummaryView;
   readonly requiresAttention: boolean;
   readonly requiresRouteReevaluation: boolean;

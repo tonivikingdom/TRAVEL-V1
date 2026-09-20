@@ -1,7 +1,8 @@
-import type {
-  FlightAdoptRepositoryResult,
-  FlightRefreshRepositoryResult,
-  FlightRepository,
+import {
+  parseAbsoluteInstantInput,
+  type FlightAdoptRepositoryResult,
+  type FlightRefreshRepositoryResult,
+  type FlightRepository,
 } from '@travel/application';
 import type {
   FlightActualConflictView,
@@ -10,6 +11,7 @@ import type {
   FlightSnapshotView,
   TemporalPointKind,
 } from '@travel/contracts';
+import { isDeepStrictEqual } from 'node:util';
 
 import {
   Prisma,
@@ -187,6 +189,30 @@ export class PrismaFlightRepository implements FlightRepository {
       ) {
         return { status: 'FLIGHT_MISMATCH' };
       }
+      const incomingFetchedAt = parseAbsoluteInstantInput(
+        input.flight.fetchedAt,
+        'flight.fetchedAt',
+      );
+      const previousSnapshot =
+        binding.latestSnapshot as unknown as FlightSnapshotView;
+      const observationOrder =
+        incomingFetchedAt.getTime() - binding.lastRefreshedAt.getTime();
+      if (observationOrder <= 0) {
+        const observationDisposition =
+          observationOrder === 0 &&
+          isDeepStrictEqual(previousSnapshot, input.flight)
+            ? 'IDEMPOTENT'
+            : 'STALE_IGNORED';
+        return {
+          status: 'SUCCESS',
+          binding: toView(binding),
+          previousSnapshot,
+          resultingTripVersion: trip.version,
+          factsChanged: false,
+          actualConflicts: [],
+          observationDisposition,
+        };
+      }
       let factsChanged = false;
       const actualConflicts: FlightActualConflictView[] = [];
       const sourceRef = `flight-binding:${binding.id}:aerodatabox`;
@@ -220,7 +246,7 @@ export class PrismaFlightRepository implements FlightRepository {
           latestSnapshot: json(input.flight),
           providerFlightRef: input.flight.candidateId,
           status: input.flight.status,
-          lastRefreshedAt: requiredDate(input.flight.fetchedAt),
+          lastRefreshedAt: incomingFetchedAt,
           displayFlightNumber: input.flight.displayFlightNumber,
         },
       });
@@ -242,9 +268,11 @@ export class PrismaFlightRepository implements FlightRepository {
       return {
         status: 'SUCCESS',
         binding: toView(updatedBinding),
+        previousSnapshot,
         resultingTripVersion,
         factsChanged,
         actualConflicts,
+        observationDisposition: 'APPLIED',
       };
     });
   }

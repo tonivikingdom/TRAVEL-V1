@@ -934,7 +934,7 @@ async function refreshFlight(): Promise<void> {
     state.flightBinding = response.flightBinding;
     state.flightRefresh = response;
     await loadTripPreservingFlight(trip.id, response.flightBinding, response);
-    state.message = `航班已手工刷新；事实变更=${response.factsChanged}，ACTUAL 冲突=${response.actualConflicts.length}。`;
+    state.message = `航班已手工刷新；observation=${response.observationDisposition}，事实变更=${response.factsChanged}，ACTUAL 冲突=${response.actualConflicts.length}。`;
   });
 }
 

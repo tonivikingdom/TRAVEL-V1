@@ -44,9 +44,11 @@ describe('FlightService', () => {
       refresh: vi.fn(async () => ({
         status: 'SUCCESS' as const,
         binding: binding(),
+        previousSnapshot: snapshot(),
         resultingTripVersion: 4,
         factsChanged: false,
         actualConflicts: [],
+        observationDisposition: 'APPLIED' as const,
       })),
     };
     risk = {
@@ -158,9 +160,11 @@ describe('FlightService', () => {
       return {
         status: 'SUCCESS',
         binding: binding(),
+        previousSnapshot: snapshot(),
         resultingTripVersion: 4,
         factsChanged: true,
         actualConflicts: [],
+        observationDisposition: 'APPLIED',
       };
     });
     risk.evaluateTripRisks.mockImplementation(async () => {
@@ -180,7 +184,17 @@ describe('FlightService', () => {
   it.each(['CANCELLED', 'DIVERTED'] as const)(
     'marks %s as requiring attention without replanning',
     async (status) => {
-      vi.mocked(provider.refresh).mockResolvedValue([snapshot({ status })]);
+      const accepted = snapshot({ status });
+      vi.mocked(provider.refresh).mockResolvedValue([accepted]);
+      vi.mocked(repository.refresh).mockResolvedValue({
+        status: 'SUCCESS',
+        binding: binding(accepted),
+        previousSnapshot: snapshot(),
+        resultingTripVersion: 4,
+        factsChanged: false,
+        actualConflicts: [],
+        observationDisposition: 'APPLIED',
+      });
       const result = await service().refresh(actor, tripId, bindingId);
       expect(result).toMatchObject({
         requiresAttention: true,
@@ -188,6 +202,50 @@ describe('FlightService', () => {
       });
     },
   );
+
+  it('returns no changes for a stale observation and evaluates the accepted database state', async () => {
+    const accepted = snapshot({
+      fetchedAt: '2026-09-22T00:02:00.000Z',
+      status: 'ARRIVED',
+    });
+    vi.mocked(provider.refresh).mockResolvedValue([
+      snapshot({
+        fetchedAt: '2026-09-22T00:01:00.000Z',
+        status: 'CANCELLED',
+      }),
+    ]);
+    vi.mocked(repository.refresh).mockResolvedValue({
+      status: 'SUCCESS',
+      binding: binding(accepted),
+      previousSnapshot: accepted,
+      resultingTripVersion: 4,
+      factsChanged: false,
+      actualConflicts: [],
+      observationDisposition: 'STALE_IGNORED',
+    });
+
+    const result = await service().refresh(actor, tripId, bindingId);
+
+    expect(result).toMatchObject({
+      observationDisposition: 'STALE_IGNORED',
+      factsChanged: false,
+      actualConflict: false,
+      changes: { changeTypes: [] },
+      requiresAttention: false,
+    });
+    expect(risk.evaluateTripRisks).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a provider observation without a valid absolute fetchedAt', async () => {
+    vi.mocked(provider.refresh).mockResolvedValue([
+      snapshot({ fetchedAt: '2026-09-22T00:01:00' }),
+    ]);
+
+    await expect(
+      service().refresh(actor, tripId, bindingId),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_SCENARIO' });
+    expect(repository.refresh).not.toHaveBeenCalled();
+  });
 
   it('does not treat predicted-only changes as operational time changes', () => {
     const base = snapshot();
@@ -322,7 +380,7 @@ function movement(iata: string, scheduledUtc: string) {
   };
 }
 
-function binding(): FlightBindingView {
+function binding(latestSnapshot = snapshot()): FlightBindingView {
   return {
     id: bindingId,
     tripId,
@@ -333,9 +391,9 @@ function binding(): FlightBindingView {
     displayFlightNumber: 'NH 53',
     serviceDate: '2026-09-22',
     selectedSnapshot: snapshot(),
-    latestSnapshot: snapshot(),
-    status: 'SCHEDULED',
-    lastRefreshedAt: '2026-09-20T00:00:00.000Z',
+    latestSnapshot,
+    status: latestSnapshot.status,
+    lastRefreshedAt: latestSnapshot.fetchedAt,
     createdAt: '2026-09-20T00:00:00.000Z',
     updatedAt: '2026-09-20T00:00:00.000Z',
   };

@@ -10,6 +10,7 @@ import {
   RouteUndoService,
   TripService,
   type Actor,
+  type RouteProvider,
   type RouteProviderQueryInput,
   type RouteProviderResult,
   type StoredRoutePreviewPayload,
@@ -26,7 +27,10 @@ import {
   PrismaTripRepository,
   type ManagedPrismaClient,
 } from '@travel/persistence';
-import { SyntheticRouteProvider } from '@travel/providers';
+import {
+  GoogleConsumerExperimentalRouteProvider,
+  SyntheticRouteProvider,
+} from '@travel/providers';
 import type { FastifyInstance } from 'fastify';
 import {
   afterAll,
@@ -36,6 +40,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 
 import { buildApi } from '../src/app.js';
@@ -84,10 +89,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       await providerHook?.();
       return providerResult;
     });
+    app = buildTestApi(provider);
+  });
+
+  function buildTestApi(provider: RouteProvider): FastifyInstance {
     const routePlanningRepository = new PrismaRoutePlanningRepository(
       managed.client,
     );
-    app = buildApi({
+    return buildApi({
       readinessProbe: {
         async check() {
           return { name: 'postgresql', status: 'READY' };
@@ -97,9 +106,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         new PrismaAuthRepository(managed.client),
         authConfig(),
       ),
-      tripService: new TripService(repository),
+      tripService: new TripService(tripRepository),
       routeQueryService: new RouteQueryService(
-        repository,
+        tripRepository,
         provider,
         routePlanningRepository,
         {
@@ -108,7 +117,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         },
       ),
       routePreviewService: new RoutePreviewService(
-        repository,
+        tripRepository,
         routePlanningRepository,
         {
           previewTtlSeconds: 600,
@@ -117,16 +126,16 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       ),
       routeAdoptionService: new RouteAdoptionService(
         routePlanningRepository,
-        new TripService(repository),
+        new TripService(tripRepository),
         { undoWindowSeconds: 600, clock: { now: () => currentNow } },
       ),
       routeUndoService: new RouteUndoService(
         routePlanningRepository,
-        new TripService(repository),
+        new TripService(tripRepository),
         { now: () => currentNow },
       ),
     });
-  });
+  }
 
   afterEach(async () => {
     await app.close();
@@ -173,6 +182,211 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(1);
     expect(await databaseFacts(trip.id)).toEqual(before);
+  });
+
+  it('runs the Google Consumer adapter through snapshot, preview, adopt, and undo', async () => {
+    currentNow = new Date('2026-09-20T05:00:00.000Z');
+    const fetchImplementation = vi.fn(async (_url, init) => {
+      const requestedQuery = JSON.parse(String(init?.body)) as Record<
+        string,
+        unknown
+      >;
+      return new Response(
+        JSON.stringify(googleConsumerHokkaidoFixture(requestedQuery)),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    await app.close();
+    app = buildTestApi(
+      new GoogleConsumerExperimentalRouteProvider({
+        baseUrl: 'http://127.0.0.1:8787',
+        token: 'SYNTHETIC_INTEGRATION_TOKEN_DO_NOT_LOG',
+        timeoutMs: 1_000,
+        fetchImplementation,
+      }),
+    );
+
+    const trip = await tripWithVisitsOnDate(
+      userA,
+      ['Hotel Mahoroba', '洞爷湖景乃之风'],
+      '2026-09-23',
+    );
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    await Promise.all([
+      managed.client.place.update({
+        where: { id: from!.place!.id },
+        data: { latitude: 42.4930624, longitude: 141.1419064 },
+      }),
+      managed.client.place.update({
+        where: { id: to!.place!.id },
+        data: { latitude: 42.565637, longitude: 140.8222622 },
+      }),
+    ]);
+    const flightsBefore = await managed.client.flightBinding.count();
+    const routeResponse = await query(userA, trip, from!.id, to!.id, {
+      type: 'DEPART_AT',
+      instant: '2026-09-23T15:00:00+09:00',
+      timeZone: 'Asia/Tokyo',
+    });
+
+    expect(routeResponse.statusCode).toBe(200);
+    const route = routeResponse.json() as RouteQueryResponse;
+    expect(route.candidates[0]).toMatchObject({
+      provider: 'GOOGLE_CONSUMER_EXPERIMENTAL',
+      providerCandidateRef: 'sanitized-hokkaido-01',
+      fare: { amount: '3910', currency: 'JPY' },
+      legs: googleExpectedLegs(),
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+
+    const snapshot =
+      await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+        where: { id: route.candidates[0]!.candidateSnapshotId },
+      });
+    expect(snapshot).toMatchObject({
+      provider: 'GOOGLE_CONSUMER_EXPERIMENTAL',
+      providerCandidateRef: 'sanitized-hokkaido-01',
+      candidateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(snapshot.candidatePayload).toMatchObject({
+      fare: { amount: '3910', currency: 'JPY' },
+      legs: googleExpectedLegs(),
+    });
+    expect(JSON.stringify(snapshot.candidatePayload)).not.toContain(
+      'SYNTHETIC_INTEGRATION_TOKEN_DO_NOT_LOG',
+    );
+    expect(JSON.stringify(snapshot.candidatePayload)).not.toContain(
+      'requestedQuery',
+    );
+
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    const preview = previewResponse.json() as RoutePreviewView;
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.nodesToCreate).toHaveLength(6);
+    expect(preview.changeSummary.proposedSegments).toMatchObject(
+      googleExpectedLegs(),
+    );
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `google-consumer-adopt-${randomUUID()}`,
+    );
+    expect(adopted.trip.version).toBe(trip.version + 1);
+    expect(
+      adopted.trip.days
+        .flatMap((day) => day.nodes)
+        .filter((node) => node.source === 'ROUTE_GENERATED'),
+    ).toHaveLength(6);
+    expect(
+      adopted.trip.connections.map((connection) => ({
+        mode: connection.transport?.mode,
+        fixedService: connection.transport?.fixedService,
+        provider: connection.transport?.provider,
+        providerRef: connection.transport?.providerRef,
+      })),
+    ).toEqual(
+      googleExpectedLegs().map((leg, index) => ({
+        ...leg,
+        provider: 'GOOGLE_CONSUMER_EXPERIMENTAL',
+        providerRef: `sanitized-hokkaido-01:leg:${index}`,
+      })),
+    );
+    const adoptedEdges = await managed.client.transportEdge.findMany({
+      where: { tripId: trip.id },
+    });
+    const adoptedTimes = await managed.client.temporalValue.findMany({
+      where: { transportEdgeId: { in: adoptedEdges.map((edge) => edge.id) } },
+      orderBy: { instant: 'asc' },
+    });
+    expect(adoptedTimes).toHaveLength(14);
+    expect(adoptedTimes[0]).toMatchObject({
+      layer: 'PLANNED',
+      sourceKind: 'ADOPTED_TRANSPORT_FACT',
+      instant: new Date('2026-09-23T06:00:00.000Z'),
+    });
+    expect(adoptedTimes.at(-1)).toMatchObject({
+      layer: 'PLANNED',
+      sourceKind: 'ADOPTED_TRANSPORT_FACT',
+      instant: new Date('2026-09-23T08:00:00.000Z'),
+    });
+    expect(adopted.operationReceipt).toMatchObject({
+      operationType: 'ROUTE_ADOPT',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      `google-consumer-undo-${randomUUID()}`,
+    );
+    expect(undone.trip.version).toBe(adopted.trip.version + 1);
+    expect(undone.operationReceipt.operationType).toBe('ROUTE_UNDO');
+    expect(
+      undone.trip.days
+        .flatMap((day) => day.nodes)
+        .filter((node) => node.source === 'ROUTE_GENERATED'),
+    ).toHaveLength(0);
+    expect(undone.trip.connections).toMatchObject([{ state: 'MISSING' }]);
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { id: snapshot.id },
+      }),
+    ).toBe(1);
+    expect(await managed.client.flightBinding.count()).toBe(flightsBefore);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps the sidecar unsupported ARRIVE_BY envelope to HTTP 422', async () => {
+    const fetchImplementation = vi.fn(async () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: 'ERROR',
+            error: {
+              code: 'UNSUPPORTED_MODE',
+              message: 'ARRIVE_BY is not enabled',
+            },
+          }),
+          { status: 422, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    await app.close();
+    app = buildTestApi(
+      new GoogleConsumerExperimentalRouteProvider({
+        baseUrl: 'http://127.0.0.1:8787',
+        token: 'SYNTHETIC_INTEGRATION_TOKEN_DO_NOT_LOG',
+        timeoutMs: 1_000,
+        fetchImplementation,
+      }),
+    );
+    const trip = await tripWithVisits(userA, ['Tokyo', 'Shinjuku']);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+
+    const response = await query(userA, trip, from!.id, to!.id, {
+      type: 'ARRIVE_BY',
+      instant: '2030-10-01T20:00:00+09:00',
+      timeZone: 'Asia/Tokyo',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({
+      error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
   it('creates and re-reads an immutable Preview without changing official Trip facts', async () => {
@@ -2806,6 +3020,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   ): Promise<{
     operationReceipt: {
       id: string;
+      operationType: 'ROUTE_ADOPT';
       adoptedRouteId: string;
       resultingTripVersion: number;
     };
@@ -2822,6 +3037,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     return response.json() as {
       operationReceipt: {
         id: string;
+        operationType: 'ROUTE_ADOPT';
         adoptedRouteId: string;
         resultingTripVersion: number;
       };
@@ -2904,6 +3120,117 @@ function departHint() {
     instant: '2030-10-01T19:00:00+09:00',
     timeZone: 'Asia/Tokyo',
   };
+}
+
+function googleExpectedLegs() {
+  return [
+    { mode: 'WALKING', fixedService: false },
+    { mode: 'BUS', fixedService: true },
+    { mode: 'WALKING', fixedService: false },
+    { mode: 'RAIL', fixedService: true },
+    { mode: 'WALKING', fixedService: false },
+    { mode: 'BUS', fixedService: true },
+    { mode: 'WALKING', fixedService: false },
+  ] as const;
+}
+
+function googleConsumerHokkaidoFixture(
+  requestedQuery: Record<string, unknown>,
+) {
+  const stops = [
+    ['Hotel Mahoroba', 42.4930624, 141.1419064],
+    ['登别温泉中央', 42.495, 141.143],
+    ['登别站前', 42.45, 141.18],
+    ['登别站', 42.452, 141.181],
+    ['洞爷站', 42.55, 140.764],
+    ['洞爷站前', 42.551, 140.765],
+    ['洞爷湖温泉', 42.566, 140.82],
+    ['洞爷湖景乃之风', 42.565637, 140.8222622],
+  ] as const;
+  const legs = [
+    googleSidecarLeg('WALK', 0, 1, '15:00', '15:05', null),
+    googleSidecarLeg('BUS', 1, 2, '15:05', '15:25', '道南巴士 1'),
+    googleSidecarLeg('WALK', 2, 3, '15:25', '15:30', null),
+    googleSidecarLeg('TRAIN', 3, 4, '15:30', '16:15', '北斗 16号'),
+    googleSidecarLeg('WALK', 4, 5, '16:15', '16:20', null),
+    googleSidecarLeg('BUS', 5, 6, '16:20', '16:50', '洞爷湖线'),
+    googleSidecarLeg('WALK', 6, 7, '16:50', '17:00', null),
+  ].map((leg) => ({
+    ...leg,
+    from: googleSidecarStop(stops[leg.fromIndex]!),
+    to: googleSidecarStop(stops[leg.toIndex]!),
+    fromIndex: undefined,
+    toIndex: undefined,
+  }));
+  return {
+    status: 'OK',
+    requestId: 'sanitized-request-id',
+    provider: 'GOOGLE_CONSUMER_EXPERIMENTAL',
+    requestedQuery,
+    queryVerified: true,
+    fetchedAt: '2026-09-20T05:01:00.000Z',
+    elapsedMs: 7_336,
+    candidateCount: 1,
+    candidates: [
+      {
+        id: 'sanitized-hokkaido-01',
+        sourceIndex: 0,
+        departureTime: googleSidecarTime('15:00'),
+        arrivalTime: googleSidecarTime('17:00'),
+        durationSeconds: 7_200,
+        fare: { currency: 'JPY', amount: 3_910, displayText: 'JPY 3,910' },
+        legs,
+        warnings: [],
+      },
+    ],
+    warnings: [],
+    cacheHit: false,
+    timing: {
+      browserStartupMs: 0,
+      contextCreationMs: 0,
+      navigationMs: 100,
+      directionsResponseMs: 7_200,
+      parseMs: 20,
+      sentinelMs: 16,
+      totalMs: 7_336,
+    },
+  };
+}
+
+function googleSidecarLeg(
+  mode: string,
+  fromIndex: number,
+  toIndex: number,
+  departure: string,
+  arrival: string,
+  serviceName: string | null,
+) {
+  const durationSeconds =
+    (Date.parse(`2026-09-23T${arrival}:00+09:00`) -
+      Date.parse(`2026-09-23T${departure}:00+09:00`)) /
+    1_000;
+  return {
+    mode,
+    fromIndex,
+    toIndex,
+    departureTime: googleSidecarTime(departure),
+    arrivalTime: googleSidecarTime(arrival),
+    durationSeconds,
+    serviceName,
+    lineName: serviceName,
+  };
+}
+
+function googleSidecarTime(time: string) {
+  return {
+    localDateTime: `2026-09-23T${time}:00`,
+    timezone: 'Asia/Tokyo',
+    utc: new Date(`2026-09-23T${time}:00+09:00`).toISOString(),
+  };
+}
+
+function googleSidecarStop(stop: readonly [string, number, number]) {
+  return { name: stop[0], latitude: stop[1], longitude: stop[2] };
 }
 
 function candidate(

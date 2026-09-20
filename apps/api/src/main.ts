@@ -23,6 +23,7 @@ import {
 import {
   createDevelopmentSyntheticRouteProvider,
   AeroDataBoxFlightProvider,
+  GoogleConsumerExperimentalRouteProvider,
   readFlightProviderConfig,
   readRouteProviderConfig,
   UnconfiguredFlightProvider,
@@ -85,7 +86,13 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   const routeProvider =
     routeProviderConfig.provider === 'synthetic'
       ? createDevelopmentSyntheticRouteProvider()
-      : new UnconfiguredRouteProvider();
+      : routeProviderConfig.provider === 'google_consumer_experimental'
+        ? new GoogleConsumerExperimentalRouteProvider({
+            baseUrl: routeProviderConfig.baseUrl,
+            token: routeProviderConfig.token,
+            timeoutMs: routeProviderConfig.timeoutMs,
+          })
+        : new UnconfiguredRouteProvider();
   routeQueryService = new RouteQueryService(
     tripRepository,
     routeProvider,

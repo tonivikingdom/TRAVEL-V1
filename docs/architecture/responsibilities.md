@@ -315,8 +315,9 @@ Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后�
 - 幂等范围为 owner + Trip + operation type + key；同 key/同 payload 返回首次 receipt，不二次写入或
   递增版本，同 key/不同 payload 返回 `IDEMPOTENCY_CONFLICT`。P4B3 对新的 Adopt receipt 扩展完整
   inverse basis；历史 P4B2 receipt 不伪造缺失状态。
-- Development/Test 只有显式 `ROUTE_PROVIDER=synthetic` 才启用 SYNTHETIC adapter；
-  Staging/Production 禁止 synthetic，真实 adapter 未配置时明确返回
+- Development/Test 只有显式 `ROUTE_PROVIDER=synthetic` 才启用 SYNTHETIC adapter；个人本机实验还可显式选择
+  `google_consumer_experimental`，它只经服务端 adapter 调用 loopback sidecar，不向 Domain、客户端或
+  Preview/Adopt/Undo 泄漏 Google Consumer 私有协议。Staging/Production 禁止两种 provider，未配置时明确返回
   `ROUTE_PROVIDER_UNCONFIGURED`，绝不静默回退。
 
 ### P4B3 Route Adopt 单步 Undo

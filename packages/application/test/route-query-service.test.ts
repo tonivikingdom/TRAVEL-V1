@@ -502,6 +502,116 @@ describe('RouteQueryService', () => {
     });
   });
 
+  it('uses a later DEPART_AT hint as effective start for the 140% value pool', async () => {
+    findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...candidate(
+            '2030-10-01T12:00:00Z',
+            '2030-10-01T12:10:00Z',
+            'hint-fastest',
+          ),
+          fare: { amount: '100', currency: 'CNY' },
+        },
+        {
+          ...candidate(
+            '2030-10-01T12:00:00Z',
+            '2030-10-01T12:30:00Z',
+            'hint-outside-140-percent',
+          ),
+          fare: { amount: '1', currency: 'CNY' },
+        },
+        {
+          ...candidate(
+            '2030-10-01T12:00:00Z',
+            '2030-10-01T12:14:00Z',
+            'hint-inside-140-percent',
+          ),
+          fare: { amount: '90', currency: 'CNY' },
+        },
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, {
+      ...request(),
+      hint: {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T12:00:00Z',
+        timeZone: 'UTC',
+      },
+    });
+
+    expect(result.candidates.map((item) => item.candidateId)).toEqual([
+      'hint-fastest',
+      'hint-inside-140-percent',
+      'hint-outside-140-percent',
+    ]);
+    expect(
+      Object.fromEntries(
+        result.candidates.map((item) => [
+          item.candidateId,
+          item.planningAssessment!.effectiveTotalTimeSeconds,
+        ]),
+      ),
+    ).toEqual({
+      'hint-fastest': 600,
+      'hint-inside-140-percent': 840,
+      'hint-outside-140-percent': 1_800,
+    });
+  });
+
+  it('keeps planning earliest as effective start when DEPART_AT is earlier', async () => {
+    findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        candidate(
+          '2030-10-01T10:50:00Z',
+          '2030-10-01T11:00:00Z',
+          'planning-start',
+        ),
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, {
+      ...request(),
+      hint: {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      },
+    });
+
+    expect(
+      result.candidates[0]!.planningAssessment!.effectiveTotalTimeSeconds,
+    ).toBe(600);
+  });
+
+  it('does not use ARRIVE_BY as effective start', async () => {
+    findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
+    queryRoutes.mockResolvedValue({
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T10:50:00Z', '2030-10-01T11:00:00Z', 'arrive-by'),
+      ],
+    });
+
+    const result = await service().queryRoutes(actor, tripId, {
+      ...request(),
+      hint: {
+        type: 'ARRIVE_BY',
+        instant: '2030-10-01T12:00:00Z',
+        timeZone: 'UTC',
+      },
+    });
+
+    expect(
+      result.candidates[0]!.planningAssessment!.effectiveTotalTimeSeconds,
+    ).toBe(600);
+  });
+
   it('keeps a lookback adjustment candidate visible but ranks a fully feasible candidate first', async () => {
     findOwnedById.mockResolvedValue(tripWithPlanningDeparture());
     queryRoutes.mockResolvedValue({

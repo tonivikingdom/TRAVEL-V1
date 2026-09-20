@@ -233,7 +233,7 @@ export class RouteQueryService {
     }
 
     const availableStart =
-      time.planningEarliestDeparture ??
+      effectiveAvailableStart(time) ??
       arrival ??
       time.earliestDeparture ??
       accepted.reduce(
@@ -595,6 +595,12 @@ function laterNullable(left: Date | null, right: Date | null): Date | null {
   if (left === null) return right;
   if (right === null) return left;
   return left > right ? left : right;
+}
+
+function effectiveAvailableStart(time: NormalizedQueryTime): Date | null {
+  const explicitDepartAt =
+    time.hint?.type === 'DEPART_AT' ? time.hint.instant : null;
+  return laterNullable(time.planningEarliestDeparture, explicitDepartAt);
 }
 
 function snapshotExpiry(

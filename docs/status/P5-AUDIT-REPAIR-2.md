@@ -2,6 +2,8 @@
 
 - 开工 main：`59d641bec4f2593e0ab735cf5abc6eb905a75a7c`
 - 分支：`feature/p5-assistance-capability-lifecycle`
+- Draft PR：[#28](https://github.com/tonivikingdom/TRAVEL-V1/pull/28)
+- 初始实现 commit：`5eb02ace6c7c2180d8dee7861f6508662adae370`
 - 范围：仅修复审计 finding `F-01`、`F-02`、`F-10`
 - migration：`20260926100000_p5_assistance_capability_lifecycle`
 

@@ -203,6 +203,20 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   Provider 调用仍在事务外，accepted refresh 后复用风险服务并原子保存 monitor state、下一检查与最多
   一条合并通知。它不自动换班、改时间或重排。
 
+## P5E1 Execution Location 边界
+
+- Domain 只负责 Haversine、按 `DayOccurrence.sequence + node.position` 的执行 frontier、目标半径、
+  departure hysteresis/连续趋势和 later-node possible-skip 判定；不访问数据库、Provider 或客户端定位 API。
+- `ExecutionLocationService` 校验 absolute observation、可靠度和时序，编排 owner-scoped context、执行事件、
+  `TemporalValue ACTUAL`、风险重评与机场触发。客户端不能声明任意 target，也不能上传机场 IATA。
+- Persistence 在 owner advisory lock 与 Trip row lock 内保证一个 node/point 最多一个 active execution event，
+  并保存每 Trip 一份最小衍生距离状态。原始经纬度、accuracy、speed、heading 与 sample payload 不落库、不进日志。
+- 自动定位事实使用 `EXECUTION_OBSERVATION` 与 `execution-event:<id>`；手工确认使用 `USER_VALUE`，但同样由
+  `ExecutionEvent` 提供幂等和精确 Undo ownership。已有其它来源 ACTUAL 继续由 `FACT_PROTECTED` 保护。
+- Arrival fact 先提交，再在事务外调用 P5D3 `ARRIVED_AT_AIRPORT`；未完成的 trigger 由后续 execution request
+  基于未完成 marker 重试。Station/普通地点 arrival 不推断上车、登机、入住或活动开始。
+- P5E1 不实现轨迹、off-route warning、后台定位、Push、正式客户端、自动改路线/时间或 Production 启用。
+
 ## Provider 与核心故障边界（O-10 产品规则已确认，仅规格）
 
 - Provider adapter 各自独立降级；单一铁路、航班或地图故障只让对应实时/路线结果 unavailable 或

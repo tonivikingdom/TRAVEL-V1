@@ -200,9 +200,14 @@ export function decideExecutionLocation(input: {
   }
 
   const targetDistance = haversineDistanceMeters(input.sample, target);
-  const targetSuppressed = (input.suppressedArrivalNodeIds ?? []).includes(
-    target.id,
+  const suppressedArrivalNodeIds = new Set(
+    input.suppressedArrivalNodeIds ?? [],
   );
+  const targetSuppressed = suppressedArrivalNodeIds.has(target.id);
+  const outsideSuppressedTarget =
+    targetDistance >
+    arrivalRadius(target.targetKind, input.policy) +
+      input.policy.exitHysteresisMeters;
   if (
     !targetSuppressed &&
     targetDistance <= arrivalRadius(target.targetKind, input.policy)
@@ -211,6 +216,21 @@ export function decideExecutionLocation(input: {
       status: 'CONFIRMED_ARRIVAL',
       nodeId: target.id,
       possiblySkippedNodeIds: [],
+      releasedArrivalSuppressionNodeIds: [],
+      state: {
+        ...baseState,
+        lastDistanceToNextTargetMeters: targetDistance,
+      },
+    };
+  }
+
+  // A later arrival cannot by itself prove that the user has left a node whose
+  // automatic arrival they explicitly corrected. This is important when place
+  // radii overlap: preserve the correction until the sample is outside that
+  // node's exit boundary.
+  if (targetSuppressed && !outsideSuppressedTarget) {
+    return {
+      status: 'NO_CHANGE',
       releasedArrivalSuppressionNodeIds: [],
       state: {
         ...baseState,
@@ -228,6 +248,7 @@ export function decideExecutionLocation(input: {
       (node) =>
         node.executionStatus !== 'SKIPPED' &&
         !node.hasActualArrival &&
+        !suppressedArrivalNodeIds.has(node.id) &&
         hasCoordinates(node) &&
         haversineDistanceMeters(input.sample, node) <=
           arrivalRadius(node.targetKind, input.policy),
@@ -257,10 +278,6 @@ export function decideExecutionLocation(input: {
   }
 
   if (targetSuppressed) {
-    const outsideSuppressedTarget =
-      targetDistance >
-      arrivalRadius(target.targetKind, input.policy) +
-        input.policy.exitHysteresisMeters;
     return {
       status: 'NO_CHANGE',
       releasedArrivalSuppressionNodeIds: outsideSuppressedTarget

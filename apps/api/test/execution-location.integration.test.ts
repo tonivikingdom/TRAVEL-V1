@@ -657,6 +657,53 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     ).toEqual(new Date('2030-01-01T10:04:00.000Z'));
   });
 
+  it('[REGRESSION F-03] does not release an undone arrival or confirm an overlapping later node', async () => {
+    const nodeB = await managed.client.itineraryNode.findUniqueOrThrow({
+      where: { id: fixture.nodeBId },
+      select: { placeId: true },
+    });
+    await managed.client.place.update({
+      where: { id: nodeB.placeId! },
+      data: { latitude: 35.0005, longitude: 139.0005 },
+    });
+    const first = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    const firstBody = first.json<ExecutionLocationResponse>();
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+
+    const overlap = await observe(owner, {
+      latitude: 35.00025,
+      longitude: 139.00025,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:02:00.000Z',
+    });
+    expect(overlap.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      resultingTripVersion: 3,
+      event: null,
+    });
+    expect(
+      await managed.client.executionArrivalSuppression.count({
+        where: { nodeId: fixture.nodeAId },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.executionEvent.count({
+        where: { nodeId: fixture.nodeBId, undoneAt: null },
+      }),
+    ).toBe(0);
+    expect(await tripVersion()).toBe(3);
+  });
+
   it('[REGRESSION F-03] serializes concurrent Undo before a queued newer observation without revival', async () => {
     const first = await observe(owner, {
       latitude: 35,

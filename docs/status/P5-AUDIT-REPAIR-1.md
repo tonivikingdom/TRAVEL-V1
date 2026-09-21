@@ -12,8 +12,10 @@
 - `ExecutionArrivalSuppression` 按 Node 保存被用户撤销的 ARRIVAL。相同 observation 幂等 no-op，更旧
   observation 继续 stale，新但仍在到达半径内的 observation 不重建事件、ACTUAL、Trip version、风险或
   airport trigger。
-- 只有可靠 observation 明确位于 `arrival radius + exit hysteresis` 外，或可靠进入后续节点，才解除
-  suppression。解除只做 housekeeping，不增加 Trip version；之后真正重新进入才可创建新的 ARRIVAL。
+- 只有可靠 observation 明确位于 `arrival radius + exit hysteresis` 外，才解除 suppression。解除只做
+  housekeeping，不增加 Trip version；之后真正重新进入才可创建新的 ARRIVAL。
+- 后续节点命中只有在当前被撤销节点已明确位于其 exit boundary 外时才会被确认；重叠范围内保持
+  `NO_CHANGE`。被 suppression 的后续节点同样不参与自动 ARRIVAL 候选。
 - migration 从现有 proximity state 和 LOCATION event 回填可恢复的 watermark；对没有 active ARRIVAL/
   ACTUAL 的历史 undone ARRIVAL 回填 suppression，不保存原始坐标。
 
@@ -37,11 +39,11 @@
 
 ## 验证证据
 
-- Unit：`40 files / 465 tests` success；覆盖 F-03 suppression/re-arm、F-13
+- Unit：`40 files / 467 tests` success；覆盖 F-03 suppression/re-arm、重叠范围、F-13
   inconsistent/normal/departure-only domain regression。
 - PostgreSQL API integration：same/older/newer-inside/outside/re-entry、Undo/observe serialization、机场 trigger、
   public provenance rejection、Undo dependent departure、inconsistent frontier 409；本机专用 PostgreSQL 验证
-  `8 files / 176 tests` success。
+  `8 files / 177 tests` success。
 - PostgreSQL persistence regression：`6 files / 48 tests` success。受本机测试账号无 `CREATE DATABASE` 权限限制，
   隔离 migration suites 以 GitHub CI 为正式结果。
 - Migration integration：clean deploy 与 populated main → repair migration；历史 event、airport marker、Trip

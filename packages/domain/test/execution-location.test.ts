@@ -234,7 +234,23 @@ describe('execution location policy', () => {
     });
   });
 
-  it('[REGRESSION F-03] lets a later node arrival release a suppressed earlier target', () => {
+  it('[REGRESSION F-03] does not release an undone target or confirm an overlapping later node', () => {
+    const overlappingB = node('overlapping-b', 0, 1, 35.0005, 139.0005);
+    const result = decideExecutionLocation({
+      nodes: [a, overlappingB],
+      previousState: null,
+      suppressedArrivalNodeIds: ['a'],
+      sample: sample(35.00025, 139.00025),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: [],
+    });
+  });
+
+  it('[REGRESSION F-03] releases a suppressed target only after exit before confirming a later node', () => {
     const result = decideExecutionLocation({
       nodes: [a, b],
       previousState: null,
@@ -247,6 +263,21 @@ describe('execution location policy', () => {
       status: 'CONFIRMED_ARRIVAL',
       nodeId: 'b',
       possiblySkippedNodeIds: ['a'],
+      releasedArrivalSuppressionNodeIds: ['a'],
+    });
+  });
+
+  it('[REGRESSION F-03] excludes a later suppressed node while safely releasing an exited target', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, b],
+      previousState: null,
+      suppressedArrivalNodeIds: ['a', 'b'],
+      sample: sample(35.001, 139.001),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
       releasedArrivalSuppressionNodeIds: ['a'],
     });
   });

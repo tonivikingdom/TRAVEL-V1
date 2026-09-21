@@ -383,7 +383,7 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       accuracyMeters: 10,
       observedAt: '2030-01-01T10:00:00.000Z',
     };
-    expect((await observe(owner, payload)).statusCode).toBe(500);
+    expect((await observe(owner, payload)).statusCode).toBe(503);
     expect(await managed.client.executionEvent.count()).toBe(1);
     expect(await tripVersion()).toBe(2);
     const recovered = await observe(owner, payload);

@@ -78,7 +78,10 @@ describe('assistance capability lifecycle migration', () => {
 });
 
 async function migrationNames(): Promise<readonly string[]> {
-  return (await readdir(migrationsPath)).sort();
+  return (await readdir(migrationsPath, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }
 
 async function applyMigration(target: Client, name: string): Promise<void> {
@@ -171,8 +174,8 @@ async function seedPopulatedMain(client: Client): Promise<void> {
   await client.query(`
     INSERT INTO "FlightMonitorState" ("flightBindingId", "mode", "updatedAt") VALUES
       ('60000000-0000-4000-8000-000000000061', 'NORMAL', CURRENT_TIMESTAMP);
-    INSERT INTO "Job" ("type", "runAt", "maxAttempts", "uniqueKey", "payloadRef", "updatedAt") VALUES
-      ('FLIGHT_MONITOR', '2030-01-01T13:00:00Z', 5, 'synthetic:legacy-monitor-job', '60000000-0000-4000-8000-000000000061', CURRENT_TIMESTAMP);
+    INSERT INTO "Job" ("id", "type", "runAt", "maxAttempts", "uniqueKey", "payloadRef", "updatedAt") VALUES
+      ('80000000-0000-4000-8000-000000000061', 'FLIGHT_MONITOR', '2030-01-01T13:00:00Z', 5, 'synthetic:legacy-monitor-job', '60000000-0000-4000-8000-000000000061', CURRENT_TIMESTAMP);
   `);
 }
 

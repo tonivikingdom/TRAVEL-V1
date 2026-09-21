@@ -27,7 +27,8 @@ export type TemporalSourceKind =
   | 'ADOPTED_TRANSPORT_FACT'
   | 'SYSTEM_SUGGESTION'
   | 'DERIVED'
-  | 'PROVIDER_OBSERVATION';
+  | 'PROVIDER_OBSERVATION'
+  | 'EXECUTION_OBSERVATION';
 export type UserTimeIntentKind = 'POINT_TIME' | 'MIN_DWELL';
 export type UserTimeIntentOperator =
   'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER' | 'MINIMUM';

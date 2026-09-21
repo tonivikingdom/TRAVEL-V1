@@ -137,6 +137,28 @@ enum TemporalSourceKind {
   SYSTEM_SUGGESTION
   DERIVED
   PROVIDER_OBSERVATION
+  EXECUTION_OBSERVATION
+}
+
+enum ExecutionEventType {
+  ARRIVAL
+  DEPARTURE
+  SKIP_CONFIRMED
+}
+
+enum ExecutionEventSource {
+  LOCATION
+  MANUAL
+}
+
+enum NodeExecutionStatus {
+  POSSIBLY_SKIPPED
+  SKIPPED
+}
+
+enum ExecutionLocationStatus {
+  RELIABLE
+  INDETERMINATE
 }
 
 enum UserTimeIntentKind {
@@ -211,6 +233,7 @@ model User {
   operationReceipts       OperationReceipt[]
   executionRisks          ExecutionRisk[]
   flightBindings          FlightBinding[]
+  executionEvents         ExecutionEvent[]
 
   @@index([status])
 }
@@ -383,6 +406,8 @@ model Trip {
   outboxEvents            OutboxEvent[]
   executionRisks          ExecutionRisk[]
   flightBindings          FlightBinding[]
+  executionEvents         ExecutionEvent[]
+  executionLocationState  ExecutionLocationState?
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -493,6 +518,10 @@ model ItineraryNode {
   adoptedRoute           AdoptedRoute?            @relation("GeneratedRouteNodes", fields: [adoptedRouteId], references: [id], onDelete: SetNull)
   adoptedRouteAnchorFrom AdoptedRoute[]           @relation("AdoptedRouteFromAnchor")
   adoptedRouteAnchorTo   AdoptedRoute[]           @relation("AdoptedRouteToAnchor")
+  executionEvents        ExecutionEvent[]
+  executionState         NodeExecutionState?
+  locationStatesCurrent  ExecutionLocationState[] @relation("ExecutionLocationCurrentNode")
+  locationStatesTarget   ExecutionLocationState[] @relation("ExecutionLocationTargetNode")
 
   @@unique([dayOccurrenceId, position])
   @@unique([id, tripId])
@@ -798,6 +827,66 @@ model TemporalValue {
   @@unique([transportEdgeId, pointKind, layer])
   @@index([nodeId])
   @@index([transportEdgeId])
+}
+
+model ExecutionEvent {
+  id                        String               @id @default(uuid()) @db.Uuid
+  ownerUserId               String               @db.Uuid
+  tripId                    String               @db.Uuid
+  nodeId                    String               @db.Uuid
+  type                      ExecutionEventType
+  source                    ExecutionEventSource
+  occurredAt                DateTime             @db.Timestamptz(3)
+  idempotencyKey            String?              @db.VarChar(200)
+  requestHash               String?              @db.VarChar(64)
+  undoneAt                  DateTime?            @db.Timestamptz(3)
+  undoIdempotencyKey        String?              @db.VarChar(200)
+  undoRequestHash           String?              @db.VarChar(64)
+  airportTriggerCompletedAt DateTime?            @db.Timestamptz(3)
+  createdAt                 DateTime             @default(now()) @db.Timestamptz(3)
+  owner                     User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                      Trip                 @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  node                      ItineraryNode        @relation(fields: [nodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  detectedNodeStates        NodeExecutionState[]
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@unique([ownerUserId, undoIdempotencyKey])
+  @@unique([id, tripId])
+  @@index([ownerUserId, tripId, createdAt(sort: Desc)])
+  @@index([tripId, nodeId, type, undoneAt])
+}
+
+model ExecutionLocationState {
+  tripId                              String                  @id @db.Uuid
+  currentNodeId                       String?                 @db.Uuid
+  targetNodeId                        String?                 @db.Uuid
+  lastObservedAt                      DateTime                @db.Timestamptz(3)
+  lastDistanceToCurrentTargetMeters   Float?
+  lastDistanceToNextTargetMeters      Float?
+  outsideTargetConsecutiveCount       Int                     @default(0)
+  locationStatus                      ExecutionLocationStatus
+  updatedAt                           DateTime                @updatedAt @db.Timestamptz(3)
+  trip                                Trip                    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  currentNode                         ItineraryNode?          @relation("ExecutionLocationCurrentNode", fields: [currentNodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  targetNode                          ItineraryNode?          @relation("ExecutionLocationTargetNode", fields: [targetNodeId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@index([currentNodeId])
+  @@index([targetNodeId])
+}
+
+model NodeExecutionState {
+  nodeId            String              @id @db.Uuid
+  tripId            String              @db.Uuid
+  status            NodeExecutionStatus
+  detectedByEventId String?             @db.Uuid
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+  node              ItineraryNode       @relation(fields: [nodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  detectedByEvent   ExecutionEvent?     @relation(fields: [detectedByEventId], references: [id], onDelete: SetNull)
+
+  @@unique([nodeId, tripId])
+  @@index([tripId, status])
+  @@index([detectedByEventId])
 }
 
 model TransportEdgeHistoryTimeValue {

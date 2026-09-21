@@ -44,3 +44,90 @@ export interface ExecutionRiskEvaluationResponse {
   readonly resolvedRisks: readonly ExecutionRiskView[];
   readonly notificationsCreated: readonly NotificationView[];
 }
+
+export type ExecutionEventType = 'ARRIVAL' | 'DEPARTURE' | 'SKIP_CONFIRMED';
+export type ExecutionEventSource = 'LOCATION' | 'MANUAL';
+export type NodeExecutionStatus = 'POSSIBLY_SKIPPED' | 'SKIPPED';
+export type ExecutionCurrentState =
+  'NOT_STARTED' | 'AT_NODE' | 'EN_ROUTE' | 'COMPLETED';
+export type ExecutionLocationStatus =
+  'NO_SAMPLE' | 'RELIABLE' | 'INDETERMINATE';
+
+export interface ExecutionLocationSampleRequest {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly accuracyMeters: number;
+  readonly observedAt: string;
+  readonly speedMetersPerSecond?: number;
+  readonly headingDegrees?: number;
+}
+
+export interface ManualExecutionEventRequest {
+  readonly baseTripVersion: number;
+  readonly idempotencyKey: string;
+  readonly type: 'MANUAL_ARRIVAL' | 'MANUAL_DEPARTURE' | 'CONFIRM_SKIP';
+  readonly nodeId: string;
+  readonly occurredAt: string;
+}
+
+export interface UndoExecutionEventRequest {
+  readonly baseTripVersion: number;
+  readonly idempotencyKey: string;
+}
+
+export interface ExecutionEventView {
+  readonly id: string;
+  readonly tripId: string;
+  readonly nodeId: string;
+  readonly type: ExecutionEventType;
+  readonly source: ExecutionEventSource;
+  readonly occurredAt: string;
+  readonly createdAt: string;
+  readonly undoneAt: string | null;
+}
+
+export interface ExecutionLocationResponse {
+  readonly status:
+    | 'CONFIRMED_ARRIVAL'
+    | 'CONFIRMED_DEPARTURE'
+    | 'NO_CHANGE'
+    | 'INDETERMINATE_LOCATION'
+    | 'MANUAL_CONFIRMATION_AVAILABLE';
+  readonly event: ExecutionEventView | null;
+  readonly resultingTripVersion: number;
+  readonly confirmationRecommended: boolean;
+  readonly airportTriggerAttempted: boolean;
+}
+
+export interface ExecutionMutationResponse {
+  readonly event: ExecutionEventView;
+  readonly resultingTripVersion: number;
+  readonly idempotentReplay: boolean;
+  readonly airportTriggerAttempted: boolean;
+}
+
+export interface ExecutionUndoResponse {
+  readonly event: ExecutionEventView;
+  readonly resultingTripVersion: number;
+  readonly idempotentReplay: boolean;
+}
+
+export interface ExecutionContextResponse {
+  readonly tripId: string;
+  readonly tripVersion: number;
+  readonly currentNodeId: string | null;
+  readonly targetNodeId: string | null;
+  readonly currentState: ExecutionCurrentState;
+  readonly latestArrival: {
+    readonly nodeId: string;
+    readonly instant: string;
+  } | null;
+  readonly latestDeparture: {
+    readonly nodeId: string;
+    readonly instant: string;
+  } | null;
+  readonly possibleSkippedNodeIds: readonly string[];
+  readonly confirmedSkippedNodeIds: readonly string[];
+  readonly locationStatus: ExecutionLocationStatus;
+  readonly activeRisks: readonly ExecutionRiskView[];
+}

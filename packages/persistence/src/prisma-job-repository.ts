@@ -11,6 +11,7 @@ interface ClaimedJobRow {
   readonly id: string;
   readonly type: JobType;
   readonly payloadRef: string;
+  readonly capabilityRevision: number | null;
   readonly attempts: number;
   readonly maxAttempts: number;
   readonly leaseOwner: string;
@@ -58,7 +59,7 @@ export class PrismaJobRepository implements JobRepository {
           "updatedAt" = ${input.now}
       FROM candidate
       WHERE job."id" = candidate."id"
-      RETURNING job."id", job."type", job."payloadRef", job."attempts",
+      RETURNING job."id", job."type", job."payloadRef", job."capabilityRevision", job."attempts",
                 job."maxAttempts", job."leaseOwner", job."leaseUntil"
     `);
     return rows[0] ?? null;

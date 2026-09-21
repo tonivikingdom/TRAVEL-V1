@@ -16,6 +16,7 @@ import {
 import {
   Prisma,
   type FlightBinding,
+  type FlightMonitoringCapability,
   type FlightMonitorState,
   type PrismaClient,
 } from './generated/prisma/client.js';
@@ -28,7 +29,13 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
 
   async ensureEligibleMonitoring(now: Date): Promise<number> {
     const bindings = await this.client.flightBinding.findMany({
-      select: { id: true, status: true, latestSnapshot: true },
+      where: { monitoringCapability: { state: 'ENABLED' } },
+      select: {
+        id: true,
+        status: true,
+        latestSnapshot: true,
+        monitoringCapability: { select: { revision: true } },
+      },
     });
     let eligible = 0;
     for (const binding of bindings) {
@@ -47,6 +54,11 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
       await this.client.$transaction(async (transaction) => {
         const locked = await lockBinding(transaction, binding.id);
         if (locked === null) return;
+        const capability =
+          await transaction.flightMonitoringCapability.findUnique({
+            where: { flightBindingId: binding.id },
+          });
+        if (capability?.state !== 'ENABLED') return;
         const lockedSnapshot =
           locked.latestSnapshot as unknown as FlightSnapshotView;
         const lockedScheduled = instant(lockedSnapshot.departure.scheduledUtc);
@@ -64,7 +76,10 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           create: { flightBindingId: binding.id },
           update: {},
         });
-        if (await hasLiveMonitorJob(transaction, binding.id)) return;
+        if (
+          await hasLiveMonitorJob(transaction, binding.id, capability.revision)
+        )
+          return;
 
         const expectedMode =
           locked.status === 'CANCELLED'
@@ -78,6 +93,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
             transaction,
             binding.id,
             state.generation,
+            capability.revision,
             now,
             'reconcile',
           );
@@ -90,6 +106,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
               transaction,
               binding.id,
               state.generation,
+              capability.revision,
               next,
               'cancelled',
             );
@@ -101,6 +118,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
             transaction,
             binding.id,
             state.generation,
+            capability.revision,
             nextDelayCheck(lockedSnapshot.departure, now),
             'delayed',
           );
@@ -110,6 +128,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           transaction,
           binding.id,
           state.generation,
+          capability.revision,
           lockedScheduled,
           now,
         );
@@ -123,17 +142,25 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
   ): Promise<FlightMonitorContext | null> {
     const binding = await this.client.flightBinding.findUnique({
       where: { id: flightBindingId },
-      include: { owner: true, monitorState: true },
+      include: {
+        owner: true,
+        monitorState: true,
+        monitoringCapability: true,
+      },
     });
     if (binding === null) return null;
+    if (binding.monitorState === null) {
+      await this.client.flightMonitorState.createMany({
+        data: [{ flightBindingId }],
+        skipDuplicates: true,
+      });
+    }
     const state =
       binding.monitorState ??
-      (await this.client.flightMonitorState.upsert({
+      (await this.client.flightMonitorState.findUniqueOrThrow({
         where: { flightBindingId },
-        create: { flightBindingId },
-        update: {},
       }));
-    return toContext(binding, state);
+    return toContext(binding, state, binding.monitoringCapability);
   }
 
   async recordAirportArrival(input: {
@@ -141,29 +168,43 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
     readonly tripId: string;
     readonly flightBindingId: string;
     readonly airportIata: string;
+    readonly expectedCapabilityRevision: number;
     readonly now: Date;
   }): Promise<FlightMonitorContext | null> {
-    const binding = await this.client.flightBinding.findFirst({
-      where: {
-        id: input.flightBindingId,
-        ownerUserId: input.ownerUserId,
-        tripId: input.tripId,
-      },
-      select: { id: true },
+    const accepted = await this.client.$transaction(async (transaction) => {
+      const binding = await lockBinding(transaction, input.flightBindingId);
+      if (
+        binding === null ||
+        binding.ownerUserId !== input.ownerUserId ||
+        binding.tripId !== input.tripId
+      ) {
+        return false;
+      }
+      const capability =
+        await transaction.flightMonitoringCapability.findUnique({
+          where: { flightBindingId: input.flightBindingId },
+        });
+      if (
+        capability?.state !== 'ENABLED' ||
+        capability.revision !== input.expectedCapabilityRevision
+      ) {
+        return false;
+      }
+      await transaction.flightMonitorState.upsert({
+        where: { flightBindingId: input.flightBindingId },
+        create: {
+          flightBindingId: input.flightBindingId,
+          arrivedAtAirportAt: input.now,
+          arrivedAirportIata: input.airportIata,
+        },
+        update: {
+          arrivedAtAirportAt: input.now,
+          arrivedAirportIata: input.airportIata,
+        },
+      });
+      return true;
     });
-    if (binding === null) return null;
-    await this.client.flightMonitorState.upsert({
-      where: { flightBindingId: input.flightBindingId },
-      create: {
-        flightBindingId: input.flightBindingId,
-        arrivedAtAirportAt: input.now,
-        arrivedAirportIata: input.airportIata,
-      },
-      update: {
-        arrivedAtAirportAt: input.now,
-        arrivedAirportIata: input.airportIata,
-      },
-    });
+    if (!accepted) return null;
     return this.findContext(input.flightBindingId);
   }
 
@@ -175,6 +216,16 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
       if (
         binding === null ||
         binding.lastRefreshedAt.getTime() !== input.acceptedFetchedAt.getTime()
+      ) {
+        return null;
+      }
+      const capability =
+        await transaction.flightMonitoringCapability.findUnique({
+          where: { flightBindingId: input.flightBindingId },
+        });
+      if (
+        capability?.state !== 'ENABLED' ||
+        capability.revision !== input.expectedCapabilityRevision
       ) {
         return null;
       }
@@ -223,6 +274,25 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
       if (replaceSchedule) {
         await cancelQueuedJobs(transaction, input.flightBindingId, input.now);
       }
+      if (
+        decision.nextCheckAt === null &&
+        (decision.state.mode === 'BAGGAGE' ||
+          decision.state.mode === 'CANCELLED')
+      ) {
+        await transaction.flightMonitoringCapability.updateMany({
+          where: {
+            flightBindingId: input.flightBindingId,
+            state: { in: ['ENABLED', 'PAUSED'] },
+            revision: capability.revision,
+          },
+          data: {
+            state: 'STOPPED',
+            revision: { increment: 1 },
+            stoppedAt: input.now,
+            stopReason: 'NATURAL_END',
+          },
+        });
+      }
       if (decision.state.mode === 'NORMAL' && replaceSchedule) {
         const snapshot =
           binding.latestSnapshot as unknown as FlightSnapshotView;
@@ -231,6 +301,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           transaction,
           input.flightBindingId,
           current.generation,
+          capability.revision,
           scheduled,
           input.now,
           true,
@@ -240,6 +311,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           transaction,
           input.flightBindingId,
           current.generation,
+          capability.revision,
           decision.nextCheckAt,
           decision.state.mode.toLowerCase(),
           replaceSchedule,
@@ -261,6 +333,16 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
     return this.client.$transaction(async (transaction) => {
       const binding = await lockBinding(transaction, input.flightBindingId);
       if (binding === null) return null;
+      const capability =
+        await transaction.flightMonitoringCapability.findUnique({
+          where: { flightBindingId: input.flightBindingId },
+        });
+      if (
+        capability?.state !== 'ENABLED' ||
+        capability.revision !== input.expectedCapabilityRevision
+      ) {
+        return null;
+      }
       const state = await transaction.flightMonitorState.findUnique({
         where: { flightBindingId: input.flightBindingId },
       });
@@ -280,6 +362,7 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           transaction,
           input.flightBindingId,
           state.generation,
+          capability.revision,
           input.nextCheckAt,
           `${input.state.mode.toLowerCase()}-failure`,
           ['DELAYED', 'CANCELLED', 'BAGGAGE'].includes(input.state.mode),
@@ -310,12 +393,14 @@ type Transaction = Prisma.TransactionClient;
 async function hasLiveMonitorJob(
   transaction: Transaction,
   flightBindingId: string,
+  capabilityRevision: number,
 ): Promise<boolean> {
   return (
     (await transaction.job.count({
       where: {
         type: 'FLIGHT_MONITOR',
         payloadRef: flightBindingId,
+        capabilityRevision,
         status: { in: ['QUEUED', 'RUNNING'] },
       },
     })) > 0
@@ -335,6 +420,7 @@ async function scheduleNormalJobs(
   transaction: Transaction,
   flightBindingId: string,
   generation: string,
+  capabilityRevision: number,
   scheduledDeparture: Date,
   now: Date,
   reactivateCancelled = false,
@@ -344,6 +430,7 @@ async function scheduleNormalJobs(
       transaction,
       flightBindingId,
       generation,
+      capabilityRevision,
       runAt,
       'normal',
       reactivateCancelled,
@@ -355,11 +442,12 @@ async function scheduleJob(
   transaction: Transaction,
   flightBindingId: string,
   generation: string,
+  capabilityRevision: number,
   runAt: Date,
   reason: string,
   reactivateCancelled = false,
 ) {
-  const uniqueKey = `flight-monitor:${flightBindingId}:${generation}:${reason}:${runAt.getTime()}`;
+  const uniqueKey = `flight-monitor:${flightBindingId}:${generation}:cap-${capabilityRevision}:${reason}:${runAt.getTime()}`;
   if (reactivateCancelled) {
     await transaction.job.updateMany({
       where: { uniqueKey, status: 'CANCELLED' },
@@ -368,6 +456,7 @@ async function scheduleJob(
         runAt,
         attempts: 0,
         maxAttempts: JOB_ATTEMPTS,
+        capabilityRevision,
         leaseOwner: null,
         leaseUntil: null,
         cancelRequested: false,
@@ -387,6 +476,7 @@ async function scheduleJob(
       maxAttempts: JOB_ATTEMPTS,
       uniqueKey,
       payloadRef: flightBindingId,
+      capabilityRevision,
     },
     update: {},
   });
@@ -503,6 +593,7 @@ function toContext(
     };
   },
   state: FlightMonitorState,
+  capability: FlightMonitoringCapability | null,
 ): FlightMonitorContext {
   return {
     actor: {
@@ -516,6 +607,7 @@ function toContext(
       mode: state.mode,
       arrivedAtAirportAt: state.arrivedAtAirportAt,
       lastSuccessfulMonitorRefreshAt: state.lastSuccessfulMonitorRefreshAt,
+      lastDecisionFetchedAt: state.lastDecisionFetchedAt,
       lastNotifiedDelayMinutes: state.lastNotifiedDelayMinutes,
       earlyDepartureNotified: state.earlyDepartureNotified,
       lastNotifiedDepartureGate: state.lastNotifiedDepartureGate,
@@ -525,6 +617,10 @@ function toContext(
       baggageWindowEndsAt: state.baggageWindowEndsAt,
       lastNotifiedBaggage: state.lastNotifiedBaggage,
     },
+    capability:
+      capability === null
+        ? { state: 'NOT_ENABLED', revision: 0 }
+        : { state: capability.state, revision: capability.revision },
   };
 }
 

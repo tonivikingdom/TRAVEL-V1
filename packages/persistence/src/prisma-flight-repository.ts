@@ -179,11 +179,24 @@ export class PrismaFlightRepository implements FlightRepository {
     readonly tripId: string;
     readonly flightBindingId: string;
     readonly flight: FlightSnapshotView;
+    readonly expectedMonitoringCapabilityRevision?: number;
   }): Promise<FlightRefreshRepositoryResult> {
     return this.client.$transaction(async (transaction) => {
       await lockOwner(transaction, input.ownerUserId);
       const trip = await lockOwnedTrip(transaction, input);
       if (trip === null) return { status: 'NOT_FOUND' };
+      if (input.expectedMonitoringCapabilityRevision !== undefined) {
+        const capability =
+          await transaction.flightMonitoringCapability.findUnique({
+            where: { flightBindingId: input.flightBindingId },
+          });
+        if (
+          capability?.state !== 'ENABLED' ||
+          capability.revision !== input.expectedMonitoringCapabilityRevision
+        ) {
+          return { status: 'CAPABILITY_CHANGED' };
+        }
+      }
       const binding = await transaction.flightBinding.findFirst({
         where: {
           id: input.flightBindingId,

@@ -34,6 +34,7 @@ export interface ExecutionFlightDepartureRecord {
   readonly flightBindingId: string;
   readonly departureNodeId: string;
   readonly airportIata: string;
+  readonly monitoringCapabilityRevision: number;
 }
 
 export interface ExecutionContextRecord {
@@ -48,6 +49,14 @@ export interface ExecutionContextRecord {
   readonly confirmedSkippedNodeIds: readonly string[];
   readonly flightDepartures: readonly ExecutionFlightDepartureRecord[];
   readonly pendingAirportArrivalEvents: readonly ExecutionEventRecord[];
+  readonly locationAssistance: {
+    readonly state: 'NOT_ENABLED' | 'ENABLED' | 'PAUSED' | 'STOPPED';
+    readonly revision: number;
+  };
+  readonly autoRecord: {
+    readonly state: 'NOT_ENABLED' | 'ENABLED' | 'PAUSED' | 'STOPPED';
+    readonly revision: number;
+  };
 }
 
 export type CommitExecutionResult =
@@ -65,7 +74,8 @@ export type CommitExecutionResult =
         | 'FACT_PROTECTED'
         | 'IDEMPOTENCY_CONFLICT'
         | 'INVALID_CONTEXT'
-        | 'UNDO_CONFLICT';
+        | 'UNDO_CONFLICT'
+        | 'CAPABILITY_CHANGED';
     };
 
 export type AirportTriggerClaimResult =
@@ -97,6 +107,9 @@ export interface ExecutionLocationRepository {
     readonly expectedObservationWatermarkAt: Date | null;
     readonly decision: ExecutionLocationDecision;
     readonly observedAt: Date;
+    readonly expectedLocationCapabilityRevision: number;
+    readonly expectedAutoRecordCapabilityRevision: number;
+    readonly autoRecordEnabled: boolean;
   }): Promise<CommitExecutionResult>;
   commitManual(input: {
     readonly ownerUserId: string;

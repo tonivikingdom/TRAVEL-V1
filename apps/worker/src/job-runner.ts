@@ -3,7 +3,11 @@ import type { ClaimedJob, JobRepository, JobType } from '@travel/application';
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export interface JobHandler {
-  execute(payloadRef: string, signal: AbortSignal): Promise<void>;
+  execute(
+    payloadRef: string,
+    signal: AbortSignal,
+    capabilityRevision: number | null,
+  ): Promise<void>;
 }
 
 export interface JobRunnerConfig {
@@ -110,7 +114,11 @@ export function createJobRunner(
           throw new Error('JOB_HANDLER_UNAVAILABLE');
         }
         await Promise.race([
-          handler.execute(job.payloadRef, controller.signal),
+          handler.execute(
+            job.payloadRef,
+            controller.signal,
+            job.capabilityRevision ?? null,
+          ),
           new Promise<never>((_resolve, reject) => {
             controller.signal.addEventListener(
               'abort',

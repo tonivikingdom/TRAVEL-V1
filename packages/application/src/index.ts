@@ -1,5 +1,14 @@
 export { AuthService, type AuthServiceConfig } from './auth-service.js';
 export {
+  AssistanceCapabilityService,
+  type AssistanceCapabilityServiceOptions,
+} from './assistance-capability-service.js';
+export type {
+  AssistanceCapabilityRecord,
+  AssistanceCapabilityRepository,
+  AssistanceMutationRepositoryResult,
+} from './assistance-capability-ports.js';
+export {
   authorize,
   type Actor,
   type AuthAction,

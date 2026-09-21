@@ -1,4 +1,10 @@
 export {
+  decideAssistanceTransition,
+  type AssistanceTransitionAction,
+  type AssistanceTransitionDecision,
+  type PersistedAssistanceState,
+} from './assistance-capability.js';
+export {
   AbsoluteInstantError,
   parseAbsoluteIsoInstant,
   type AbsoluteInstantErrorReason,

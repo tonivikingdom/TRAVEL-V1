@@ -27,6 +27,17 @@ interface LockedAirportTriggerRow {
   readonly airportTriggerCompletedAt: Date | null;
 }
 
+function capabilityBasis(
+  capability:
+    | {
+        readonly state: 'ENABLED' | 'PAUSED' | 'STOPPED';
+        readonly revision: number;
+      }
+    | undefined,
+) {
+  return capability ?? { state: 'NOT_ENABLED' as const, revision: 0 };
+}
+
 export class PrismaExecutionLocationRepository implements ExecutionLocationRepository {
   constructor(private readonly client: PrismaClient) {}
 
@@ -42,6 +53,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         version: true,
         executionLocationState: true,
         executionObservationWatermark: true,
+        assistanceCapabilities: true,
         executionArrivalSuppressions: {
           orderBy: [{ suppressedAt: 'asc' }, { nodeId: 'asc' }],
           select: { nodeId: true },
@@ -71,6 +83,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
             id: true,
             latestSnapshot: true,
             transportEdge: { select: { fromNodeId: true } },
+            monitoringCapability: { select: { state: true, revision: true } },
           },
         },
         executionEvents: {
@@ -133,6 +146,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         .filter((node) => node.executionStatus === 'SKIPPED')
         .map((node) => node.id),
       flightDepartures: trip.flightBindings.flatMap((binding) => {
+        if (binding.monitoringCapability?.state !== 'ENABLED') return [];
         const snapshot = binding.latestSnapshot as unknown as {
           readonly departure?: { readonly airportIata?: unknown };
         };
@@ -144,11 +158,23 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
                 flightBindingId: binding.id,
                 departureNodeId: binding.transportEdge.fromNodeId,
                 airportIata,
+                monitoringCapabilityRevision:
+                  binding.monitoringCapability.revision,
               },
             ]
           : [];
       }),
       pendingAirportArrivalEvents: trip.executionEvents.map(toEventRecord),
+      locationAssistance: capabilityBasis(
+        trip.assistanceCapabilities.find(
+          (capability) => capability.kind === 'LOCATION_ASSISTANCE',
+        ),
+      ),
+      autoRecord: capabilityBasis(
+        trip.assistanceCapabilities.find(
+          (capability) => capability.kind === 'AUTO_RECORD',
+        ),
+      ),
     };
   }
 
@@ -194,6 +220,25 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
       );
       if (trip === null) return { status: 'NOT_FOUND' as const };
+      const capabilities = await transaction.tripAssistanceCapability.findMany({
+        where: { tripId: input.tripId },
+      });
+      const locationCapability = capabilities.find(
+        (capability) => capability.kind === 'LOCATION_ASSISTANCE',
+      );
+      const autoRecordCapability = capabilities.find(
+        (capability) => capability.kind === 'AUTO_RECORD',
+      );
+      if (
+        locationCapability?.state !== 'ENABLED' ||
+        locationCapability.revision !==
+          input.expectedLocationCapabilityRevision ||
+        (autoRecordCapability?.revision ?? 0) !==
+          input.expectedAutoRecordCapabilityRevision ||
+        (autoRecordCapability?.state === 'ENABLED') !== input.autoRecordEnabled
+      ) {
+        return { status: 'CAPABILITY_CHANGED' as const };
+      }
       const currentWatermark =
         await transaction.executionObservationWatermark.findUnique({
           where: { tripId: input.tripId },
@@ -210,8 +255,10 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
       let version = trip.version;
       let idempotentReplay = false;
       if (
-        input.decision.status === 'CONFIRMED_ARRIVAL' ||
-        input.decision.status === 'CONFIRMED_DEPARTURE'
+        (input.autoRecordEnabled &&
+          input.decision.status === 'CONFIRMED_ARRIVAL') ||
+        (input.autoRecordEnabled &&
+          input.decision.status === 'CONFIRMED_DEPARTURE')
       ) {
         const type =
           input.decision.status === 'CONFIRMED_ARRIVAL'
@@ -265,6 +312,13 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
         input.observedAt,
       );
+      if (event !== null && !idempotentReplay) {
+        await stopTripAssistanceIfComplete(
+          transaction,
+          input.tripId,
+          input.observedAt,
+        );
+      }
       return {
         status: 'SUCCESS' as const,
         event,
@@ -362,6 +416,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
           data: { status: 'SKIPPED' },
         });
         await finishManualMutation(transaction, input.tripId);
+        await stopTripAssistanceIfComplete(
+          transaction,
+          input.tripId,
+          input.occurredAt,
+        );
         return {
           status: 'SUCCESS' as const,
           event: toEventRecord(created),
@@ -397,6 +456,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         });
       }
       await finishManualMutation(transaction, input.tripId);
+      await stopTripAssistanceIfComplete(
+        transaction,
+        input.tripId,
+        input.occurredAt,
+      );
       return {
         status: 'SUCCESS' as const,
         event: toEventRecord(result.event),
@@ -712,6 +776,45 @@ async function finishManualMutation(
     where: { id: tripId },
     data: { version: { increment: 1 } },
   });
+}
+
+async function stopTripAssistanceIfComplete(
+  transaction: Transaction,
+  tripId: string,
+  now: Date,
+): Promise<void> {
+  const nodes = await transaction.itineraryNode.findMany({
+    where: { tripId },
+    select: {
+      temporalValues: {
+        where: { layer: 'ACTUAL', pointKind: 'ARRIVAL' },
+        select: { id: true },
+      },
+      executionState: { select: { status: true } },
+    },
+  });
+  if (
+    nodes.length === 0 ||
+    nodes.some(
+      (node) =>
+        node.temporalValues.length === 0 &&
+        node.executionState?.status !== 'SKIPPED',
+    )
+  ) {
+    return;
+  }
+  const stopped = await transaction.tripAssistanceCapability.updateMany({
+    where: { tripId, state: { in: ['ENABLED', 'PAUSED'] } },
+    data: {
+      state: 'STOPPED',
+      revision: { increment: 1 },
+      stoppedAt: now,
+      stopReason: 'NATURAL_END',
+    },
+  });
+  if (stopped.count > 0) {
+    await transaction.executionLocationState.deleteMany({ where: { tripId } });
+  }
 }
 
 async function upsertLocationState(

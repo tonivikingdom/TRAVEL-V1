@@ -42,6 +42,8 @@ export interface ExecutionContextRecord {
   readonly tripVersion: number;
   readonly nodes: readonly ExecutionContextNodeRecord[];
   readonly locationState: ExecutionDerivedLocationState | null;
+  readonly observationWatermarkAt: Date | null;
+  readonly suppressedArrivalNodeIds: readonly string[];
   readonly possibleSkippedNodeIds: readonly string[];
   readonly confirmedSkippedNodeIds: readonly string[];
   readonly flightDepartures: readonly ExecutionFlightDepartureRecord[];
@@ -92,7 +94,7 @@ export interface ExecutionLocationRepository {
     readonly ownerUserId: string;
     readonly tripId: string;
     readonly expectedTripVersion: number;
-    readonly expectedLastObservedAt: Date | null;
+    readonly expectedObservationWatermarkAt: Date | null;
     readonly decision: ExecutionLocationDecision;
     readonly observedAt: Date;
   }): Promise<CommitExecutionResult>;

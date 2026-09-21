@@ -90,6 +90,7 @@ export {
   resolveExecutionFrontier,
   type ExecutionDerivedLocationState,
   type ExecutionFrontier,
+  type ExecutionFrontierConflict,
   type ExecutionLocationDecision,
   type ExecutionLocationPolicy,
   type ExecutionTargetKind,

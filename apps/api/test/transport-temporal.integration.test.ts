@@ -965,7 +965,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
 
     const actual = await temporalValueResponse(userA, trip, subject, {
       layer: 'ACTUAL',
-      sourceKind: 'PROVIDER_OBSERVATION',
+      sourceKind: 'USER_VALUE',
       observedAt: '2030-10-01T19:31:00+08:00',
     });
     expect(actual.statusCode).toBe(200);
@@ -973,7 +973,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     const overwrite = await temporalValueResponse(userA, trip, subject, {
       layer: 'ACTUAL',
       instant: '2030-10-01T19:32:00+08:00',
-      sourceKind: 'PROVIDER_OBSERVATION',
+      sourceKind: 'USER_VALUE',
       observedAt: '2030-10-01T19:33:00+08:00',
     });
     expect(overwrite.statusCode).toBe(409);
@@ -982,27 +982,50 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     });
   });
 
-  it('[AUDIT SOURCE TRUST] accepts an owner-supplied provider provenance through public temporal HTTP', async () => {
-    const trip = await tripWithPlaces(userA, ['A']);
-    const subject = {
-      type: 'NODE',
-      nodeId: trip.days[0]!.nodes[0]!.id,
-    } as const;
-    const response = await temporalValueResponse(userA, trip, subject, {
-      layer: 'ACTUAL',
-      sourceKind: 'PROVIDER_OBSERVATION',
-      sourceRef: 'provider:caller-controlled-reference',
-      observedAt: '2030-10-01T19:31:00+08:00',
-    });
+  it.each([
+    'PROVIDER_OBSERVATION',
+    'ADOPTED_TRANSPORT_FACT',
+    'EXECUTION_OBSERVATION',
+    'DERIVED',
+    'SYSTEM_SUGGESTION',
+  ])(
+    '[REGRESSION F-11] rejects owner-supplied trusted provenance %s through public temporal HTTP',
+    async (sourceKind) => {
+      const trip = await tripWithPlaces(userA, ['A']);
+      const subject = {
+        type: 'NODE',
+        nodeId: trip.days[0]!.nodes[0]!.id,
+      } as const;
+      const response = await temporalValueResponse(userA, trip, subject, {
+        layer: 'ACTUAL',
+        sourceKind,
+        sourceRef: 'provider:caller-controlled-reference',
+        observedAt: '2030-10-01T19:31:00+08:00',
+      });
 
-    expect(response.statusCode).toBe(200);
-    expect(
-      (response.json() as TripView).days[0]!.nodes[0]!.timeValues[0],
-    ).toMatchObject({
-      layer: 'ACTUAL',
-      sourceKind: 'PROVIDER_OBSERVATION',
-      sourceRef: 'provider:caller-controlled-reference',
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        error: { code: 'VALIDATION_ERROR' },
+      });
+      expect(await managed.client.temporalValue.count()).toBe(0);
+      expect((await getTrip(userA, trip.id)).version).toBe(trip.version);
+    },
+  );
+
+  it('[REGRESSION F-11] rejects a caller-controlled sourceRef even with USER_VALUE', async () => {
+    const trip = await tripWithPlaces(userA, ['A']);
+    const response = await temporalValueResponse(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: trip.days[0]!.nodes[0]!.id },
+      { sourceKind: 'USER_VALUE', sourceRef: 'provider:forged' },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR' },
     });
+    expect(await managed.client.temporalValue.count()).toBe(0);
   });
 
   it('rejects an offset masquerading as an IANA time zone over HTTP', async () => {
@@ -1270,7 +1293,7 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
           instant: '2030-10-01T19:30:00+08:00',
           timeZone: 'Asia/Shanghai',
           sourceKind: 'USER_VALUE',
-          sourceRef: 'SYNTHETIC_HTTP_P5A',
+          sourceRef: null,
           ...valueOverrides,
         },
       },

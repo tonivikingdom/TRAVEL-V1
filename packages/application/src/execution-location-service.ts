@@ -80,7 +80,9 @@ export class ExecutionLocationService {
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const context = await this.requireContext(actor, tripId);
-      const previousObservedAt = context.locationState?.lastObservedAt ?? null;
+      const frontier = resolveExecutionFrontier(toDomainNodes(context));
+      requireConsistentFrontier(frontier);
+      const previousObservedAt = context.observationWatermarkAt;
       if (
         previousObservedAt !== null &&
         sample.observedAt.getTime() < previousObservedAt.getTime()
@@ -107,6 +109,7 @@ export class ExecutionLocationService {
       const decision = decideExecutionLocation({
         nodes: toDomainNodes(context),
         previousState: context.locationState,
+        suppressedArrivalNodeIds: context.suppressedArrivalNodeIds,
         sample,
         policy: this.policy,
       });
@@ -114,7 +117,7 @@ export class ExecutionLocationService {
         ownerUserId: actor.userId,
         tripId,
         expectedTripVersion: context.tripVersion,
-        expectedLastObservedAt: previousObservedAt,
+        expectedObservationWatermarkAt: previousObservedAt,
         decision,
         observedAt: sample.observedAt,
       });
@@ -278,6 +281,7 @@ export class ExecutionLocationService {
       currentNodeId: frontier.currentNode?.id ?? null,
       targetNodeId: frontier.targetNode?.id ?? null,
       currentState: frontier.state,
+      frontierConflict: frontier.conflict,
       latestArrival: latestFact(context, 'ARRIVAL'),
       latestDeparture: latestFact(context, 'DEPARTURE'),
       possibleSkippedNodeIds: context.possibleSkippedNodeIds,
@@ -423,6 +427,7 @@ function validateManualContext(
   type: 'ARRIVAL' | 'DEPARTURE' | 'SKIP_CONFIRMED',
 ): void {
   const frontier = resolveExecutionFrontier(toDomainNodes(context));
+  requireConsistentFrontier(frontier);
   const valid =
     type === 'ARRIVAL'
       ? frontier.targetNode?.id === nodeId
@@ -436,6 +441,17 @@ function validateManualContext(
       409,
     );
   }
+}
+
+function requireConsistentFrontier(
+  frontier: ReturnType<typeof resolveExecutionFrontier>,
+): void {
+  if (frontier.state !== 'INCONSISTENT') return;
+  throw new ApplicationError(
+    'EXECUTION_EVENT_CONFLICT',
+    '执行记录存在因果冲突，请先纠正实际到达或离开记录。',
+    409,
+  );
 }
 
 function requireSuccess(result: CommitExecutionResult) {

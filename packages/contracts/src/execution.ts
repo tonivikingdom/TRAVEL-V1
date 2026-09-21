@@ -49,7 +49,12 @@ export type ExecutionEventType = 'ARRIVAL' | 'DEPARTURE' | 'SKIP_CONFIRMED';
 export type ExecutionEventSource = 'LOCATION' | 'MANUAL';
 export type NodeExecutionStatus = 'POSSIBLY_SKIPPED' | 'SKIPPED';
 export type ExecutionCurrentState =
-  'NOT_STARTED' | 'AT_NODE' | 'EN_ROUTE' | 'COMPLETED';
+  'NOT_STARTED' | 'AT_NODE' | 'EN_ROUTE' | 'COMPLETED' | 'INCONSISTENT';
+export interface ExecutionFrontierConflictView {
+  readonly code: 'MULTIPLE_OPEN_NODES' | 'OPEN_NODE_PRECEDES_LATER_EXECUTION';
+  readonly openNodeIds: readonly string[];
+  readonly laterExecutedNodeIds: readonly string[];
+}
 export type ExecutionLocationStatus =
   'NO_SAMPLE' | 'RELIABLE' | 'INDETERMINATE';
 
@@ -118,6 +123,7 @@ export interface ExecutionContextResponse {
   readonly currentNodeId: string | null;
   readonly targetNodeId: string | null;
   readonly currentState: ExecutionCurrentState;
+  readonly frontierConflict: ExecutionFrontierConflictView | null;
   readonly latestArrival: {
     readonly nodeId: string;
     readonly instant: string;

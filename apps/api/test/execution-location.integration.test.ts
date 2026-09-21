@@ -539,7 +539,7 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     });
   });
 
-  it('[AUDIT F-03] reproduces an undone location arrival from the identical observation', async () => {
+  it('[REGRESSION F-03] keeps an identical observation suppressed after Undo', async () => {
     await createAirportBinding('aerodatabox:audit-f03-identical');
     const sample = {
       latitude: 35,
@@ -563,20 +563,16 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
 
     const replay = await observe(owner, sample);
     expect(replay.json<ExecutionLocationResponse>()).toMatchObject({
-      status: 'CONFIRMED_ARRIVAL',
-      resultingTripVersion: 4,
+      status: 'NO_CHANGE',
+      resultingTripVersion: 3,
+      event: null,
     });
     const events = await managed.client.executionEvent.findMany({
       where: { tripId: fixture.tripId, type: 'ARRIVAL' },
       orderBy: { createdAt: 'asc' },
     });
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(1);
     expect(events[0]!.undoneAt).not.toBeNull();
-    expect(events[1]!.undoneAt).toBeNull();
-    expect(events.map((event) => event.occurredAt.toISOString())).toEqual([
-      sample.observedAt,
-      sample.observedAt,
-    ]);
     expect(
       await managed.client.temporalValue.count({
         where: {
@@ -585,12 +581,12 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
           layer: 'ACTUAL',
         },
       }),
-    ).toBe(1);
-    expect(await tripVersion()).toBe(4);
-    expect(flightTrigger).toHaveBeenCalledTimes(2);
+    ).toBe(0);
+    expect(await tripVersion()).toBe(3);
+    expect(flightTrigger).toHaveBeenCalledTimes(1);
   });
 
-  it('[AUDIT F-03] reproduces an undone arrival from an older still-fresh observation', async () => {
+  it('[REGRESSION F-03] rejects an older still-fresh observation after Undo', async () => {
     const first = await observe(owner, {
       latitude: 35,
       longitude: 139,
@@ -611,16 +607,15 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       accuracyMeters: 10,
       observedAt: '2030-01-01T10:01:00.000Z',
     });
-    expect(older.json<ExecutionLocationResponse>()).toMatchObject({
-      status: 'CONFIRMED_ARRIVAL',
-      resultingTripVersion: 4,
-      event: { occurredAt: '2030-01-01T10:01:00.000Z' },
+    expect(older.statusCode).toBe(409);
+    expect(older.json()).toMatchObject({
+      error: { code: 'EXECUTION_SAMPLE_STALE' },
     });
-    expect(await managed.client.executionEvent.count()).toBe(2);
-    expect(await tripVersion()).toBe(4);
+    expect(await managed.client.executionEvent.count()).toBe(1);
+    expect(await tripVersion()).toBe(3);
   });
 
-  it('[AUDIT F-03] records current handling of a newer observation after user Undo', async () => {
+  it('[REGRESSION F-03] keeps a newer inside observation suppressed after user Undo', async () => {
     const first = await observe(owner, {
       latitude: 35,
       longitude: 139,
@@ -642,14 +637,27 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       observedAt: '2030-01-01T10:04:00.000Z',
     });
     expect(newer.json<ExecutionLocationResponse>()).toMatchObject({
-      status: 'CONFIRMED_ARRIVAL',
-      resultingTripVersion: 4,
+      status: 'NO_CHANGE',
+      resultingTripVersion: 3,
+      event: null,
     });
-    expect(await managed.client.executionEvent.count()).toBe(2);
-    expect(await tripVersion()).toBe(4);
+    expect(await managed.client.executionEvent.count()).toBe(1);
+    expect(await tripVersion()).toBe(3);
+    expect(
+      await managed.client.executionArrivalSuppression.count({
+        where: { nodeId: fixture.nodeAId },
+      }),
+    ).toBe(1);
+    expect(
+      (
+        await managed.client.executionObservationWatermark.findUniqueOrThrow({
+          where: { tripId: fixture.tripId },
+        })
+      ).lastObservedAt,
+    ).toEqual(new Date('2030-01-01T10:04:00.000Z'));
   });
 
-  it('[AUDIT F-03] serializes concurrent Undo before a queued newer observation and reproduces once', async () => {
+  it('[REGRESSION F-03] serializes concurrent Undo before a queued newer observation without revival', async () => {
     const first = await observe(owner, {
       latitude: 35,
       longitude: 139,
@@ -692,10 +700,10 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     ]);
     expect(undo.statusCode).toBe(200);
     expect(observation.json<ExecutionLocationResponse>()).toMatchObject({
-      status: 'CONFIRMED_ARRIVAL',
-      resultingTripVersion: 4,
+      status: 'NO_CHANGE',
+      resultingTripVersion: 3,
     });
-    expect(await managed.client.executionEvent.count()).toBe(2);
+    expect(await managed.client.executionEvent.count()).toBe(1);
     expect(
       await managed.client.temporalValue.count({
         where: {
@@ -704,8 +712,89 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
           layer: 'ACTUAL',
         },
       }),
-    ).toBe(1);
+    ).toBe(0);
+    expect(await tripVersion()).toBe(3);
+  });
+
+  it('[REGRESSION F-03] re-arms only after reliable exit and permits one later re-entry and airport trigger', async () => {
+    await createAirportBinding('aerodatabox:regression-f03-reentry');
+    const arrival = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    const eventId = arrival.json<ExecutionLocationResponse>().event!.id;
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${eventId}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+
+    const outside = await observe(owner, {
+      latitude: 35.004,
+      longitude: 139.004,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:02:00.000Z',
+    });
+    expect(outside.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      resultingTripVersion: 3,
+    });
+    expect(
+      await managed.client.executionArrivalSuppression.count({
+        where: { nodeId: fixture.nodeAId },
+      }),
+    ).toBe(0);
+    expect(await tripVersion()).toBe(3);
+
+    const reentry = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:03:00.000Z',
+    });
+    expect(reentry.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 4,
+      event: { nodeId: fixture.nodeAId },
+    });
+    expect(await managed.client.executionEvent.count()).toBe(2);
     expect(await tripVersion()).toBe(4);
+    expect(flightTrigger).toHaveBeenCalledTimes(2);
+  });
+
+  it('[REGRESSION F-03] allows a later node arrival while never reviving the suppressed node', async () => {
+    const arrival = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${arrival.json<ExecutionLocationResponse>().event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+
+    const later = await observe(owner, {
+      latitude: 35.01,
+      longitude: 139.01,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:02:00.000Z',
+    });
+    expect(later.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 4,
+      event: { nodeId: fixture.nodeBId },
+    });
+    expect(
+      await managed.client.executionEvent.count({
+        where: { nodeId: fixture.nodeAId, undoneAt: null },
+      }),
+    ).toBe(0);
   });
 
   it('supports idempotent manual departure and exact-source undo with monotonic versions', async () => {
@@ -761,7 +850,7 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     ).toBe(0);
   });
 
-  it('[AUDIT EXECUTION ORDER] permits arrival Undo while the same node departure fact remains', async () => {
+  it('[REGRESSION F-13] rejects arrival Undo while the same node departure fact remains', async () => {
     const arrival = await observe(owner, {
       latitude: 35,
       longitude: 139,
@@ -784,8 +873,10 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       headers: bearer(owner.credential),
       payload: { baseTripVersion: 3, idempotencyKey: randomUUID() },
     });
-    expect(undo.statusCode).toBe(200);
-    expect(undo.json<ExecutionUndoResponse>().resultingTripVersion).toBe(4);
+    expect(undo.statusCode).toBe(409);
+    expect(undo.json()).toMatchObject({
+      error: { code: 'EXECUTION_EVENT_CONFLICT' },
+    });
     expect(
       await managed.client.temporalValue.count({
         where: {
@@ -794,7 +885,7 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
           layer: 'ACTUAL',
         },
       }),
-    ).toBe(0);
+    ).toBe(1);
     expect(
       await managed.client.temporalValue.count({
         where: {
@@ -804,7 +895,7 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
         },
       }),
     ).toBe(1);
-    expect(await tripVersion()).toBe(4);
+    expect(await tripVersion()).toBe(3);
   });
 
   it('marks intervening nodes possibly skipped and confirms or undoes skip without deleting itinerary nodes', async () => {
@@ -850,6 +941,75 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       confirmedSkippedNodeIds: [],
     });
     expect(await managed.client.itineraryNode.count()).toBe(3);
+  });
+
+  it('[REGRESSION F-13] exposes an inconsistent frontier and rejects automatic location mutation', async () => {
+    await managed.client.temporalValue.createMany({
+      data: [
+        {
+          nodeId: fixture.nodeAId,
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: new Date('2030-01-01T09:00:00.000Z'),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+        {
+          nodeId: fixture.nodeBId,
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: new Date('2030-01-01T09:30:00.000Z'),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+        {
+          nodeId: fixture.nodeBId,
+          layer: 'ACTUAL',
+          pointKind: 'DEPARTURE',
+          instant: new Date('2030-01-01T09:45:00.000Z'),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      ],
+    });
+
+    const context = await getExecution(owner);
+    expect(context.statusCode).toBe(200);
+    expect(context.json<ExecutionContextResponse>()).toMatchObject({
+      currentState: 'INCONSISTENT',
+      currentNodeId: fixture.nodeAId,
+      targetNodeId: null,
+      frontierConflict: {
+        code: 'OPEN_NODE_PRECEDES_LATER_EXECUTION',
+        openNodeIds: [fixture.nodeAId],
+        laterExecutedNodeIds: [fixture.nodeBId],
+      },
+    });
+
+    const observation = await observe(owner, {
+      latitude: 35.02,
+      longitude: 139.02,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    expect(observation.statusCode).toBe(409);
+    expect(observation.json()).toMatchObject({
+      error: { code: 'EXECUTION_EVENT_CONFLICT' },
+    });
+    expect(await managed.client.executionEvent.count()).toBe(0);
+    expect(await tripVersion()).toBe(1);
+
+    await managed.client.temporalValue.deleteMany({
+      where: { nodeId: fixture.nodeBId, layer: 'ACTUAL' },
+    });
+    expect(
+      (await getExecution(owner)).json<ExecutionContextResponse>(),
+    ).toMatchObject({
+      currentState: 'AT_NODE',
+      currentNodeId: fixture.nodeAId,
+      targetNodeId: fixture.nodeBId,
+      frontierConflict: null,
+    });
   });
 
   it('hides execution context and mutations from other owners and administrators', async () => {

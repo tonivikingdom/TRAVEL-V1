@@ -408,6 +408,8 @@ model Trip {
   flightBindings          FlightBinding[]
   executionEvents         ExecutionEvent[]
   executionLocationState  ExecutionLocationState?
+  executionObservationWatermark ExecutionObservationWatermark?
+  executionArrivalSuppressions  ExecutionArrivalSuppression[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -522,6 +524,7 @@ model ItineraryNode {
   executionState         NodeExecutionState?
   locationStatesCurrent  ExecutionLocationState[] @relation("ExecutionLocationCurrentNode")
   locationStatesTarget   ExecutionLocationState[] @relation("ExecutionLocationTargetNode")
+  executionArrivalSuppression ExecutionArrivalSuppression?
 
   @@unique([dayOccurrenceId, position])
   @@unique([id, tripId])
@@ -850,6 +853,7 @@ model ExecutionEvent {
   trip                      Trip                 @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
   node                      ItineraryNode        @relation(fields: [nodeId, tripId], references: [id, tripId], onDelete: Cascade)
   detectedNodeStates        NodeExecutionState[]
+  arrivalSuppression        ExecutionArrivalSuppression?
 
   @@unique([ownerUserId, idempotencyKey])
   @@unique([ownerUserId, undoIdempotencyKey])
@@ -874,6 +878,27 @@ model ExecutionLocationState {
 
   @@index([currentNodeId])
   @@index([targetNodeId])
+}
+
+model ExecutionObservationWatermark {
+  tripId         String   @id @db.Uuid
+  lastObservedAt DateTime @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  trip           Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+}
+
+model ExecutionArrivalSuppression {
+  nodeId              String         @id @db.Uuid
+  tripId              String         @db.Uuid
+  suppressedByEventId String         @unique @db.Uuid
+  suppressedAt        DateTime       @db.Timestamptz(3)
+  trip                Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  node                ItineraryNode  @relation(fields: [nodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  suppressedByEvent   ExecutionEvent @relation(fields: [suppressedByEventId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@unique([nodeId, tripId])
+  @@unique([suppressedByEventId, tripId])
+  @@index([tripId, suppressedAt])
 }
 
 model NodeExecutionState {

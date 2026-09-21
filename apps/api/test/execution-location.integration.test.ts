@@ -539,6 +539,175 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     });
   });
 
+  it('[AUDIT F-03] reproduces an undone location arrival from the identical observation', async () => {
+    await createAirportBinding('aerodatabox:audit-f03-identical');
+    const sample = {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    };
+    const first = await observe(owner, sample);
+    const firstBody = first.json<ExecutionLocationResponse>();
+    expect(firstBody).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 2,
+    });
+    const undo = await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+    expect(undo.json<ExecutionUndoResponse>().resultingTripVersion).toBe(3);
+
+    const replay = await observe(owner, sample);
+    expect(replay.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 4,
+    });
+    const events = await managed.client.executionEvent.findMany({
+      where: { tripId: fixture.tripId, type: 'ARRIVAL' },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]!.undoneAt).not.toBeNull();
+    expect(events[1]!.undoneAt).toBeNull();
+    expect(events.map((event) => event.occurredAt.toISOString())).toEqual([
+      sample.observedAt,
+      sample.observedAt,
+    ]);
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          nodeId: fixture.nodeAId,
+          pointKind: 'ARRIVAL',
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(1);
+    expect(await tripVersion()).toBe(4);
+    expect(flightTrigger).toHaveBeenCalledTimes(2);
+  });
+
+  it('[AUDIT F-03] reproduces an undone arrival from an older still-fresh observation', async () => {
+    const first = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:02:00.000Z',
+    });
+    const firstBody = first.json<ExecutionLocationResponse>();
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+
+    const older = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:01:00.000Z',
+    });
+    expect(older.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 4,
+      event: { occurredAt: '2030-01-01T10:01:00.000Z' },
+    });
+    expect(await managed.client.executionEvent.count()).toBe(2);
+    expect(await tripVersion()).toBe(4);
+  });
+
+  it('[AUDIT F-03] records current handling of a newer observation after user Undo', async () => {
+    const first = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    const firstBody = first.json<ExecutionLocationResponse>();
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+
+    const newer = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:04:00.000Z',
+    });
+    expect(newer.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 4,
+    });
+    expect(await managed.client.executionEvent.count()).toBe(2);
+    expect(await tripVersion()).toBe(4);
+  });
+
+  it('[AUDIT F-03] serializes concurrent Undo before a queued newer observation and reproduces once', async () => {
+    const first = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    const firstBody = first.json<ExecutionLocationResponse>();
+    const lockReady = deferred();
+    const releaseLock = deferred();
+    const ownerLock = managed.client.$transaction(async (transaction) => {
+      await transaction.$queryRawUnsafe(
+        'SELECT TRUE AS locked FROM pg_advisory_xact_lock(hashtextextended($1, 2))',
+        owner.userId,
+      );
+      lockReady.resolve();
+      await releaseLock.promise;
+    });
+    await lockReady.promise;
+
+    const undoPromise = app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const observePromise = observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:04:00.000Z',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releaseLock.resolve();
+    await ownerLock;
+
+    const [undo, observation] = await Promise.all([
+      undoPromise,
+      observePromise,
+    ]);
+    expect(undo.statusCode).toBe(200);
+    expect(observation.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      resultingTripVersion: 4,
+    });
+    expect(await managed.client.executionEvent.count()).toBe(2);
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          nodeId: fixture.nodeAId,
+          pointKind: 'ARRIVAL',
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(1);
+    expect(await tripVersion()).toBe(4);
+  });
+
   it('supports idempotent manual departure and exact-source undo with monotonic versions', async () => {
     await observe(owner, {
       latitude: 35,
@@ -590,6 +759,52 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
         where: { nodeId: fixture.nodeAId, pointKind: 'DEPARTURE' },
       }),
     ).toBe(0);
+  });
+
+  it('[AUDIT EXECUTION ORDER] permits arrival Undo while the same node departure fact remains', async () => {
+    const arrival = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    const arrivalBody = arrival.json<ExecutionLocationResponse>();
+    const departure = await manual(owner, {
+      baseTripVersion: 2,
+      idempotencyKey: randomUUID(),
+      type: 'MANUAL_DEPARTURE',
+      nodeId: fixture.nodeAId,
+      occurredAt: '2030-01-01T10:01:00.000Z',
+    });
+    expect(departure.statusCode).toBe(200);
+
+    const undo = await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${arrivalBody.event!.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 3, idempotencyKey: randomUUID() },
+    });
+    expect(undo.statusCode).toBe(200);
+    expect(undo.json<ExecutionUndoResponse>().resultingTripVersion).toBe(4);
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          nodeId: fixture.nodeAId,
+          pointKind: 'ARRIVAL',
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          nodeId: fixture.nodeAId,
+          pointKind: 'DEPARTURE',
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(1);
+    expect(await tripVersion()).toBe(4);
   });
 
   it('marks intervening nodes possibly skipped and confirms or undoes skip without deleting itinerary nodes', async () => {

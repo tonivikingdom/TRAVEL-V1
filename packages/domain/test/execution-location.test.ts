@@ -36,6 +36,18 @@ describe('execution location policy', () => {
     expect(frontier.targetNode?.id).toBe('a');
   });
 
+  it('[AUDIT EXECUTION ORDER] exposes an open earlier node while advancing the target past a later completed node', () => {
+    const frontier = resolveExecutionFrontier([
+      { ...a, hasActualArrival: true, hasActualDeparture: false },
+      { ...b, hasActualArrival: true, hasActualDeparture: true },
+      c,
+    ]);
+
+    expect(frontier.currentNode?.id).toBe('a');
+    expect(frontier.targetNode?.id).toBe('c');
+    expect(frontier.state).toBe('AT_NODE');
+  });
+
   it('confirms arrival immediately when a reliable sample is inside target radius', () => {
     const result = decideExecutionLocation({
       nodes: [a, b],

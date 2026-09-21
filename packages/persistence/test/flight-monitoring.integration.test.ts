@@ -45,7 +45,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     await managed.close();
   });
 
-  it('runs a claimed durable job through refresh, risk, one notification and next schedule', async () => {
+  it('[AUDIT NOTIFICATION PATHS] records separate risk and flight notifications for one refresh', async () => {
     const fixture = await createFixture(managed);
     const initial = snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' });
     const delayed = snapshot({
@@ -107,6 +107,15 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         where: { tripId: fixture.tripId, status: 'OPEN' },
       }),
     ).toBeGreaterThan(0);
+    expect(
+      (
+        await managed.client.notificationEvent.findMany({
+          where: { ownerUserId: fixture.ownerUserId },
+          orderBy: { kind: 'asc' },
+          select: { kind: true },
+        })
+      ).map((notification) => notification.kind),
+    ).toEqual(['EXECUTION_RISK', 'FLIGHT_IMPORTANT_CHANGE']);
     expect(
       await managed.client.job.count({
         where: {

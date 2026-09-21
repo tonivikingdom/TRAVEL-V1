@@ -19,6 +19,7 @@ import type {
   TransportMode,
   TripCommandInput,
   TripView,
+  UserResolvedTemporalValueInput,
   UserTimeIntentView,
 } from '@travel/contracts';
 import {
@@ -183,6 +184,32 @@ export class TripService {
         subject: validateTemporalSubject(subject),
         value: validateTemporalValue(value),
       }),
+    );
+  }
+
+  async setUserResolvedTemporalValue(
+    actor: Actor,
+    tripId: string,
+    baseTripVersion: number,
+    subject: TemporalSubjectInput,
+    value: UserResolvedTemporalValueInput,
+  ): Promise<TripView> {
+    return this.setResolvedTemporalValue(
+      actor,
+      tripId,
+      baseTripVersion,
+      subject,
+      {
+        layer: value.layer,
+        pointKind: value.pointKind,
+        instant: value.instant,
+        timeZone: value.timeZone,
+        sourceKind: 'USER_VALUE',
+        sourceRef: null,
+        ...(value.observedAt === undefined
+          ? {}
+          : { observedAt: value.observedAt }),
+      },
     );
   }
 

@@ -478,8 +478,6 @@ async function writeTemporalValue(data: FormData): Promise<void> {
       pointKind: requiredFormString(data, 'pointKind') as 'ARRIVAL',
       instant: requiredFormString(data, 'instant'),
       timeZone: requiredFormString(data, 'timeZone'),
-      sourceKind: requiredFormString(data, 'sourceKind') as 'USER_VALUE',
-      sourceRef: nullableFormString(data, 'sourceRef'),
       observedAt: nullableFormString(data, 'observedAt'),
     },
   };
@@ -1018,7 +1016,7 @@ function temporalForm(trip: TripView): string {
   const transports = trip.connections.flatMap((connection) =>
     connection.transport === null ? [] : [connection.transport],
   );
-  return `<form id="temporal-value-form" class="stack-form compact"><label>Subject type<select name="subjectType"><option>NODE</option><option>TRANSPORT</option></select></label><label>Subject ID<select name="subjectId">${nodes.map((node) => `<option value="${attr(node.id)}">NODE ${esc(node.place?.name ?? node.note ?? node.id)}</option>`).join('')}${transports.map((edge) => `<option value="${attr(edge.id)}">TRANSPORT ${esc(edge.fromNodeId.slice(0, 8))}→${esc(edge.toNodeId.slice(0, 8))}</option>`).join('')}</select></label><div class="two"><label>Layer<select name="layer"><option>PLANNED</option><option>ESTIMATED</option><option>ACTUAL</option></select></label><label>Point<select name="pointKind"><option>ARRIVAL</option><option>DEPARTURE</option></select></label></div><label>Absolute instant<input name="instant" placeholder="2030-10-01T19:30:00+08:00" required /></label><label>IANA timezone<input name="timeZone" value="Asia/Shanghai" required /></label><label>sourceKind<select name="sourceKind"><option>USER_VALUE</option><option>PROVIDER_OBSERVATION</option><option>ADOPTED_TRANSPORT_FACT</option><option>SYSTEM_SUGGESTION</option><option>DERIVED</option></select></label><label>sourceRef<input name="sourceRef" /></label><label>observedAt<input name="observedAt" /></label><button type="submit">写入测试事实</button><p class="muted">不提供强制覆盖 ACTUAL。</p></form>`;
+  return `<form id="temporal-value-form" class="stack-form compact"><label>Subject type<select name="subjectType"><option>NODE</option><option>TRANSPORT</option></select></label><label>Subject ID<select name="subjectId">${nodes.map((node) => `<option value="${attr(node.id)}">NODE ${esc(node.place?.name ?? node.note ?? node.id)}</option>`).join('')}${transports.map((edge) => `<option value="${attr(edge.id)}">TRANSPORT ${esc(edge.fromNodeId.slice(0, 8))}→${esc(edge.toNodeId.slice(0, 8))}</option>`).join('')}</select></label><div class="two"><label>Layer<select name="layer"><option>PLANNED</option><option>ESTIMATED</option><option>ACTUAL</option></select></label><label>Point<select name="pointKind"><option>ARRIVAL</option><option>DEPARTURE</option></select></label></div><label>Absolute instant<input name="instant" placeholder="2030-10-01T19:30:00+08:00" required /></label><label>IANA timezone<input name="timeZone" value="Asia/Shanghai" required /></label><label>observedAt<input name="observedAt" /></label><button type="submit">写入用户时间事实</button><p class="muted">公开测试入口固定记录为 USER_VALUE，不接受 Provider/System provenance，也不提供强制覆盖 ACTUAL。</p></form>`;
 }
 
 function intentForms(trip: TripView): string {

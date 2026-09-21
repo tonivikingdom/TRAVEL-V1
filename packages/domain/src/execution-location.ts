@@ -38,8 +38,22 @@ export interface ExecutionFrontier {
   readonly orderedNodes: readonly ExecutionTimelineNode[];
   readonly currentNode: ExecutionTimelineNode | null;
   readonly targetNode: ExecutionTimelineNode | null;
-  readonly state: 'NOT_STARTED' | 'AT_NODE' | 'EN_ROUTE' | 'COMPLETED';
+  readonly state:
+    'NOT_STARTED' | 'AT_NODE' | 'EN_ROUTE' | 'COMPLETED' | 'INCONSISTENT';
+  readonly conflict: ExecutionFrontierConflict | null;
 }
+
+export type ExecutionFrontierConflict =
+  | {
+      readonly code: 'MULTIPLE_OPEN_NODES';
+      readonly openNodeIds: readonly string[];
+      readonly laterExecutedNodeIds: readonly string[];
+    }
+  | {
+      readonly code: 'OPEN_NODE_PRECEDES_LATER_EXECUTION';
+      readonly openNodeIds: readonly string[];
+      readonly laterExecutedNodeIds: readonly string[];
+    };
 
 export interface ExecutionDerivedLocationState {
   readonly currentNodeId: string | null;
@@ -62,27 +76,64 @@ export type ExecutionLocationDecision =
   | {
       readonly status: 'INDETERMINATE_LOCATION';
       readonly state: ExecutionDerivedLocationState;
+      readonly releasedArrivalSuppressionNodeIds: readonly string[];
     }
   | {
       readonly status: 'MANUAL_CONFIRMATION_AVAILABLE' | 'NO_CHANGE';
       readonly state: ExecutionDerivedLocationState;
+      readonly releasedArrivalSuppressionNodeIds: readonly string[];
     }
   | {
       readonly status: 'CONFIRMED_ARRIVAL';
       readonly nodeId: string;
       readonly possiblySkippedNodeIds: readonly string[];
       readonly state: ExecutionDerivedLocationState;
+      readonly releasedArrivalSuppressionNodeIds: readonly string[];
     }
   | {
       readonly status: 'CONFIRMED_DEPARTURE';
       readonly nodeId: string;
       readonly state: ExecutionDerivedLocationState;
+      readonly releasedArrivalSuppressionNodeIds: readonly string[];
     };
 
 export function resolveExecutionFrontier(
   nodes: readonly ExecutionTimelineNode[],
 ): ExecutionFrontier {
   const orderedNodes = [...nodes].sort(compareTimelineNodes);
+  const openNodes = orderedNodes.filter(
+    (node) => node.hasActualArrival && !node.hasActualDeparture,
+  );
+  if (openNodes.length > 1) {
+    return {
+      orderedNodes,
+      currentNode: openNodes[0]!,
+      targetNode: null,
+      state: 'INCONSISTENT',
+      conflict: {
+        code: 'MULTIPLE_OPEN_NODES',
+        openNodeIds: openNodes.map((node) => node.id),
+        laterExecutedNodeIds: laterExecutedNodeIds(orderedNodes, openNodes[0]!),
+      },
+    };
+  }
+  const onlyOpenNode = openNodes[0];
+  if (onlyOpenNode !== undefined) {
+    const laterExecuted = laterExecutedNodeIds(orderedNodes, onlyOpenNode);
+    if (laterExecuted.length > 0) {
+      return {
+        orderedNodes,
+        currentNode: onlyOpenNode,
+        targetNode: null,
+        state: 'INCONSISTENT',
+        conflict: {
+          code: 'OPEN_NODE_PRECEDES_LATER_EXECUTION',
+          openNodeIds: [onlyOpenNode.id],
+          laterExecutedNodeIds: laterExecuted,
+        },
+      };
+    }
+  }
   let frontierIndex = -1;
   let currentIndex = -1;
   for (let index = 0; index < orderedNodes.length; index += 1) {
@@ -113,12 +164,13 @@ export function resolveExecutionFrontier(
           : targetNode === null
             ? 'COMPLETED'
             : 'EN_ROUTE';
-  return { orderedNodes, currentNode, targetNode, state };
+  return { orderedNodes, currentNode, targetNode, state, conflict: null };
 }
 
 export function decideExecutionLocation(input: {
   readonly nodes: readonly ExecutionTimelineNode[];
   readonly previousState: ExecutionDerivedLocationState | null;
+  readonly suppressedArrivalNodeIds?: readonly string[];
   readonly sample: LocationObservation;
   readonly policy: ExecutionLocationPolicy;
 }): ExecutionLocationDecision {
@@ -128,22 +180,58 @@ export function decideExecutionLocation(input: {
     return {
       status: 'INDETERMINATE_LOCATION',
       state: { ...baseState, locationStatus: 'INDETERMINATE' },
+      releasedArrivalSuppressionNodeIds: [],
     };
   }
   const target = frontier.targetNode;
   if (target === null) {
-    return { status: 'NO_CHANGE', state: baseState };
+    return {
+      status: 'NO_CHANGE',
+      state: baseState,
+      releasedArrivalSuppressionNodeIds: [],
+    };
   }
   if (!hasCoordinates(target)) {
-    return { status: 'MANUAL_CONFIRMATION_AVAILABLE', state: baseState };
+    return {
+      status: 'MANUAL_CONFIRMATION_AVAILABLE',
+      state: baseState,
+      releasedArrivalSuppressionNodeIds: [],
+    };
   }
 
   const targetDistance = haversineDistanceMeters(input.sample, target);
-  if (targetDistance <= arrivalRadius(target.targetKind, input.policy)) {
+  const suppressedArrivalNodeIds = new Set(
+    input.suppressedArrivalNodeIds ?? [],
+  );
+  const targetSuppressed = suppressedArrivalNodeIds.has(target.id);
+  const outsideSuppressedTarget =
+    targetDistance >
+    arrivalRadius(target.targetKind, input.policy) +
+      input.policy.exitHysteresisMeters;
+  if (
+    !targetSuppressed &&
+    targetDistance <= arrivalRadius(target.targetKind, input.policy)
+  ) {
     return {
       status: 'CONFIRMED_ARRIVAL',
       nodeId: target.id,
       possiblySkippedNodeIds: [],
+      releasedArrivalSuppressionNodeIds: [],
+      state: {
+        ...baseState,
+        lastDistanceToNextTargetMeters: targetDistance,
+      },
+    };
+  }
+
+  // A later arrival cannot by itself prove that the user has left a node whose
+  // automatic arrival they explicitly corrected. This is important when place
+  // radii overlap: preserve the correction until the sample is outside that
+  // node's exit boundary.
+  if (targetSuppressed && !outsideSuppressedTarget) {
+    return {
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: [],
       state: {
         ...baseState,
         lastDistanceToNextTargetMeters: targetDistance,
@@ -160,6 +248,7 @@ export function decideExecutionLocation(input: {
       (node) =>
         node.executionStatus !== 'SKIPPED' &&
         !node.hasActualArrival &&
+        !suppressedArrivalNodeIds.has(node.id) &&
         hasCoordinates(node) &&
         haversineDistanceMeters(input.sample, node) <=
           arrivalRadius(node.targetKind, input.policy),
@@ -177,6 +266,7 @@ export function decideExecutionLocation(input: {
           (node) => node.executionStatus === null && !node.hasActualArrival,
         )
         .map((node) => node.id),
+      releasedArrivalSuppressionNodeIds: targetSuppressed ? [target.id] : [],
       state: {
         ...baseState,
         lastDistanceToNextTargetMeters: haversineDistanceMeters(
@@ -187,10 +277,24 @@ export function decideExecutionLocation(input: {
     };
   }
 
+  if (targetSuppressed) {
+    return {
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: outsideSuppressedTarget
+        ? [target.id]
+        : [],
+      state: {
+        ...baseState,
+        lastDistanceToNextTargetMeters: targetDistance,
+      },
+    };
+  }
+
   const current = frontier.currentNode;
   if (current === null || !hasCoordinates(current)) {
     return {
       status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: [],
       state: {
         ...baseState,
         lastDistanceToNextTargetMeters: targetDistance,
@@ -227,9 +331,18 @@ export function decideExecutionLocation(input: {
     movementTowardNext &&
     outsideCount >= input.policy.minimumDepartureSamples
   ) {
-    return { status: 'CONFIRMED_DEPARTURE', nodeId: current.id, state };
+    return {
+      status: 'CONFIRMED_DEPARTURE',
+      nodeId: current.id,
+      state,
+      releasedArrivalSuppressionNodeIds: [],
+    };
   }
-  return { status: 'NO_CHANGE', state };
+  return {
+    status: 'NO_CHANGE',
+    state,
+    releasedArrivalSuppressionNodeIds: [],
+  };
 }
 
 export function haversineDistanceMeters(
@@ -262,6 +375,22 @@ function compareTimelineNodes(
 
 function compareCodePoints(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function laterExecutedNodeIds(
+  orderedNodes: readonly ExecutionTimelineNode[],
+  openNode: ExecutionTimelineNode,
+): readonly string[] {
+  const openIndex = orderedNodes.findIndex((node) => node.id === openNode.id);
+  return orderedNodes
+    .slice(openIndex + 1)
+    .filter(
+      (node) =>
+        node.executionStatus === 'SKIPPED' ||
+        node.hasActualArrival ||
+        node.hasActualDeparture,
+    )
+    .map((node) => node.id);
 }
 
 function hasCoordinates(

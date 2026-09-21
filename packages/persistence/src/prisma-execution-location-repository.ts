@@ -41,6 +41,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         ownerUserId: true,
         version: true,
         executionLocationState: true,
+        executionObservationWatermark: true,
+        executionArrivalSuppressions: {
+          orderBy: [{ suppressedAt: 'asc' }, { nodeId: 'asc' }],
+          select: { nodeId: true },
+        },
         dayOccurrences: {
           orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
           select: {
@@ -116,6 +121,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
                 trip.executionLocationState.outsideTargetConsecutiveCount,
               locationStatus: trip.executionLocationState.locationStatus,
             },
+      observationWatermarkAt:
+        trip.executionObservationWatermark?.lastObservedAt ?? null,
+      suppressedArrivalNodeIds: trip.executionArrivalSuppressions.map(
+        (suppression) => suppression.nodeId,
+      ),
       possibleSkippedNodeIds: nodes
         .filter((node) => node.executionStatus === 'POSSIBLY_SKIPPED')
         .map((node) => node.id),
@@ -184,12 +194,13 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
       );
       if (trip === null) return { status: 'NOT_FOUND' as const };
-      const currentState = await transaction.executionLocationState.findUnique({
-        where: { tripId: input.tripId },
-      });
+      const currentWatermark =
+        await transaction.executionObservationWatermark.findUnique({
+          where: { tripId: input.tripId },
+        });
       if (
-        (currentState?.lastObservedAt.getTime() ?? null) !==
-          (input.expectedLastObservedAt?.getTime() ?? null) ||
+        (currentWatermark?.lastObservedAt.getTime() ?? null) !==
+          (input.expectedObservationWatermarkAt?.getTime() ?? null) ||
         trip.version !== input.expectedTripVersion
       ) {
         return { status: 'RETRY' as const };
@@ -197,6 +208,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
 
       let event: ExecutionEventRecord | null = null;
       let version = trip.version;
+      let idempotentReplay = false;
       if (
         input.decision.status === 'CONFIRMED_ARRIVAL' ||
         input.decision.status === 'CONFIRMED_DEPARTURE'
@@ -219,21 +231,28 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
               ? input.decision.possiblySkippedNodeIds
               : [],
         });
-        if (result.status !== 'CREATED') {
-          return result.status === 'FACT_PROTECTED'
-            ? { status: 'FACT_PROTECTED' as const }
-            : {
-                status: 'SUCCESS' as const,
-                event: toEventRecord(result.event),
-                resultingTripVersion: trip.version,
-                idempotentReplay: true,
-              };
+        if (result.status === 'FACT_PROTECTED') {
+          return { status: 'FACT_PROTECTED' as const };
         }
         event = toEventRecord(result.event);
-        version += 1;
-        await transaction.trip.update({
-          where: { id: input.tripId },
-          data: { version: { increment: 1 } },
+        if (result.status === 'CREATED') {
+          version += 1;
+          await transaction.trip.update({
+            where: { id: input.tripId },
+            data: { version: { increment: 1 } },
+          });
+        } else {
+          idempotentReplay = true;
+        }
+      }
+      if (input.decision.releasedArrivalSuppressionNodeIds.length > 0) {
+        await transaction.executionArrivalSuppression.deleteMany({
+          where: {
+            tripId: input.tripId,
+            nodeId: {
+              in: [...input.decision.releasedArrivalSuppressionNodeIds],
+            },
+          },
         });
       }
       await upsertLocationState(
@@ -241,11 +260,16 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
         input.decision.state,
       );
+      await upsertObservationWatermark(
+        transaction,
+        input.tripId,
+        input.observedAt,
+      );
       return {
         status: 'SUCCESS' as const,
         event,
         resultingTripVersion: version,
-        idempotentReplay: false,
+        idempotentReplay,
       };
     });
   }
@@ -367,6 +391,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
           idempotentReplay: true,
         };
       }
+      if (input.type === 'ARRIVAL') {
+        await transaction.executionArrivalSuppression.deleteMany({
+          where: { tripId: input.tripId, nodeId: input.nodeId },
+        });
+      }
       await finishManualMutation(transaction, input.tripId);
       return {
         status: 'SUCCESS' as const,
@@ -427,6 +456,19 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
           data: { status: 'POSSIBLY_SKIPPED' },
         });
       } else {
+        if (event.type === 'ARRIVAL') {
+          const dependentDeparture = await transaction.temporalValue.findFirst({
+            where: {
+              nodeId: event.nodeId,
+              pointKind: 'DEPARTURE',
+              layer: 'ACTUAL',
+            },
+            select: { id: true },
+          });
+          if (dependentDeparture !== null) {
+            return { status: 'UNDO_CONFLICT' as const };
+          }
+        }
         const pointKind = event.type === 'ARRIVAL' ? 'ARRIVAL' : 'DEPARTURE';
         const value = await transaction.temporalValue.findFirst({
           where: { nodeId: event.nodeId, pointKind, layer: 'ACTUAL' },
@@ -441,6 +483,19 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         }
         await transaction.temporalValue.delete({ where: { id: value.id } });
         if (event.type === 'ARRIVAL') {
+          await transaction.executionArrivalSuppression.upsert({
+            where: { nodeId: event.nodeId },
+            create: {
+              nodeId: event.nodeId,
+              tripId: input.tripId,
+              suppressedByEventId: event.id,
+              suppressedAt: input.now,
+            },
+            update: {
+              suppressedByEventId: event.id,
+              suppressedAt: input.now,
+            },
+          });
           await transaction.nodeExecutionState.deleteMany({
             where: {
               detectedByEventId: event.id,
@@ -677,6 +732,18 @@ async function upsertLocationState(
     where: { tripId },
     create: { tripId, ...data },
     update: data,
+  });
+}
+
+async function upsertObservationWatermark(
+  transaction: Transaction,
+  tripId: string,
+  observedAt: Date,
+): Promise<void> {
+  await transaction.executionObservationWatermark.upsert({
+    where: { tripId },
+    create: { tripId, lastObservedAt: observedAt },
+    update: { lastObservedAt: observedAt },
   });
 }
 

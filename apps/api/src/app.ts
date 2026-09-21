@@ -24,7 +24,7 @@ import type {
   LivenessResponse,
   PlaceInput,
   ReadinessResponse,
-  ResolvedTemporalValueInput,
+  UserResolvedTemporalValueInput,
   RouteQueryHint,
   TemporalSubjectInput,
   TransportMode,
@@ -574,7 +574,7 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request,
       );
       const body = requiredRecord(request.body);
-      return requireTripService(dependencies).setResolvedTemporalValue(
+      return requireTripService(dependencies).setUserResolvedTemporalValue(
         authenticated.actor,
         request.params.id,
         requiredNumber(body, 'baseTripVersion'),
@@ -1070,17 +1070,40 @@ function parseTemporalSubject(value: unknown): TemporalSubjectInput {
 
 function parseResolvedTemporalValue(
   value: unknown,
-): ResolvedTemporalValueInput {
+): UserResolvedTemporalValueInput {
   const temporal = requiredRecord(value);
+  const requestedSourceKind = hasOwn(temporal, 'sourceKind')
+    ? requiredString(temporal, 'sourceKind')
+    : undefined;
+  if (
+    requestedSourceKind !== undefined &&
+    requestedSourceKind !== 'USER_VALUE'
+  ) {
+    throw new ApplicationError(
+      'VALIDATION_ERROR',
+      '公开时间事实入口只接受用户来源。',
+      400,
+    );
+  }
+  const requestedSourceRef = hasOwn(temporal, 'sourceRef')
+    ? optionalNullableString(temporal, 'sourceRef')
+    : undefined;
+  if (requestedSourceRef !== undefined && requestedSourceRef !== null) {
+    throw new ApplicationError(
+      'VALIDATION_ERROR',
+      '公开时间事实入口不能声明受信来源引用。',
+      400,
+    );
+  }
   return {
     layer: parseTemporalLayer(requiredString(temporal, 'layer')),
     pointKind: parseTemporalPointKind(requiredString(temporal, 'pointKind')),
     instant: requiredString(temporal, 'instant'),
     timeZone: requiredString(temporal, 'timeZone'),
-    sourceKind: parseTemporalSourceKind(requiredString(temporal, 'sourceKind')),
-    ...(hasOwn(temporal, 'sourceRef')
-      ? { sourceRef: optionalNullableString(temporal, 'sourceRef') }
+    ...(requestedSourceKind === 'USER_VALUE'
+      ? { sourceKind: 'USER_VALUE' as const }
       : {}),
+    ...(requestedSourceRef === null ? { sourceRef: null } : {}),
     ...(hasOwn(temporal, 'observedAt')
       ? { observedAt: optionalNullableString(temporal, 'observedAt') }
       : {}),
@@ -1089,26 +1112,11 @@ function parseResolvedTemporalValue(
 
 function parseTemporalLayer(
   value: string,
-): ResolvedTemporalValueInput['layer'] {
+): UserResolvedTemporalValueInput['layer'] {
   if (value === 'PLANNED' || value === 'ESTIMATED' || value === 'ACTUAL') {
     return value;
   }
   throw new ApplicationError('VALIDATION_ERROR', '时间层无效。', 400);
-}
-
-function parseTemporalSourceKind(
-  value: string,
-): ResolvedTemporalValueInput['sourceKind'] {
-  switch (value) {
-    case 'USER_VALUE':
-    case 'ADOPTED_TRANSPORT_FACT':
-    case 'SYSTEM_SUGGESTION':
-    case 'DERIVED':
-    case 'PROVIDER_OBSERVATION':
-      return value;
-    default:
-      throw new ApplicationError('VALIDATION_ERROR', '时间来源无效。', 400);
-  }
 }
 
 function parseTemporalPointKind(value: string): 'ARRIVAL' | 'DEPARTURE' {

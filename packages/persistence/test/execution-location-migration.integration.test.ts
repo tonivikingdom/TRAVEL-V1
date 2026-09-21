@@ -14,6 +14,7 @@ const migrationsPath = fileURLToPath(
   new URL('../../../prisma/migrations/', import.meta.url),
 );
 const migration = '20260924100000_p5e1_execution_location';
+const repairMigration = '20260925100000_p5_audit_repair_1';
 const statementByStatementMigrations = new Set([
   '20260920110000_p4b2_route_adoption',
   '20260920150000_p4b3_route_undo',
@@ -108,6 +109,87 @@ describe('P5E1 execution-location migration', () => {
       await admin.end();
     }
   });
+
+  it('backfills the audit-repair watermark and suppression without changing historical execution facts', async () => {
+    const databaseName = `travel_p5_audit_${randomUUID().replaceAll('-', '')}`;
+    const adminUrl = new URL(databaseUrl);
+    adminUrl.pathname = '/postgres';
+    const admin = new Client({ connectionString: adminUrl.toString() });
+    await admin.connect();
+    try {
+      await admin.query(`CREATE DATABASE "${databaseName}"`);
+      const targetUrl = new URL(databaseUrl);
+      targetUrl.pathname = `/${databaseName}`;
+      const target = new Client({ connectionString: targetUrl.toString() });
+      await target.connect();
+      try {
+        const migrationNames = (await readdir(migrationsPath))
+          .filter((name) => name < repairMigration)
+          .sort();
+        for (const name of migrationNames) await applyMigration(target, name);
+        await seedUndoneLocationArrival(target);
+        await target.query(
+          await readFile(
+            `${migrationsPath}/${repairMigration}/migration.sql`,
+            'utf8',
+          ),
+        );
+
+        expect(
+          (
+            await target.query(`
+              SELECT "lastObservedAt"
+              FROM "ExecutionObservationWatermark"
+              WHERE "tripId" = '10000000-0000-4000-8000-000000000051'
+            `)
+          ).rows[0],
+        ).toEqual({ lastObservedAt: new Date('2030-01-01T10:00:00.000Z') });
+        expect(
+          (
+            await target.query(`
+              SELECT "nodeId", "suppressedByEventId", "suppressedAt"
+              FROM "ExecutionArrivalSuppression"
+            `)
+          ).rows,
+        ).toEqual([
+          {
+            nodeId: '40000000-0000-4000-8000-000000000051',
+            suppressedByEventId: '80000000-0000-4000-8000-000000000051',
+            suppressedAt: new Date('2030-01-01T10:01:00.000Z'),
+          },
+        ]);
+        expect(
+          (
+            await target.query(`
+              SELECT "version" FROM "Trip"
+              WHERE "id" = '10000000-0000-4000-8000-000000000051'
+            `)
+          ).rows[0],
+        ).toEqual({ version: 9 });
+        expect(
+          (
+            await target.query(`
+              SELECT "undoneAt", "airportTriggerCompletedAt"
+              FROM "ExecutionEvent"
+              WHERE "id" = '80000000-0000-4000-8000-000000000051'
+            `)
+          ).rows[0],
+        ).toEqual({
+          undoneAt: new Date('2030-01-01T10:01:00.000Z'),
+          airportTriggerCompletedAt: new Date('2030-01-01T10:00:30.000Z'),
+        });
+      } finally {
+        await target.end();
+      }
+    } finally {
+      await admin.query(
+        'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1',
+        [databaseName],
+      );
+      await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
+      await admin.end();
+    }
+  });
 });
 
 async function applyMigration(target: Client, name: string) {
@@ -177,6 +259,32 @@ async function seedPopulatedP5d3(client: Client) {
       '2030-01-01T12:00:00Z', '2030-01-01T12:00:00Z',
       '${snapshot.replaceAll("'", "''")}'::jsonb, CURRENT_TIMESTAMP
     )
+  `);
+}
+
+async function seedUndoneLocationArrival(client: Client) {
+  await client.query(`
+    INSERT INTO "User" ("id", "email", "normalizedEmail", "updatedAt") VALUES
+      ('00000000-0000-4000-8000-000000000051', 'synthetic-audit-repair@synthetic.example.test', 'synthetic-audit-repair@synthetic.example.test', CURRENT_TIMESTAMP);
+    INSERT INTO "Trip" ("id", "ownerUserId", "name", "planningAnchorDate", "defaultPeopleCount", "version", "updatedAt") VALUES
+      ('10000000-0000-4000-8000-000000000051', '00000000-0000-4000-8000-000000000051', 'SYNTHETIC AUDIT REPAIR', DATE '2030-01-01', 1, 9, CURRENT_TIMESTAMP);
+    INSERT INTO "DayOccurrence" ("id", "tripId", "localDate", "sequence", "updatedAt") VALUES
+      ('20000000-0000-4000-8000-000000000051', '10000000-0000-4000-8000-000000000051', DATE '2030-01-01', 0, CURRENT_TIMESTAMP);
+    INSERT INTO "Place" ("id", "ownerUserId", "name", "latitude", "longitude") VALUES
+      ('30000000-0000-4000-8000-000000000051', '00000000-0000-4000-8000-000000000051', 'A', 35, 139);
+    INSERT INTO "ItineraryNode" ("id", "tripId", "dayOccurrenceId", "kind", "position", "placeId", "updatedAt") VALUES
+      ('40000000-0000-4000-8000-000000000051', '10000000-0000-4000-8000-000000000051', '20000000-0000-4000-8000-000000000051', 'PLACE_VISIT', 0, '30000000-0000-4000-8000-000000000051', CURRENT_TIMESTAMP);
+    INSERT INTO "ExecutionEvent" (
+      "id", "ownerUserId", "tripId", "nodeId", "type", "source",
+      "occurredAt", "undoneAt", "airportTriggerCompletedAt"
+    ) VALUES (
+      '80000000-0000-4000-8000-000000000051',
+      '00000000-0000-4000-8000-000000000051',
+      '10000000-0000-4000-8000-000000000051',
+      '40000000-0000-4000-8000-000000000051',
+      'ARRIVAL', 'LOCATION', '2030-01-01T10:00:00Z',
+      '2030-01-01T10:01:00Z', '2030-01-01T10:00:30Z'
+    );
   `);
 }
 

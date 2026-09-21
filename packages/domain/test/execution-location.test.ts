@@ -36,7 +36,7 @@ describe('execution location policy', () => {
     expect(frontier.targetNode?.id).toBe('a');
   });
 
-  it('[AUDIT EXECUTION ORDER] exposes an open earlier node while advancing the target past a later completed node', () => {
+  it('[REGRESSION F-13] exposes an explicit conflict instead of advancing past an open earlier node', () => {
     const frontier = resolveExecutionFrontier([
       { ...a, hasActualArrival: true, hasActualDeparture: false },
       { ...b, hasActualArrival: true, hasActualDeparture: true },
@@ -44,8 +44,57 @@ describe('execution location policy', () => {
     ]);
 
     expect(frontier.currentNode?.id).toBe('a');
-    expect(frontier.targetNode?.id).toBe('c');
-    expect(frontier.state).toBe('AT_NODE');
+    expect(frontier.targetNode).toBeNull();
+    expect(frontier.state).toBe('INCONSISTENT');
+    expect(frontier.conflict).toEqual({
+      code: 'OPEN_NODE_PRECEDES_LATER_EXECUTION',
+      openNodeIds: ['a'],
+      laterExecutedNodeIds: ['b'],
+    });
+  });
+
+  it('[REGRESSION F-13] reports multiple open arrival nodes as inconsistent', () => {
+    const frontier = resolveExecutionFrontier([
+      { ...a, hasActualArrival: true },
+      { ...b, hasActualArrival: true },
+      c,
+    ]);
+
+    expect(frontier.state).toBe('INCONSISTENT');
+    expect(frontier.targetNode).toBeNull();
+    expect(frontier.conflict).toMatchObject({
+      code: 'MULTIPLE_OPEN_NODES',
+      openNodeIds: ['a', 'b'],
+    });
+  });
+
+  it('keeps a normal completed, open, future frontier at the open node', () => {
+    const frontier = resolveExecutionFrontier([
+      { ...a, hasActualArrival: true, hasActualDeparture: true },
+      { ...b, hasActualArrival: true, hasActualDeparture: false },
+      c,
+    ]);
+
+    expect(frontier).toMatchObject({
+      currentNode: { id: 'b' },
+      targetNode: { id: 'c' },
+      state: 'AT_NODE',
+      conflict: null,
+    });
+  });
+
+  it('keeps a legal first-node departure-only frontier compatible', () => {
+    const frontier = resolveExecutionFrontier([
+      { ...a, hasActualDeparture: true },
+      b,
+    ]);
+
+    expect(frontier).toMatchObject({
+      currentNode: null,
+      targetNode: { id: 'b' },
+      state: 'EN_ROUTE',
+      conflict: null,
+    });
   });
 
   it('confirms arrival immediately when a reliable sample is inside target radius', () => {
@@ -144,6 +193,92 @@ describe('execution location policy', () => {
       status: 'CONFIRMED_ARRIVAL',
       nodeId: 'c',
       possiblySkippedNodeIds: ['a', 'b'],
+    });
+  });
+
+  it('[REGRESSION F-03] suppresses an undone target until a reliable outside sample re-arms it', () => {
+    const inside = decideExecutionLocation({
+      nodes: [a, b],
+      previousState: null,
+      suppressedArrivalNodeIds: ['a'],
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(inside).toMatchObject({
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: [],
+    });
+
+    const outside = decideExecutionLocation({
+      nodes: [a, b],
+      previousState: inside.state,
+      suppressedArrivalNodeIds: ['a'],
+      sample: sample(35.002, 139.002),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(outside).toMatchObject({
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: ['a'],
+    });
+
+    const reentry = decideExecutionLocation({
+      nodes: [a, b],
+      previousState: outside.state,
+      suppressedArrivalNodeIds: [],
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(reentry).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      nodeId: 'a',
+    });
+  });
+
+  it('[REGRESSION F-03] does not release an undone target or confirm an overlapping later node', () => {
+    const overlappingB = node('overlapping-b', 0, 1, 35.0005, 139.0005);
+    const result = decideExecutionLocation({
+      nodes: [a, overlappingB],
+      previousState: null,
+      suppressedArrivalNodeIds: ['a'],
+      sample: sample(35.00025, 139.00025),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: [],
+    });
+  });
+
+  it('[REGRESSION F-03] releases a suppressed target only after exit before confirming a later node', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, b],
+      previousState: null,
+      suppressedArrivalNodeIds: ['a'],
+      sample: sample(35.001, 139.001),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+
+    expect(result).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      nodeId: 'b',
+      possiblySkippedNodeIds: ['a'],
+      releasedArrivalSuppressionNodeIds: ['a'],
+    });
+  });
+
+  it('[REGRESSION F-03] excludes a later suppressed node while safely releasing an exited target', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, b],
+      previousState: null,
+      suppressedArrivalNodeIds: ['a', 'b'],
+      sample: sample(35.001, 139.001),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      releasedArrivalSuppressionNodeIds: ['a'],
     });
   });
 

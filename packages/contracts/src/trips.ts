@@ -285,10 +285,20 @@ export interface ResolvedTemporalValueInput {
   readonly observedAt?: string | null;
 }
 
+export interface UserResolvedTemporalValueInput {
+  readonly layer: TemporalLayer;
+  readonly pointKind: TemporalPointKind;
+  readonly instant: string;
+  readonly timeZone: string;
+  readonly sourceKind?: 'USER_VALUE';
+  readonly sourceRef?: null;
+  readonly observedAt?: string | null;
+}
+
 export interface SetResolvedTemporalValueRequest {
   readonly baseTripVersion: number;
   readonly subject: TemporalSubjectInput;
-  readonly value: ResolvedTemporalValueInput;
+  readonly value: UserResolvedTemporalValueInput;
 }
 
 export interface TransportHistoryResponse {

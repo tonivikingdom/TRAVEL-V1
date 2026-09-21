@@ -113,6 +113,7 @@ describe('P5E1 execution-location HTTP surface', () => {
       currentNodeId: null,
       targetNodeId: nodeId,
       currentState: 'NOT_STARTED' as const,
+      frontierConflict: null,
       latestArrival: null,
       latestDeparture: null,
       possibleSkippedNodeIds: [],

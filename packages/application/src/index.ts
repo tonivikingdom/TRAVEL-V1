@@ -35,6 +35,18 @@ export {
   ExecutionRiskService,
   type ExecutionRiskServiceOptions,
 } from './execution-risk-service.js';
+export {
+  ExecutionLocationService,
+  type ExecutionLocationServiceOptions,
+} from './execution-location-service.js';
+export type {
+  CommitExecutionResult,
+  ExecutionContextNodeRecord,
+  ExecutionContextRecord,
+  ExecutionEventRecord,
+  ExecutionFlightDepartureRecord,
+  ExecutionLocationRepository,
+} from './execution-location-ports.js';
 export type {
   DesiredExecutionRisk,
   ExecutionRiskRecord,

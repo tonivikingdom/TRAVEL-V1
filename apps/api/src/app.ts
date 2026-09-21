@@ -1,6 +1,7 @@
 import {
   ApplicationError,
   AuthService,
+  ExecutionLocationService,
   ExecutionRiskService,
   FlightMonitoringService,
   FlightService,
@@ -16,6 +17,9 @@ import type {
   ApiErrorResponse,
   FlightSnapshotView,
   FlightExecutionTriggerRequest,
+  ExecutionLocationSampleRequest,
+  ManualExecutionEventRequest,
+  UndoExecutionEventRequest,
   DayOccurrenceTargetInput,
   LivenessResponse,
   PlaceInput,
@@ -38,6 +42,7 @@ export interface ApiDependencies {
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
   readonly notificationService?: NotificationService;
+  readonly executionLocationService?: ExecutionLocationService;
   readonly executionRiskService?: ExecutionRiskService;
   readonly flightService?: FlightService;
   readonly flightMonitoringService?: FlightMonitoringService;
@@ -447,6 +452,72 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/execution/location',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionLocationService(dependencies).observeLocation(
+        authenticated.actor,
+        request.params.tripId,
+        requiredRecord(
+          request.body,
+        ) as unknown as ExecutionLocationSampleRequest,
+      );
+    },
+  );
+
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/execution/events',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionLocationService(dependencies).createManualEvent(
+        authenticated.actor,
+        request.params.tripId,
+        requiredRecord(request.body) as unknown as ManualExecutionEventRequest,
+      );
+    },
+  );
+
+  app.post<{ Params: { tripId: string; eventId: string } }>(
+    '/trips/:tripId/execution/events/:eventId/undo',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionLocationService(dependencies).undoEvent(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.eventId,
+        requiredRecord(request.body) as unknown as UndoExecutionEventRequest,
+      );
+    },
+  );
+
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/execution',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExecutionLocationService(dependencies).getExecution(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     '/trips/:id/execution/risks',
     async (request) => {
@@ -677,6 +748,20 @@ function requireExecutionRiskService(
     );
   }
   return dependencies.executionRiskService;
+}
+
+function requireExecutionLocationService(
+  dependencies: ApiDependencies,
+): ExecutionLocationService {
+  if (dependencies.executionLocationService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '执行定位服务尚未连接数据库。',
+      503,
+      true,
+    );
+  }
+  return dependencies.executionLocationService;
 }
 
 function requireFlightService(dependencies: ApiDependencies): FlightService {

@@ -312,8 +312,8 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
         ownerUserId: owner.userId,
         tripId: fixture.tripId,
         transportEdgeId: edge.id,
-        provider: 'synthetic',
-        providerFlightRef: 'synthetic:p5e1',
+        provider: 'aerodatabox',
+        providerFlightRef: 'aerodatabox:p5e1',
         canonicalFlightNumber: 'NH53',
         displayFlightNumber: 'NH 53',
         serviceDate: new Date('2030-01-01T00:00:00.000Z'),
@@ -363,8 +363,8 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
         ownerUserId: owner.userId,
         tripId: fixture.tripId,
         transportEdgeId: edge.id,
-        provider: 'synthetic',
-        providerFlightRef: 'synthetic:p5e1-recovery',
+        provider: 'aerodatabox',
+        providerFlightRef: 'aerodatabox:p5e1-recovery',
         canonicalFlightNumber: 'NH53',
         displayFlightNumber: 'NH 53',
         serviceDate: new Date('2030-01-01T00:00:00.000Z'),
@@ -689,7 +689,7 @@ function authConfig() {
 
 function flightSnapshot(departureIata: string, arrivalIata: string) {
   return {
-    provider: 'synthetic',
+    provider: 'aerodatabox',
     candidateId: 'synthetic:p5e1',
     canonicalFlightNumber: 'NH53',
     displayFlightNumber: 'NH 53',

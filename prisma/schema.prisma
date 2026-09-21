@@ -842,6 +842,8 @@ model ExecutionEvent {
   undoneAt                  DateTime?            @db.Timestamptz(3)
   undoIdempotencyKey        String?              @db.VarChar(200)
   undoRequestHash           String?              @db.VarChar(64)
+  airportTriggerClaimedAt   DateTime?            @db.Timestamptz(3)
+  airportTriggerClaimToken  String?              @db.Uuid
   airportTriggerCompletedAt DateTime?            @db.Timestamptz(3)
   createdAt                 DateTime             @default(now()) @db.Timestamptz(3)
   owner                     User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)

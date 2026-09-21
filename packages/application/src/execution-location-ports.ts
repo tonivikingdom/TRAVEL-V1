@@ -66,6 +66,10 @@ export type CommitExecutionResult =
         | 'UNDO_CONFLICT';
     };
 
+export type AirportTriggerClaimResult =
+  | { readonly status: 'CLAIMED'; readonly claimToken: string }
+  | { readonly status: 'BUSY' | 'COMPLETED' | 'NOT_ELIGIBLE' };
+
 export interface ExecutionLocationRepository {
   findOwnedContext(input: {
     readonly ownerUserId: string;
@@ -113,10 +117,25 @@ export interface ExecutionLocationRepository {
     readonly requestHash: string;
     readonly now: Date;
   }): Promise<CommitExecutionResult>;
-  markAirportTriggerCompleted(input: {
+  claimAirportTrigger(input: {
     readonly ownerUserId: string;
     readonly tripId: string;
     readonly eventId: string;
+    readonly claimToken: string;
+    readonly claimedAt: Date;
+    readonly expiredBefore: Date;
+  }): Promise<AirportTriggerClaimResult>;
+  completeAirportTrigger(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly eventId: string;
+    readonly claimToken: string;
     readonly completedAt: Date;
+  }): Promise<boolean>;
+  releaseAirportTriggerClaim(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly eventId: string;
+    readonly claimToken: string;
   }): Promise<void>;
 }

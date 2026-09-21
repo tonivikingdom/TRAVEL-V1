@@ -20,6 +20,13 @@ interface AdvisoryLockRow {
   readonly locked: boolean;
 }
 
+interface LockedAirportTriggerRow {
+  readonly id: string;
+  readonly undoneAt: Date | null;
+  readonly airportTriggerClaimedAt: Date | null;
+  readonly airportTriggerCompletedAt: Date | null;
+}
+
 export class PrismaExecutionLocationRepository implements ExecutionLocationRepository {
   constructor(private readonly client: PrismaClient) {}
 
@@ -448,6 +455,8 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
           undoneAt: input.now,
           undoIdempotencyKey: input.idempotencyKey,
           undoRequestHash: input.requestHash,
+          airportTriggerClaimedAt: null,
+          airportTriggerClaimToken: null,
         },
       });
       await transaction.executionLocationState.deleteMany({
@@ -466,11 +475,80 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
     });
   }
 
-  async markAirportTriggerCompleted(input: {
+  async claimAirportTrigger(
+    input: Parameters<ExecutionLocationRepository['claimAirportTrigger']>[0],
+  ) {
+    return this.client.$transaction(async (transaction) => {
+      const rows = await transaction.$queryRaw<LockedAirportTriggerRow[]>(
+        Prisma.sql`
+          SELECT
+            "id",
+            "undoneAt",
+            "airportTriggerClaimedAt",
+            "airportTriggerCompletedAt"
+          FROM "ExecutionEvent"
+          WHERE "id" = ${input.eventId}::uuid
+            AND "ownerUserId" = ${input.ownerUserId}::uuid
+            AND "tripId" = ${input.tripId}::uuid
+            AND "type" = 'ARRIVAL'
+          FOR UPDATE
+        `,
+      );
+      const event = rows[0];
+      if (event === undefined || event.undoneAt !== null) {
+        return { status: 'NOT_ELIGIBLE' as const };
+      }
+      if (event.airportTriggerCompletedAt !== null) {
+        return { status: 'COMPLETED' as const };
+      }
+      if (
+        event.airportTriggerClaimedAt !== null &&
+        event.airportTriggerClaimedAt.getTime() > input.expiredBefore.getTime()
+      ) {
+        return { status: 'BUSY' as const };
+      }
+      await transaction.executionEvent.update({
+        where: { id: event.id },
+        data: {
+          airportTriggerClaimedAt: input.claimedAt,
+          airportTriggerClaimToken: input.claimToken,
+        },
+      });
+      return { status: 'CLAIMED' as const, claimToken: input.claimToken };
+    });
+  }
+
+  async completeAirportTrigger(input: {
     readonly ownerUserId: string;
     readonly tripId: string;
     readonly eventId: string;
+    readonly claimToken: string;
     readonly completedAt: Date;
+  }): Promise<boolean> {
+    const result = await this.client.executionEvent.updateMany({
+      where: {
+        id: input.eventId,
+        ownerUserId: input.ownerUserId,
+        tripId: input.tripId,
+        type: 'ARRIVAL',
+        undoneAt: null,
+        airportTriggerCompletedAt: null,
+        airportTriggerClaimToken: input.claimToken,
+      },
+      data: {
+        airportTriggerClaimedAt: null,
+        airportTriggerClaimToken: null,
+        airportTriggerCompletedAt: input.completedAt,
+      },
+    });
+    return result.count === 1;
+  }
+
+  async releaseAirportTriggerClaim(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly eventId: string;
+    readonly claimToken: string;
   }): Promise<void> {
     await this.client.executionEvent.updateMany({
       where: {
@@ -480,8 +558,12 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         type: 'ARRIVAL',
         undoneAt: null,
         airportTriggerCompletedAt: null,
+        airportTriggerClaimToken: input.claimToken,
       },
-      data: { airportTriggerCompletedAt: input.completedAt },
+      data: {
+        airportTriggerClaimedAt: null,
+        airportTriggerClaimToken: null,
+      },
     });
   }
 }

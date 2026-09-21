@@ -403,6 +403,142 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     ).not.toBeNull();
   });
 
+  it('claims one airport trigger across concurrent reconciliation callers', async () => {
+    await createAirportBinding('aerodatabox:p5e1-concurrent');
+    const gate = deferred();
+    flightTrigger.mockImplementationOnce(async () => {
+      await gate.promise;
+      return flightTriggerResult();
+    });
+    const payload = airportObservation();
+    const firstPromise = observe(owner, payload);
+    await vi.waitFor(() => expect(flightTrigger).toHaveBeenCalledTimes(1));
+
+    const second = await observe(owner, payload);
+    expect(second.statusCode).toBe(200);
+    expect(second.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      airportTriggerAttempted: false,
+      resultingTripVersion: 2,
+    });
+    expect(flightTrigger).toHaveBeenCalledTimes(1);
+
+    gate.resolve();
+    expect((await firstPromise).statusCode).toBe(200);
+    const event = await managed.client.executionEvent.findFirstOrThrow({
+      where: { tripId: fixture.tripId, type: 'ARRIVAL' },
+    });
+    expect(event).toMatchObject({
+      airportTriggerClaimedAt: null,
+      airportTriggerClaimToken: null,
+    });
+    expect(event.airportTriggerCompletedAt).not.toBeNull();
+    expect(await managed.client.executionEvent.count()).toBe(1);
+    expect(
+      await managed.client.temporalValue.count({
+        where: { nodeId: fixture.nodeAId, layer: 'ACTUAL' },
+      }),
+    ).toBe(1);
+    expect(await tripVersion()).toBe(2);
+  });
+
+  it('keeps a concurrent loser idle and releases a failed claim for later retry', async () => {
+    await createAirportBinding('aerodatabox:p5e1-concurrent-retry');
+    const gate = deferred();
+    flightTrigger.mockImplementationOnce(async () => {
+      await gate.promise;
+      throw new Error('synthetic provider failure');
+    });
+    const payload = airportObservation();
+    const firstPromise = observe(owner, payload);
+    await vi.waitFor(() => expect(flightTrigger).toHaveBeenCalledTimes(1));
+
+    const concurrentLoser = await observe(owner, payload);
+    expect(concurrentLoser.statusCode).toBe(200);
+    expect(
+      concurrentLoser.json<ExecutionLocationResponse>().airportTriggerAttempted,
+    ).toBe(false);
+    expect(flightTrigger).toHaveBeenCalledTimes(1);
+
+    gate.resolve();
+    expect((await firstPromise).statusCode).toBe(503);
+    const pending = await managed.client.executionEvent.findFirstOrThrow({
+      where: { tripId: fixture.tripId, type: 'ARRIVAL' },
+    });
+    expect(pending).toMatchObject({
+      airportTriggerClaimedAt: null,
+      airportTriggerClaimToken: null,
+      airportTriggerCompletedAt: null,
+    });
+
+    const retry = await observe(owner, payload);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      airportTriggerAttempted: true,
+      resultingTripVersion: 2,
+    });
+    expect(flightTrigger).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await managed.client.executionEvent.findFirstOrThrow({
+          where: { id: pending.id },
+        })
+      ).airportTriggerCompletedAt,
+    ).not.toBeNull();
+    expect(await tripVersion()).toBe(2);
+  });
+
+  it('never reclaims an undone airport arrival event', async () => {
+    await createAirportBinding('aerodatabox:p5e1-undone');
+    flightTrigger.mockRejectedValueOnce(
+      new Error('synthetic provider failure'),
+    );
+    const idempotencyKey = randomUUID();
+    const payload = {
+      baseTripVersion: 1,
+      idempotencyKey,
+      type: 'MANUAL_ARRIVAL',
+      nodeId: fixture.nodeAId,
+      occurredAt: '2030-01-01T10:00:00.000Z',
+    };
+    expect((await manual(owner, payload)).statusCode).toBe(503);
+    const event = await managed.client.executionEvent.findFirstOrThrow({
+      where: { tripId: fixture.tripId, type: 'ARRIVAL' },
+    });
+    const undo = await app.inject({
+      method: 'POST',
+      url: `/trips/${fixture.tripId}/execution/events/${event.id}/undo`,
+      headers: bearer(owner.credential),
+      payload: { baseTripVersion: 2, idempotencyKey: randomUUID() },
+    });
+    expect(undo.statusCode).toBe(200);
+
+    const replay = await manual(owner, payload);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json<ExecutionMutationResponse>()).toMatchObject({
+      idempotentReplay: true,
+      airportTriggerAttempted: false,
+      resultingTripVersion: 3,
+    });
+    expect(flightTrigger).toHaveBeenCalledTimes(1);
+    expect(
+      await managed.client.temporalValue.count({
+        where: { nodeId: fixture.nodeAId, layer: 'ACTUAL' },
+      }),
+    ).toBe(0);
+    expect(await tripVersion()).toBe(3);
+    expect(
+      await managed.client.executionEvent.findUniqueOrThrow({
+        where: { id: event.id },
+      }),
+    ).toMatchObject({
+      airportTriggerClaimedAt: null,
+      airportTriggerClaimToken: null,
+      airportTriggerCompletedAt: null,
+    });
+  });
+
   it('supports idempotent manual departure and exact-source undo with monotonic versions', async () => {
     await observe(owner, {
       latitude: 35,
@@ -558,7 +694,62 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       })
     ).version;
   }
+
+  async function createAirportBinding(providerFlightRef: string) {
+    const edge = await managed.client.transportEdge.create({
+      data: {
+        tripId: fixture.tripId,
+        fromNodeId: fixture.nodeAId,
+        toNodeId: fixture.nodeBId,
+        mode: 'FLIGHT',
+        fixedService: true,
+        source: 'MANUAL',
+      },
+    });
+    const snapshot = flightSnapshot('HND', 'CTS');
+    return managed.client.flightBinding.create({
+      data: {
+        ownerUserId: owner.userId,
+        tripId: fixture.tripId,
+        transportEdgeId: edge.id,
+        provider: 'aerodatabox',
+        providerFlightRef,
+        canonicalFlightNumber: 'NH53',
+        displayFlightNumber: 'NH 53',
+        serviceDate: new Date('2030-01-01T00:00:00.000Z'),
+        selectedSnapshot: snapshot,
+        latestSnapshot: snapshot,
+        status: 'SCHEDULED',
+        lastRefreshedAt: NOW,
+      },
+    });
+  }
 });
+
+function airportObservation() {
+  return {
+    latitude: 35,
+    longitude: 139,
+    accuracyMeters: 10,
+    observedAt: '2030-01-01T10:00:00.000Z',
+  };
+}
+
+function flightTriggerResult() {
+  return {
+    flightBinding: {},
+    providerRefreshPerformed: false,
+    notificationId: null,
+  };
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 interface SyntheticIdentity {
   readonly userId: string;

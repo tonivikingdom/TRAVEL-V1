@@ -61,6 +61,26 @@ describe('P5E1 execution-location migration', () => {
         }
         expect(
           (
+            await target.query<{ column_name: string }>(`
+              SELECT column_name
+              FROM information_schema.columns
+              WHERE table_schema = 'public'
+                AND table_name = 'ExecutionEvent'
+                AND column_name IN (
+                  'airportTriggerClaimedAt',
+                  'airportTriggerClaimToken',
+                  'airportTriggerCompletedAt'
+                )
+              ORDER BY column_name
+            `)
+          ).rows.map((row) => row.column_name),
+        ).toEqual([
+          'airportTriggerClaimToken',
+          'airportTriggerClaimedAt',
+          'airportTriggerCompletedAt',
+        ]);
+        expect(
+          (
             await target.query(`
               SELECT "version" FROM "Trip"
               WHERE "id" = '10000000-0000-4000-8000-000000000041'

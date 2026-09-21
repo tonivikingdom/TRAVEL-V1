@@ -18,6 +18,8 @@ CREATE TABLE "ExecutionEvent" (
   "undoneAt" TIMESTAMPTZ(3),
   "undoIdempotencyKey" VARCHAR(200),
   "undoRequestHash" VARCHAR(64),
+  "airportTriggerClaimedAt" TIMESTAMPTZ(3),
+  "airportTriggerClaimToken" UUID,
   "airportTriggerCompletedAt" TIMESTAMPTZ(3),
   "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ExecutionEvent_pkey" PRIMARY KEY ("id"),
@@ -25,6 +27,8 @@ CREATE TABLE "ExecutionEvent" (
     CHECK (("idempotencyKey" IS NULL) = ("requestHash" IS NULL)),
   CONSTRAINT "ExecutionEvent_undo_pair_check"
     CHECK (("undoIdempotencyKey" IS NULL) = ("undoRequestHash" IS NULL)),
+  CONSTRAINT "ExecutionEvent_airport_claim_pair_check"
+    CHECK (("airportTriggerClaimedAt" IS NULL) = ("airportTriggerClaimToken" IS NULL)),
   CONSTRAINT "ExecutionEvent_undo_time_check"
     CHECK ("undoneAt" IS NULL OR "undoneAt" >= "createdAt")
 );

@@ -40,6 +40,7 @@ export {
   type ExecutionLocationServiceOptions,
 } from './execution-location-service.js';
 export type {
+  AirportTriggerClaimResult,
   CommitExecutionResult,
   ExecutionContextNodeRecord,
   ExecutionContextRecord,

@@ -16,7 +16,7 @@ import {
   type ExecutionTargetKind,
   type ExecutionTimelineNode,
 } from '@travel/domain';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
@@ -33,11 +33,15 @@ import { parseAbsoluteInstantInput } from './time-input.js';
 export interface ExecutionLocationServiceOptions {
   readonly now?: () => Date;
   readonly policy?: ExecutionLocationPolicy;
+  readonly airportTriggerClaimLeaseMs?: number;
 }
+
+const DEFAULT_AIRPORT_TRIGGER_CLAIM_LEASE_MS = 120_000;
 
 export class ExecutionLocationService {
   private readonly now: () => Date;
   private readonly policy: ExecutionLocationPolicy;
+  private readonly airportTriggerClaimLeaseMs: number;
 
   constructor(
     private readonly repository: ExecutionLocationRepository,
@@ -47,6 +51,15 @@ export class ExecutionLocationService {
   ) {
     this.now = options.now ?? (() => new Date());
     this.policy = options.policy ?? DEFAULT_EXECUTION_LOCATION_POLICY;
+    this.airportTriggerClaimLeaseMs =
+      options.airportTriggerClaimLeaseMs ??
+      DEFAULT_AIRPORT_TRIGGER_CLAIM_LEASE_MS;
+    if (
+      !Number.isSafeInteger(this.airportTriggerClaimLeaseMs) ||
+      this.airportTriggerClaimLeaseMs <= 0
+    ) {
+      throw new Error('airportTriggerClaimLeaseMs must be a positive integer');
+    }
   }
 
   async observeLocation(
@@ -311,17 +324,41 @@ export class ExecutionLocationService {
         (item) => item.departureNodeId === arrival.nodeId,
       );
       if (flight === undefined) continue;
-      attempted = true;
-      await this.flightMonitoringService.trigger(
-        actor,
-        context.tripId,
-        flight.flightBindingId,
-        { type: 'ARRIVED_AT_AIRPORT', airportIata: flight.airportIata },
-      );
-      await this.repository.markAirportTriggerCompleted({
+      const claimedAt = this.now();
+      const claimToken = randomUUID();
+      const claim = await this.repository.claimAirportTrigger({
         ownerUserId: actor.userId,
         tripId: context.tripId,
         eventId: arrival.id,
+        claimToken,
+        claimedAt,
+        expiredBefore: new Date(
+          claimedAt.getTime() - this.airportTriggerClaimLeaseMs,
+        ),
+      });
+      if (claim.status !== 'CLAIMED') continue;
+      attempted = true;
+      try {
+        await this.flightMonitoringService.trigger(
+          actor,
+          context.tripId,
+          flight.flightBindingId,
+          { type: 'ARRIVED_AT_AIRPORT', airportIata: flight.airportIata },
+        );
+      } catch (error) {
+        await this.repository.releaseAirportTriggerClaim({
+          ownerUserId: actor.userId,
+          tripId: context.tripId,
+          eventId: arrival.id,
+          claimToken: claim.claimToken,
+        });
+        throw error;
+      }
+      await this.repository.completeAirportTrigger({
+        ownerUserId: actor.userId,
+        tripId: context.tripId,
+        eventId: arrival.id,
+        claimToken: claim.claimToken,
         completedAt: this.now(),
       });
     }

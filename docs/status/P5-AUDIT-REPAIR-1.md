@@ -37,11 +37,17 @@
 
 ## 验证证据
 
-- Unit：F-03 suppression/re-arm、F-13 inconsistent/normal/departure-only domain regression。
+- Unit：`40 files / 465 tests` success；覆盖 F-03 suppression/re-arm、F-13
+  inconsistent/normal/departure-only domain regression。
 - PostgreSQL API integration：same/older/newer-inside/outside/re-entry、Undo/observe serialization、机场 trigger、
-  public provenance rejection、Undo dependent departure、inconsistent frontier 409。
+  public provenance rejection、Undo dependent departure、inconsistent frontier 409；本机专用 PostgreSQL 验证
+  `8 files / 176 tests` success。
+- PostgreSQL persistence regression：`6 files / 48 tests` success。受本机测试账号无 `CREATE DATABASE` 权限限制，
+  隔离 migration suites 以 GitHub CI 为正式结果。
 - Migration integration：clean deploy 与 populated main → repair migration；历史 event、airport marker、Trip
   version 保持，watermark/suppression 按安全条件回填。
+- GitHub CI Run [`35592969481`](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35592969481)：
+  `verify`、`Compose verification`、`P5B acceptance` 全部 success。
 - 原 `[AUDIT F-03/F-11/F-13]` characterization 已改为 `[REGRESSION ...]` 语义；审计目录继续保留当时基线证据。
 
 ## 明确未处理

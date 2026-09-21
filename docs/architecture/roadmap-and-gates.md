@@ -21,8 +21,9 @@
 | P5C  | 停留/Buffer 策略、Route lookback、候选排序与可逆调整 | 已通过 PR #18 Squash Merge；main `7b069707ed67fe539adea373b642041cce1820ac`；CI `35479025186` 三个核心 job 通过    | 确定性 planning policy 已完成；真实 Provider、Push 与 Production 仍未授权            |
 | P5D1 | 确定性执行风险、持久生命周期与通知抑制               | 已完成；PR #20 已 Squash Merge 至 main `83ce12780879c563470ff3dc98a72e6f68a3fe00`                                  | 仅显式评估 foundation；无后台实时轮询、定位、Push、自动重排或下一班查询              |
 | P5D2 | Flight operational facts 与手工刷新                  | 已通过 PR #21 Squash Merge；main `ddfa4cb558ea4dabec032189f2f66129f1f6f0f8`                                        | AeroDataBox 适配器、FlightBinding、事实排序与风险重评已完成                          |
-| P5D3 | Flight monitoring 与重要变化通知 V1                  | 已授权，在 `feature/p5d3-flight-monitoring` 实施；保持 Draft                                                       | 持久 Job、重要变化聚合与行李短轮询；不含 Push、定位、自动换班或 Production           |
-| P5D+ | 后续执行采集、提醒投递与正式客户端能力               | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
+| P5D3 | Flight monitoring 与重要变化通知 V1                  | 已通过 PR #24 Squash Merge；main `990c6420d2fc4018569f827786c3316324715aa9`；CI `35529228227` 三个核心 job 通过    | 持久 Job、重要变化聚合与行李短轮询；不含 Push、定位、自动换班或 Production           |
+| P5E1 | Execution Location 与 Arrival Detection V1           | 已授权，在 `feature/p5e1-execution-location` 实施；保持 Draft                                                      | 只处理执行事实、最小派生状态与显式 Undo；不保存轨迹、不含原生定位或 Push             |
+| P5E+ | 后续执行采集、提醒投递与正式客户端能力               | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                   |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。

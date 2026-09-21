@@ -84,6 +84,19 @@ export {
   type ExecutionRiskTransport,
 } from './execution-risk.js';
 export {
+  decideExecutionLocation,
+  DEFAULT_EXECUTION_LOCATION_POLICY,
+  haversineDistanceMeters,
+  resolveExecutionFrontier,
+  type ExecutionDerivedLocationState,
+  type ExecutionFrontier,
+  type ExecutionLocationDecision,
+  type ExecutionLocationPolicy,
+  type ExecutionTargetKind,
+  type ExecutionTimelineNode,
+  type LocationObservation,
+} from './execution-location.js';
+export {
   decideAcceptedFlightRefresh,
   decideProviderFailure,
   futureNormalCheckpoints,

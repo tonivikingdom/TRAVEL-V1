@@ -1,5 +1,6 @@
 import {
   AuthService,
+  ExecutionLocationService,
   ExecutionRiskService,
   FlightMonitoringService,
   FlightService,
@@ -14,6 +15,7 @@ import {
   createPostgresReadiness,
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaExecutionLocationRepository,
   PrismaExecutionRiskRepository,
   PrismaFlightRepository,
   PrismaFlightMonitoringRepository,
@@ -43,6 +45,7 @@ const managedProbe = createPostgresReadiness(databaseUrl);
 let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
 let notificationService: NotificationService | undefined;
+let executionLocationService: ExecutionLocationService | undefined;
 let executionRiskService: ExecutionRiskService | undefined;
 let flightService: FlightService | undefined;
 let flightMonitoringService: FlightMonitoringService | undefined;
@@ -84,6 +87,11 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   flightMonitoringService = new FlightMonitoringService(
     flightService,
     new PrismaFlightMonitoringRepository(managedPrisma.client),
+  );
+  executionLocationService = new ExecutionLocationService(
+    new PrismaExecutionLocationRepository(managedPrisma.client),
+    executionRiskService,
+    flightMonitoringService,
   );
   const planningRepository = new PrismaRoutePlanningRepository(
     managedPrisma.client,
@@ -127,6 +135,9 @@ const app = buildApi({
   readinessProbe: managedProbe.probe,
   ...(authService === undefined ? {} : { authService }),
   ...(notificationService === undefined ? {} : { notificationService }),
+  ...(executionLocationService === undefined
+    ? {}
+    : { executionLocationService }),
   ...(executionRiskService === undefined ? {} : { executionRiskService }),
   ...(flightService === undefined ? {} : { flightService }),
   ...(flightMonitoringService === undefined ? {} : { flightMonitoringService }),

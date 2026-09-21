@@ -2,11 +2,11 @@
 
 ## 证据分层
 
-| 层级              | Commit / Run                                                                                                                             | 实际范围                                                                                                                        | 权威度与限制                                                                          |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 固定业务 baseline | `317a08ed4c9d5ff0fcb455573a012762269eaaf7` / [main Run 35554823250](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35554823250) | `verify`（PostgreSQL 17、migration deploy、format/lint/typecheck/unit/integration/build）、Compose verification、P5B acceptance | 三个 job success；证明既有断言，不证明审计新增场景。                                  |
-| 初始审计 PR       | `2b92836b3e512a0f36cdda2c3bcaef18174106eb` / [PR Run 35580280588](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35580280588)   | 既有 verify、Compose、P5B；仅审计文档/repro                                                                                     | 三个 job success；没有审计 PostgreSQL repro。                                         |
-| 本轮审计证据提交  | 见本 PR 后续 HEAD/Run                                                                                                                    | 新增 `[AUDIT ...]` Domain/PostgreSQL characterization tests + 全部既有 jobs                                                     | CI 完成后填写；缺陷测试“通过”表示稳定复现基线行为，结果分类仍是 `DEFECT_REPRODUCED`。 |
+| 层级              | Commit / Run                                                                                                                             | 实际范围                                                                                                                        | 权威度与限制                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 固定业务 baseline | `317a08ed4c9d5ff0fcb455573a012762269eaaf7` / [main Run 35554823250](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35554823250) | `verify`（PostgreSQL 17、migration deploy、format/lint/typecheck/unit/integration/build）、Compose verification、P5B acceptance | 三个 job success；证明既有断言，不证明审计新增场景。                                 |
+| 初始审计 PR       | `2b92836b3e512a0f36cdda2c3bcaef18174106eb` / [PR Run 35580280588](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35580280588)   | 既有 verify、Compose、P5B；仅审计文档/repro                                                                                     | 三个 job success；没有审计 PostgreSQL repro。                                        |
+| 本轮审计证据提交  | `bf656046eed19e11510da521ce837aed3b8aa401` / [PR Run 35585294571](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35585294571)   | 新增 `[AUDIT ...]` Domain/PostgreSQL characterization tests + 全部既有 jobs                                                     | 三个 job success；缺陷测试“通过”表示稳定复现基线行为，结果仍是 `DEFECT_REPRODUCED`。 |
 
 ## 固定基线既有 CI
 
@@ -35,6 +35,8 @@
 真实 PostgreSQL、Compose 与 P5B 留给隔离 PR CI。
 
 ## 审计新增用例
+
+Run 35585294571 的 `verify` 日志：unit **40 files / 460 tests**；PostgreSQL integration **22 files / 227 tests**（persistence 14/59，API 8/168）。相比固定基线，新增 **1 unit + 6 PostgreSQL integration**；另把 1 个既有 flight monitoring integration test 加强为跨通知域断言，因此测试总数不增加。
 
 | 用例                                            | 使用真实 PostgreSQL | 使用真实 Application/Repository                                     | Flight trigger / Worker                               | 结果含义                                                                 |
 | ----------------------------------------------- | ------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |

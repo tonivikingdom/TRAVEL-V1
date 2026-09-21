@@ -982,6 +982,29 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     });
   });
 
+  it('[AUDIT SOURCE TRUST] accepts an owner-supplied provider provenance through public temporal HTTP', async () => {
+    const trip = await tripWithPlaces(userA, ['A']);
+    const subject = {
+      type: 'NODE',
+      nodeId: trip.days[0]!.nodes[0]!.id,
+    } as const;
+    const response = await temporalValueResponse(userA, trip, subject, {
+      layer: 'ACTUAL',
+      sourceKind: 'PROVIDER_OBSERVATION',
+      sourceRef: 'provider:caller-controlled-reference',
+      observedAt: '2030-10-01T19:31:00+08:00',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      (response.json() as TripView).days[0]!.nodes[0]!.timeValues[0],
+    ).toMatchObject({
+      layer: 'ACTUAL',
+      sourceKind: 'PROVIDER_OBSERVATION',
+      sourceRef: 'provider:caller-controlled-reference',
+    });
+  });
+
   it('rejects an offset masquerading as an IANA time zone over HTTP', async () => {
     const trip = await tripWithPlaces(userA, ['A']);
     const response = await temporalValueResponse(

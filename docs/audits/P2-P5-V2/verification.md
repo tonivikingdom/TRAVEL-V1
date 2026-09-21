@@ -1,83 +1,86 @@
 # 验证记录
 
-## 固定环境
+## 证据分层
 
-| 项目                | 值                                         |
-| ------------------- | ------------------------------------------ |
-| Audit baseline      | `317a08ed4c9d5ff0fcb455573a012762269eaaf7` |
-| OS / shell          | Windows / PowerShell                       |
-| Node.js             | `v24.19.0`                                 |
-| pnpm                | `11.19.0`                                  |
-| Git                 | `2.53.0.windows.3`                         |
-| PostgreSQL service  | `postgresql-x64-17` 正在运行               |
-| `psql`              | 未在 PATH 中                               |
-| Docker CLI          | 不可用                                     |
-| `TEST_DATABASE_URL` | 未设置                                     |
-| `DATABASE_URL`      | 未设置                                     |
+| 层级              | Commit / Run                                                                                                                             | 实际范围                                                                                                                        | 权威度与限制                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 固定业务 baseline | `317a08ed4c9d5ff0fcb455573a012762269eaaf7` / [main Run 35554823250](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35554823250) | `verify`（PostgreSQL 17、migration deploy、format/lint/typecheck/unit/integration/build）、Compose verification、P5B acceptance | 三个 job success；证明既有断言，不证明审计新增场景。                                  |
+| 初始审计 PR       | `2b92836b3e512a0f36cdda2c3bcaef18174106eb` / [PR Run 35580280588](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35580280588)   | 既有 verify、Compose、P5B；仅审计文档/repro                                                                                     | 三个 job success；没有审计 PostgreSQL repro。                                         |
+| 本轮审计证据提交  | 见本 PR 后续 HEAD/Run                                                                                                                    | 新增 `[AUDIT ...]` Domain/PostgreSQL characterization tests + 全部既有 jobs                                                     | CI 完成后填写；缺陷测试“通过”表示稳定复现基线行为，结果分类仍是 `DEFECT_REPRODUCED`。 |
 
-## 本机命令结果
+## 固定基线既有 CI
 
-| 命令                                    | Exit | 结果                                                                                                                                                           |
-| --------------------------------------- | ---: | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm prisma:validate`                  |    0 | Prisma schema valid                                                                                                                                            |
-| `pnpm format:check`                     |    1 | Prettier 在 21 个 baseline 文件报告格式差异；均为本次审计前已存在的 P5E1/Windows CRLF 相关文件，本审计没有批量改写业务文件。同一 SHA 的 Linux CI format 成功。 |
-| `pnpm lint`                             |    0 | success                                                                                                                                                        |
-| `pnpm typecheck`                        |    0 | success；Prisma generate 成功，workspace projects 全部通过                                                                                                     |
-| `pnpm test`                             |    0 | **40 files / 459 tests** passed                                                                                                                                |
-| `pnpm exec vitest run apps/worker/test` |    0 | **4 files / 17 tests** passed                                                                                                                                  |
-| `pnpm test:integration`                 |    1 | 环境阻塞：13 个 persistence suite 在加载时因 `TEST_DATABASE_URL is required` 失败，1 file / 2 tests skipped；API stage 未开始。不是产品断言失败。              |
-| `pnpm build`                            |    0 | 全 workspace build 成功，包含 Debug Web Vite production build                                                                                                  |
+- `verify`: success；unit **40 files / 459 tests**，PostgreSQL integration **22 files / 221 tests**（persistence 14/59，API 8/162）。
+- `Compose verification`: success。
+- `P5B acceptance`: success。
+- Workflow 定义：`.github/workflows/ci.yml`。具体 test 名称与 assertion 索引见 [evidence-matrix.md](./evidence-matrix.md)。
 
-`pnpm --filter @travel/worker test` 没有执行测试，因为 worker package 没有 `test` script；因此使用上表的显式 Vitest 命令，未把空输出算作通过。
+## 本机已运行
 
-## 正式 main CI 证据
+本轮不读取未知本地数据库，不使用真实用户/Provider/生产 secret。
 
-- Workflow run：[35554823250](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/35554823250)
-- Commit：`317a08ed4c9d5ff0fcb455573a012762269eaaf7`
-- Trigger：push to `main`
-- Overall：success
-- `verify`：success（PostgreSQL 17、migration deploy、format、lint、typecheck、unit、PostgreSQL integration、build）
-- `Compose verification`：success
-- `P5B acceptance`：success
-- CI 记录的测试规模：unit **40 files / 459 tests**；PostgreSQL integration **22 files / 221 tests**（persistence 14/59，API 8/162）。
+| 命令                                                                   | 结果                          | 证明范围                                                   |
+| ---------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------- |
+| `pnpm prisma:validate`                                                 | success                       | schema 未改；只验证现有 schema。                           |
+| `pnpm exec vitest run packages/domain/test/execution-location.test.ts` | 1 file / 9 tests success      | 纯 Domain；包含执行前沿不一致的 characterization。         |
+| `pnpm lint`                                                            | success                       | 静态 lint，不证明 PostgreSQL 行为。                        |
+| `pnpm typecheck`                                                       | success                       | workspace 类型/Prisma generate，不证明运行期行为。         |
+| `pnpm test`                                                            | **40 files / 460 tests**      | 全部 unit；比 baseline 增加 1 个 Domain characterization。 |
+| `pnpm build`                                                           | success                       | 全 workspace，含真实 Vite production build。               |
+| `pnpm exec tsx .../location-single-sample.repro.ts`                    | success                       | 仅刻画单点 baseline；明确不证明 pass-through 误判。        |
+| 审计文件 targeted Prettier                                             | success                       | 本轮修改的 docs/tests 全部匹配格式。                       |
+| `pnpm format:check`                                                    | exit 1（19 个 baseline 文件） | 固定基线 Windows/CRLF 差异；未批量改写，Linux CI 为权威。  |
+| `git diff --check`                                                     | success                       | 无 whitespace error；CRLF warning 不等于 diff error。      |
 
-工作流定义见 `.github/workflows/ci.yml:12-139`。CI 页面同时提示 GitHub Actions v4 内置 Node 20 的弃用迁移和 `ubuntu-latest` 迁移警告；这是 CI 维护项，不是本次产品 correctness failure。
+真实 PostgreSQL、Compose 与 P5B 留给隔离 PR CI。
 
-## 未能在本机执行的项目
+## 审计新增用例
 
-1. PostgreSQL integration：缺少 `TEST_DATABASE_URL`。
-2. clean/populated migration：同上；由 main CI `verify` 提供基线证据。
-3. Compose verification：Docker CLI 不可用；由 main CI 提供证据。
-4. P5B acceptance：Docker CLI 不可用；由 main CI 提供证据。
+| 用例                                            | 使用真实 PostgreSQL | 使用真实 Application/Repository                                     | Flight trigger / Worker                               | 结果含义                                                                 |
+| ----------------------------------------------- | ------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| F-03 identical sample after Undo                | 是（PR CI）         | 是，真实 HTTP→ExecutionLocationService→repository                   | Flight trigger 为 mock；无 Worker                     | `DEFECT_REPRODUCED`：第二 event/ACTUAL/version/trigger。                 |
+| F-03 older still-fresh sample after Undo        | 是（PR CI）         | 是                                                                  | 无 Flight binding；无 Worker                          | `DEFECT_REPRODUCED`。                                                    |
+| F-03 newer sample after Undo                    | 是（PR CI）         | 是                                                                  | 无 Worker                                             | 当前行为记录；仍重建事实。                                               |
+| F-03 owner-lock concurrent Undo→observe         | 是（PR CI）         | 是，真实 advisory transaction lock                                  | 无 Worker                                             | `DEFECT_REPRODUCED`；串行化不能保持用户纠正。                            |
+| SOURCE TRUST public Provider provenance         | 是（PR CI）         | 是，真实 authenticated temporal HTTP                                | 无 Worker                                             | `DEFECT_REPRODUCED`：普通 owner 的 caller-controlled provenance 被接受。 |
+| Risk + Flight notification paths                | 是（PR CI）         | 是，真实 FlightMonitoringService/FlightService/ExecutionRiskService | 调用 durable job service；没有启动独立 Worker process | `STATIC_CONFIRMED/DEFECT CHARACTERIZED`：同轮各一条不同 kind。           |
+| Arrival Undo leaves Departure                   | 是（PR CI）         | 是，真实 HTTP/service/repository                                    | 无 Worker                                             | `DEFECT_REPRODUCED`。                                                    |
+| Open earlier/current + later completed frontier | 否，纯 Domain       | 真实 domain function                                                | 无                                                    | `STATIC_CONFIRMED` characterization。                                    |
 
-这些项目均标为“CI 已验证 / 本机未验证”，没有用 mock 或 unit test 替代真实 PostgreSQL/Compose 结论。
+## 未执行/未证明
 
-## 测试盘点结果
+1. 本机 PostgreSQL integration：未设置/使用审计专用 `TEST_DATABASE_URL`；按要求不探测未知本地库，交由 PR 的隔离 PostgreSQL CI。
+2. 本机 Compose/P5B：本轮未运行；使用固定 baseline 与 PR CI job，不能把它写成本机结果。
+3. F-09 API+Worker+Flight 全链：未新增；P5E1 suite 只 mock Flight trigger，P5D3 suite 虽使用真实 services 但不是由 location HTTP/Worker 串起。
+4. 真实 pass-through/重叠地点轨迹：未执行；`location-single-sample.repro.ts` 仅证明单点当前行为。
+5. 真实 Provider account entitlement、webhook 签名、费用、retention：未验证；没有付费调用、订阅变更或数据删除。
+6. Production/Staging、Push、原生后台定位和正式客户端：未实现/未授权。
 
-- 唯一显式条件 skip：`packages/persistence/test/p5b-reset.integration.test.ts:14` 的 `describe.skipIf(databaseUrl === undefined)`；它只在没有数据库 URL 时跳过 reset integration。
-- 未发现 `test.only`、注释掉整套 suite 或通过弱化 assertion 绕过 P2–P5 核心行为。
-- 多处 `as unknown as` 用于 Prisma JSON → versioned contract 的边界。本审计只在能形成具体触发与后果时立项，未把类型转换数量当 finding 数量。
+## 结果分类
 
-## 外部 Provider 官方来源
+- `BASELINE_TESTS_PASSED`：既有 main/PR CI 通过。
+- `DEFECT_REPRODUCED`：F-03、F-11、F-13 的审计 PostgreSQL用例复现；测试绿不等于产品正确。
+- `STATIC_CONFIRMED`：F-01/F-02/F-04A/F-06/F-07/F-08/F-10/F-12 调用链或缺口。
+- `UNVERIFIED`：F-04B 具体误判、F-05 account governance、F-09 全链及 A–H 表明确标注的缺段。
 
-查询日期：**2026-09-21**。只查看官方公开资料；没有发起付费 API 调用、购买订阅或假定账户 entitlement。
+## 外部资料使用边界
 
-1. [Google Routes API policies](https://developers.google.com/maps/documentation/routes/policies)：Routes 内容缓存、归因、隐私和 Terms 边界；Place ID 有单独规则。
-2. [Google Maps Platform service-specific terms](https://cloud.google.com/maps-platform/terms/maps-service-terms)：Routes 等服务的缓存/使用限制；具体许可仍取决于账户合同和当期条款。
-3. [AeroDataBox Flight Alert API guide](https://aerodatabox.com/flight-alert-api-2026)：官方说明按 flight number/airport 建立 webhook subscription、交付重试和 credit-based billing；覆盖和余额会影响通知。
-4. [AeroDataBox API](https://aerodatabox.com/api) 与 [pricing](https://aerodatabox.com/pricing/)：能力、配额、覆盖和数据使用随计划变化。
-5. [AeroDataBox 2026 terms update](https://aerodatabox.com/2026-09-terms-update)：官方说明默认数据留存上限和扩展计划差异；实际账户计划未知。
+审计只可用供应商官方资料判断“一般提供什么能力”，不能据此推定当前账户 entitlement、价格、字段完整性、回调签名或合同许可。不同 provider 不应被假设为统一 webhook 机制。本轮不新增订阅、不调用付费接口、不删除现有数据。
 
-由此只能得出：仓库需要一份与实际 provider plan 绑定的 retention/attribution/acquisition capability matrix。不能仅凭公开网页断言当前账户已经违规，或承诺 webhook 一定免费、完整、可靠。
+参考入口（查询日期 2026-09-21）：
 
-## 审计自身验证
+- [Google Routes API policies](https://developers.google.com/maps/documentation/routes/policies)
+- [Google Maps Platform service-specific terms](https://cloud.google.com/maps-platform/terms/maps-service-terms)
+- [AeroDataBox API](https://aerodatabox.com/api)
+- [AeroDataBox pricing](https://aerodatabox.com/pricing/)
 
-提交前执行：
+## 审计材料校验
 
 ```text
 pnpm exec prettier --check "docs/audits/P2-P5-V2/**/*.md" "docs/audits/P2-P5-V2/**/*.ts"
 pnpm exec tsx docs/audits/P2-P5-V2/repro/location-single-sample.repro.ts
+pnpm lint
+pnpm typecheck
+pnpm test
 git diff --check
 ```
-
-最终实际结果记录在 Draft PR 正文和提交后的审计 HEAD。

@@ -1,6 +1,6 @@
 # Repro: location fact Undo 后重放旧样本
 
-状态：baseline 静态确认；需要 `TEST_DATABASE_URL` 或 API+PostgreSQL 环境完成动态复现。
+状态：baseline 静态确认；审计分支已加入同样本、旧但仍 fresh 样本、新样本和 Undo/observe 并发的真实 PostgreSQL 用例。权威运行结果见 `verification.md` 的 PR CI。
 
 ## 前置
 

@@ -1,48 +1,48 @@
-# 审计覆盖矩阵
+# 审计覆盖清单
 
-## 阶段/模块覆盖
+详细的 requirement/scenario ID、调用链、固定基线文件/函数/行范围、测试名称/断言、运行方式和限制见 [evidence-matrix.md](./evidence-matrix.md)。本页只做范围完整性和结果索引，不再用“integration/main CI 已覆盖”替代具体证据。
 
-| 模块                                     | 静态审阅                                           | 自动化证据                                  | 结论/缺口                                                              |
-| ---------------------------------------- | -------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------- |
-| P2A Trip / DayOccurrence / DateOwnership | schema、Trip repository、command/API、migration    | Trip PostgreSQL integration；main CI        | 版本、owner、日期所有权和 sequence 边界已覆盖；未重做产品语义。        |
-| P2B Transport / History / TemporalValue  | adjacency、history、FACT_PROTECTED、strict instant | transport-temporal integration；main CI     | 当前 adjacency 与历史保留设计成立。                                    |
-| P3A DayOccurrence sequence               | migration、read model、node move                   | migration/integration；main CI              | 重复 localDate 与 sequence 排序受覆盖。                                |
-| P3B1 Intent / Evaluate                   | schema、commands、read-only evaluate               | unit/integration；main CI                   | intent 与事实分离。                                                    |
-| P3B2 Propagation                         | worklist/fixed-point、provenance、conflict         | domain unit/integration；main CI            | hard/soft 边界清楚；未发现自动写回。                                   |
-| P4A1 Provider-neutral query              | port、capability、normalization                    | provider/application tests；main CI         | query 只读；真实 Provider 留存/归因仍有 F-05/F-06。                    |
-| P4B1 Snapshot / Preview                  | immutable snapshot、expiry、owner/version          | route-query integration；main CI            | 快照可追溯但无清理生命周期，见 F-05。                                  |
-| P4B2 Adopt                               | transaction、receipt/outbox、route lifecycle       | PostgreSQL fault/concurrency tests；main CI | 显式 Adopt，不自动采用。                                               |
-| P4B3 Undo                                | inverse basis、ACTUAL/new-fact guard、idempotency  | route-query integration；main CI            | route undo 边界完整。                                                  |
-| P5A Debug Web                            | auth/session、API client、debug workflows          | unit/build；main CI                         | 非正式 UI；通知空态文案已过时，见 F-08。                               |
-| P5B Acceptance                           | isolated Compose harness、reset guard              | main CI P5B acceptance                      | P0–P5A 跨层通过；尚未覆盖 P5E1 location chain，见 F-09。               |
-| P5C Planning Policy                      | ranking/lookback/dwell adjustment/undo             | unit/integration/P5B extension；main CI     | 取舍与显式 adjustment 已覆盖。                                         |
-| P5D1 Execution Risk                      | reconcile、dedupe、ack/snooze                      | unit/integration；main CI                   | 风险状态与 Notification 分离；用户级 capability 偏好缺失。             |
-| P5D2 Flight Facts                        | snapshot、fact mapping、ACTUAL protection          | unit/integration；main CI                   | provider snapshot 长期留存决策缺失，见 F-05。                          |
-| P5D3 Flight Monitoring                   | jobs、decision marker、notification aggregation    | unit/worker/integration；main CI            | 并发 decision 幂等已覆盖；默认自动 enroll，见 F-01。                   |
-| P5E1 Execution Location                  | decision、fact event、Undo、airport trigger claim  | domain/API integration；main CI             | 单点即事实与 Undo 重放缺陷，见 F-03/F-04；无 Compose 全链，见 F-09。   |
-| Auth / Session                           | Magic Link、session、disable                       | P1 regressions；main CI                     | 未发现新增越权路径。                                                   |
-| Job / Worker                             | PostgreSQL claim/lease/retry/shutdown              | worker unit、Compose CI                     | at-least-once 边界明确。                                               |
-| Notification / Outbox                    | owner list/dismiss、trusted writer、dedupe         | integration/Compose                         | 没有把 Notification 当 Push；提醒偏好仍未建模。                        |
-| ObjectStorage                            | owner-scoped lookup、reservation/provider boundary | integration/main CI                         | stale PENDING reconciliation 仍是已登记上线闸门，见 F-07。             |
-| P5E2 前置设计                            | 无实现                                             | 无                                          | 必须先处理 remediation plan 中的 capability/recording/lifecycle 决策。 |
+## 模块覆盖
 
-## 跨模块链路 A–H
+| 模块                | 关键场景 ID                                                  | 结论                                          | 关联 finding/限制                    |
+| ------------------- | ------------------------------------------------------------ | --------------------------------------------- | ------------------------------------ |
+| P2A                 | P2A-01：空 Trip、日期范围、重复 localDate、ownership/并发    | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P2B                 | P2B-01：adjacency、history、三层事实、FACT protection        | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P3A                 | P3A-01：occurrence identity/sequence、日期回拨               | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P3B1                | P3B1-01：intent 与事实分离、evaluate 只读                    | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P3B2                | P3B2-01：hard basis、双向传播、conflict/provenance           | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P4A1                | P4A1-01：provider-neutral query、P3 window、post-filter      | `BASELINE_TESTS_PASSED`                       | 真实 Provider governance F-05/F-06   |
+| P4B1                | P4B1-01：immutable snapshot/Preview、owner/version/expiry    | `BASELINE_TESTS_PASSED`                       | retention F-05                       |
+| P4B2                | P4B2-01：Adopt transaction、receipt/outbox、failure rollback | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P4B3                | P4B3-01：Undo compensation、ACTUAL/new fact guard、并发      | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| P5A                 | P5A-01：Debug client、outage/version/error state             | `BASELINE_TESTS_PASSED`                       | 文案 F-08；source trust F-11         |
+| P5B                 | P5B-01：5-user synthetic/auth/outage/worker/adopt/undo       | `BASELINE_TESTS_PASSED`                       | 不含后来的 P5E1 全链，F-09           |
+| P5C                 | P5C-01：ranking/lookback/dwell adjustment/undo/buffers       | `BASELINE_TESTS_PASSED`                       | 重点结论已明确，无新缺陷             |
+| P5D1                | P5D1-01：risk lifecycle、ack/snooze、fixed/actual anchors    | `BASELINE_TESTS_PASSED`                       | capability F-01；跨域通知 F-12       |
+| P5D2                | P5D2-01：snapshot ordering/fact mapping/ACTUAL protection    | `BASELINE_TESTS_PASSED`                       | governance F-05/F-06                 |
+| P5D3                | P5D3-01：monitor decision marker、aggregation、next job      | `BASELINE_TESTS_PASSED`                       | opt-in/stop F-01/F-10；跨域通知 F-12 |
+| P5E1                | P5E1-01：location decision/fact/Undo/risk/airport trigger    | `BASELINE_TESTS_PASSED` + `DEFECT_REPRODUCED` | F-02/F-03/F-04/F-09/F-13             |
+| Auth/Session        | PUB-01：邀请、Magic Link、session revoke、non-disclosure     | `BASELINE_TESTS_PASSED`                       | 无新增 finding                       |
+| Job/Worker          | PUB-01：claim/lease/retry/restart/shutdown                   | `BASELINE_TESTS_PASSED`                       | capability lifecycle F-01/F-10       |
+| Notification/Outbox | PUB-01：owner list/dismiss/dedupe/outbox                     | `BASELINE_TESTS_PASSED`                       | 两通知域 F-12；Push 未实现           |
+| ObjectStorage       | PUB-01：owner lookup、quota、provider failure/restart        | `BASELINE_TESTS_PASSED`                       | stale PENDING F-07                   |
 
-| 链路 | 路径                                                                                       | 状态                  | 证据或缺口                                                                                                                         |
-| ---- | ------------------------------------------------------------------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| A    | Trip command → DayOccurrence → DateOwnership → Transport invalidation → version            | **VERIFIED**          | PostgreSQL integration 与 transaction tests 覆盖成功/失败/并发。                                                                   |
-| B    | UserTimeIntent → deterministic propagation → Route Query hard window                       | **VERIFIED**          | P3/P4 unit + integration 覆盖 forward/backward/bidirectional 与 query condition。                                                  |
-| C    | Provider candidate → Snapshot → Preview → Adopt → Receipt/Outbox → Undo                    | **VERIFIED**          | P4B integration、P5C acceptance 与 main CI；显式 adoption。                                                                        |
-| D    | Flight provider → FlightBinding/TemporalValue → ExecutionRisk → Monitor Job → Notification | **VERIFIED with GAP** | P5D2/P5D3 integration/worker 通过；用户 opt-in 与 acquisition policy 缺失（F-01/F-06）。                                           |
-| E    | Location sample → ExecutionEvent/ACTUAL → Risk → Airport Flight trigger                    | **PARTIAL**           | API PostgreSQL integration 覆盖 claim；缺少真实 API+Worker Compose 全链（F-09），并有 Undo replay/single-point 问题（F-03/F-04）。 |
-| F    | Invitation → Magic Link request → durable Job → Worker → captured mail → session           | **VERIFIED**          | P5B acceptance 与 Compose verification。                                                                                           |
-| G    | Trusted domain event → Notification → owner-only list/dismiss                              | **VERIFIED with GAP** | owner isolation 与 dismiss 覆盖；Push/客户端 presence 未实现且未伪装。                                                             |
-| H    | Object reserve → provider write → READY/FAILED → owner read/delete                         | **PARTIAL**           | 正常/失败边界有测试；进程死在 PENDING 后没有 reconciliation（F-07）。                                                              |
+## 跨模块 A–H 状态
 
-## 未覆盖/未验证
+| ID                                                   | 状态                              | 摘要                                                                            |
+| ---------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------- |
+| A 最低停留→Query→Preview→Adopt→Undo                  | `BASELINE_TESTS_PASSED`           | 要求与路线可原子调整并由 Undo 恢复；idempotent replay 有断言。                  |
+| B 取消中间地点→旧目标/候选/风险/task 收口            | `PARTIAL`                         | transport/history/version 成立；旧 execution risk/task lifecycle 没有统一实现。 |
+| C Flight update→risk/notify/job→关闭辅助→late result | `PARTIAL`                         | snapshot/monitor 幂等成立；关闭辅助不存在，Risk/Flight 可能双通知。             |
+| D Location→fact→risk→flight→notification→纠正        | `DEFECT_REPRODUCED + UNVERIFIED`  | 单模块段有证据；完整 Worker 链缺失；Undo 后 observation 可复活。                |
+| E 无重要后果 vs 用户保护安排                         | `PARTIAL`                         | objective anchor、user intent、risk state 分离；主动提醒跨域聚合缺失。          |
+| F 断网/重启/DB 中断恢复                              | `BASELINE_TESTS_PASSED + PARTIAL` | P5B/Job/route/flight 有证据；P5E1→Flight 全链未纳入。                           |
+| G 多设备 stale mutation/event/Preview                | `PARTIAL/DEFECT_REPRODUCED`       | version/Preview/route Undo 保护成立；pause 不存在；旧 location event 可复活。   |
+| H 结束、跨夜与短尾                                   | `NOT_IMPLEMENTED/UNVERIFIED`      | instant/sequence 不依赖 server localDate；统一 end/cleanup authority 不存在。   |
 
-- 真实 Push、后台定位客户端、正式 Desktop/Mobile Client：`NOT IMPLEMENTED`。
-- Production/Staging Provider、外部 ingress、隐私/备份：`NOT AUTHORIZED / UNVERIFIED`。
-- 真实 Provider 长期留存和归因是否满足账户合同：`UNVERIFIED`。
-- 旅行结束后的能力清理和短尾需求：`PRODUCT DECISION REQUIRED`。
-- 本机 PostgreSQL/Compose/P5B：环境缺少连接串与 Docker CLI，见 verification。
+## 明确没有被证明的事项
+
+- `UNVERIFIED`：重复车站/酒店重叠、乘车经过但未下车、完整跨夜结束/短尾、P5E1 API+Worker+Flight 全链。
+- `NOT_IMPLEMENTED`：Push、正式后台定位客户端、capability pause/stop/cleanup、正式 Desktop/Mobile、RecommendationPolicy 之外的自动改计划、Production deployment。
+- `NOT AUTHORIZED`：Staging/Production、真实付费 Provider 调用、供应商订阅/数据删除。
+- P5E2 仅表示后续地面公共交通执行能力；不等于正式客户端开发或上线授权。

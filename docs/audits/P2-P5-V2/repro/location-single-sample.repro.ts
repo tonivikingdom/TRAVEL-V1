@@ -45,7 +45,7 @@ process.stdout.write(
       demonstratedBehavior: 'single reliable point confirms arrival',
       status: result.status,
       nodeId: result.nodeId,
-      note: 'This demonstrates current baseline behavior; it is not the proposed remediation.',
+      note: 'This only characterizes current baseline behavior. It does not reproduce a pass-through false arrival and does not imply that one sample is inherently invalid.',
     },
     null,
     2,

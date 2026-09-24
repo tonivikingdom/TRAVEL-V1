@@ -167,6 +167,21 @@ export function resolveExecutionFrontier(
   return { orderedNodes, currentNode, targetNode, state, conflict: null };
 }
 
+export function isTripExecutionNaturallyComplete(
+  nodes: readonly ExecutionTimelineNode[],
+): boolean {
+  if (nodes.length === 0) return false;
+  const frontier = resolveExecutionFrontier(nodes);
+  if (frontier.state === 'INCONSISTENT') return false;
+  const hasExecutionEvidence = frontier.orderedNodes.some(
+    (node) =>
+      node.hasActualArrival ||
+      node.hasActualDeparture ||
+      node.executionStatus === 'SKIPPED',
+  );
+  return hasExecutionEvidence && frontier.targetNode === null;
+}
+
 export function decideExecutionLocation(input: {
   readonly nodes: readonly ExecutionTimelineNode[];
   readonly previousState: ExecutionDerivedLocationState | null;

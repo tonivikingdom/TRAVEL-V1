@@ -812,6 +812,21 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     );
     now = new Date('2030-01-02T14:06:00.000Z');
     await monitoring.service.executeJob(adopted.binding.id, 1);
+    const capabilityService = new AssistanceCapabilityService(
+      new PrismaAssistanceCapabilityRepository(managed.client),
+      { now: () => now },
+    );
+    expect(
+      await capabilityService.getFlight(
+        monitoring.actor,
+        fixture.tripId,
+        adopted.binding.id,
+      ),
+    ).toMatchObject({
+      state: 'ENABLED',
+      effectiveEnabled: true,
+      effectiveReason: 'ENABLED',
+    });
     now = new Date('2030-01-02T14:11:00.000Z');
     await monitoring.service.executeJob(adopted.binding.id, 1);
     now = new Date('2030-01-02T14:31:00.000Z');
@@ -853,6 +868,18 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       state: 'STOPPED',
       revision: 2,
       stopReason: 'NATURAL_END',
+    });
+    expect(
+      await capabilityService.getFlight(
+        monitoring.actor,
+        fixture.tripId,
+        adopted.binding.id,
+      ),
+    ).toMatchObject({
+      state: 'STOPPED',
+      stopReason: 'NATURAL_END',
+      effectiveEnabled: false,
+      effectiveReason: 'STOPPED',
     });
   });
 

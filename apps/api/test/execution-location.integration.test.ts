@@ -4,6 +4,7 @@ import {
   digestOpaqueToken,
   ExecutionLocationService,
   ExecutionRiskService,
+  TripService,
   type ExecutionLocationRepository,
   type FlightMonitoringService,
 } from '@travel/application';
@@ -184,6 +185,90 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     expect(await tripVersion()).toBe(1);
     expect(await managed.client.executionEvent.count()).toBe(0);
   });
+
+  it.each([
+    ['LOCATION_ASSISTANCE', false],
+    ['AUTO_RECORD', true],
+  ] as const)(
+    'generation-fences a same-timestamp replay across %s pause/resume',
+    async (kind, resume) => {
+      const payload = {
+        latitude: 35,
+        longitude: 139,
+        accuracyMeters: 150,
+        observedAt: '2030-01-01T10:00:00.000Z',
+      };
+      expect((await observe(owner, payload)).statusCode).toBe(200);
+      const repository = new PrismaExecutionLocationRepository(managed.client);
+      const gate = deferred();
+      const started = deferred();
+      const delayed = new Proxy(repository, {
+        get(target, property, receiver) {
+          if (property === 'validateLocationReplay') {
+            return async (
+              input: Parameters<
+                ExecutionLocationRepository['validateLocationReplay']
+              >[0],
+            ) => {
+              started.resolve();
+              await gate.promise;
+              return target.validateLocationReplay(input);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }) as ExecutionLocationRepository;
+      const service = executionLocationService(delayed);
+      const replay = service.observeLocation(
+        executionActor(owner),
+        fixture.tripId,
+        payload,
+      );
+      await started.promise;
+      const capabilityService = new AssistanceCapabilityService(
+        new PrismaAssistanceCapabilityRepository(managed.client),
+        { now: () => NOW },
+      );
+      await capabilityService.mutateTrip(
+        executionActor(owner),
+        fixture.tripId,
+        kind,
+        {
+          action: 'PAUSE',
+          baseCapabilityRevision: 1,
+          idempotencyKey: randomUUID(),
+        },
+      );
+      if (resume) {
+        await capabilityService.mutateTrip(
+          executionActor(owner),
+          fixture.tripId,
+          kind,
+          {
+            action: 'RESUME',
+            baseCapabilityRevision: 2,
+            idempotencyKey: randomUUID(),
+          },
+        );
+      }
+      gate.resolve();
+      await expect(replay).rejects.toMatchObject({
+        code: 'CAPABILITY_CHANGED',
+      });
+      expect(flightTrigger).not.toHaveBeenCalled();
+      expect(await managed.client.executionEvent.count()).toBe(0);
+      expect(await managed.client.executionRisk.count()).toBe(0);
+      expect(await tripVersion()).toBe(1);
+      expect(
+        (
+          await managed.client.executionObservationWatermark.findUniqueOrThrow({
+            where: { tripId: fixture.tripId },
+          })
+        ).lastObservedAt,
+      ).toEqual(new Date(payload.observedAt));
+    },
+  );
 
   it('rejects stale, future, and invalid coordinate observations', async () => {
     for (const payload of [
@@ -435,6 +520,101 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       (
         await managed.client.executionEvent.findFirstOrThrow({
           where: { tripId: fixture.tripId, type: 'ARRIVAL' },
+        })
+      ).airportTriggerCompletedAt,
+    ).not.toBeNull();
+  });
+
+  it('keeps a pending airport trigger fenced from an old duplicate generation and recoverable by a new sample', async () => {
+    await createAirportBinding('aerodatabox:p5e1-generation-recovery');
+    flightTrigger.mockRejectedValueOnce(
+      new Error('synthetic provider failure'),
+    );
+    const payload = airportObservation();
+    expect((await observe(owner, payload)).statusCode).toBe(503);
+    const pending = await managed.client.executionEvent.findFirstOrThrow({
+      where: { tripId: fixture.tripId, type: 'ARRIVAL' },
+    });
+
+    const repository = new PrismaExecutionLocationRepository(managed.client);
+    const gate = deferred();
+    const started = deferred();
+    const delayed = new Proxy(repository, {
+      get(target, property, receiver) {
+        if (property === 'validateLocationReplay') {
+          return async (
+            input: Parameters<
+              ExecutionLocationRepository['validateLocationReplay']
+            >[0],
+          ) => {
+            started.resolve();
+            await gate.promise;
+            return target.validateLocationReplay(input);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as ExecutionLocationRepository;
+    const replay = executionLocationService(delayed).observeLocation(
+      executionActor(owner),
+      fixture.tripId,
+      payload,
+    );
+    await started.promise;
+    const capabilityService = new AssistanceCapabilityService(
+      new PrismaAssistanceCapabilityRepository(managed.client),
+      { now: () => NOW },
+    );
+    await capabilityService.mutateTrip(
+      executionActor(owner),
+      fixture.tripId,
+      'AUTO_RECORD',
+      {
+        action: 'PAUSE',
+        baseCapabilityRevision: 1,
+        idempotencyKey: randomUUID(),
+      },
+    );
+    await capabilityService.mutateTrip(
+      executionActor(owner),
+      fixture.tripId,
+      'AUTO_RECORD',
+      {
+        action: 'RESUME',
+        baseCapabilityRevision: 2,
+        idempotencyKey: randomUUID(),
+      },
+    );
+    gate.resolve();
+    await expect(replay).rejects.toMatchObject({
+      code: 'CAPABILITY_CHANGED',
+    });
+    expect(flightTrigger).toHaveBeenCalledTimes(1);
+    expect(
+      await managed.client.executionEvent.findUniqueOrThrow({
+        where: { id: pending.id },
+      }),
+    ).toMatchObject({
+      airportTriggerClaimedAt: null,
+      airportTriggerClaimToken: null,
+      airportTriggerCompletedAt: null,
+    });
+
+    const recovered = await observe(owner, {
+      ...payload,
+      observedAt: '2030-01-01T10:01:00.000Z',
+    });
+    expect(recovered.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      airportTriggerAttempted: true,
+      resultingTripVersion: 2,
+    });
+    expect(flightTrigger).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await managed.client.executionEvent.findUniqueOrThrow({
+          where: { id: pending.id },
         })
       ).airportTriggerCompletedAt,
     ).not.toBeNull();
@@ -1158,6 +1338,32 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     ).version;
   }
 
+  function assistanceStates() {
+    return managed.client.tripAssistanceCapability.findMany({
+      where: { tripId: fixture.tripId },
+      orderBy: { kind: 'asc' },
+      select: {
+        kind: true,
+        state: true,
+        revision: true,
+        stopReason: true,
+      },
+    });
+  }
+
+  function executionLocationService(repository: ExecutionLocationRepository) {
+    return new ExecutionLocationService(
+      repository,
+      new ExecutionRiskService(
+        new PrismaTripRepository(managed.client),
+        new PrismaExecutionRiskRepository(managed.client),
+        { now: () => NOW },
+      ),
+      { trigger: flightTrigger } as unknown as FlightMonitoringService,
+      { now: () => NOW },
+    );
+  }
+
   async function createAirportBinding(
     providerFlightRef: string,
     monitoringEnabled = true,
@@ -1344,6 +1550,159 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     expect(await tripVersion()).toBe(4);
   });
 
+  it('naturally completes with a legal first departure-only node and no final departure', async () => {
+    await managed.client.temporalValue.createMany({
+      data: [
+        executionFact(fixture.nodeAId, 'DEPARTURE', '09:00'),
+        executionFact(fixture.nodeBId, 'ARRIVAL', '09:15'),
+        executionFact(fixture.nodeBId, 'DEPARTURE', '09:30'),
+      ],
+    });
+    const finalArrival = await manual(owner, {
+      baseTripVersion: 1,
+      idempotencyKey: randomUUID(),
+      type: 'MANUAL_ARRIVAL',
+      nodeId: fixture.nodeCId,
+      occurredAt: '2030-01-01T10:00:00.000Z',
+    });
+    expect(finalArrival.statusCode).toBe(200);
+    expect(await assistanceStates()).toEqual([
+      expect.objectContaining({
+        kind: 'LOCATION_ASSISTANCE',
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      }),
+      expect.objectContaining({
+        kind: 'AUTO_RECORD',
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      }),
+    ]);
+    expect(await tripVersion()).toBe(2);
+  });
+
+  it('naturally stops after deleting the last future target and never silently reopens', async () => {
+    await managed.client.temporalValue.create({
+      data: executionFact(fixture.nodeAId, 'ARRIVAL', '09:00'),
+    });
+    const service = new TripService(new PrismaTripRepository(managed.client));
+    const actor = executionActor(owner);
+    const afterRemovingC = await service.executeCommand(
+      actor,
+      fixture.tripId,
+      1,
+      { type: 'DELETE_NODE', nodeId: fixture.nodeCId },
+    );
+    expect(afterRemovingC.version).toBe(2);
+    expect(await assistanceStates()).toEqual([
+      expect.objectContaining({ state: 'ENABLED', revision: 1 }),
+      expect.objectContaining({ state: 'ENABLED', revision: 1 }),
+    ]);
+
+    const afterRemovingB = await service.executeCommand(
+      actor,
+      fixture.tripId,
+      2,
+      { type: 'DELETE_NODE', nodeId: fixture.nodeBId },
+    );
+    expect(afterRemovingB.version).toBe(3);
+    expect(await assistanceStates()).toEqual([
+      expect.objectContaining({
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      }),
+      expect.objectContaining({
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      }),
+    ]);
+
+    const afterAddingFuture = await service.executeCommand(
+      actor,
+      fixture.tripId,
+      3,
+      {
+        type: 'ADD_FREE_ACTION',
+        targetDay: {
+          type: 'EXISTING',
+          dayOccurrenceId: afterRemovingB.days[0]!.dayOccurrenceId,
+        },
+        position: 1,
+        note: 'SYNTHETIC future target',
+      },
+    );
+    expect(afterAddingFuture.version).toBe(4);
+    expect(await assistanceStates()).toEqual([
+      expect.objectContaining({ state: 'STOPPED', revision: 2 }),
+      expect.objectContaining({ state: 'STOPPED', revision: 2 }),
+    ]);
+  });
+
+  it('does not naturally stop empty or inconsistent execution timelines', async () => {
+    const emptyTrip = await managed.client.trip.create({
+      data: {
+        ownerUserId: owner.userId,
+        name: 'SYNTHETIC empty assistance',
+        planningAnchorDate: new Date('2030-01-01T00:00:00.000Z'),
+        defaultPeopleCount: 1,
+        assistanceCapabilities: {
+          create: [
+            {
+              kind: 'LOCATION_ASSISTANCE',
+              state: 'ENABLED',
+              revision: 1,
+            },
+            {
+              kind: 'AUTO_RECORD',
+              state: 'ENABLED',
+              revision: 1,
+            },
+          ],
+        },
+      },
+    });
+    const service = new TripService(new PrismaTripRepository(managed.client));
+    await service.updateTrip(executionActor(owner), emptyTrip.id, {
+      baseTripVersion: 1,
+      name: 'SYNTHETIC empty assistance renamed',
+    });
+    expect(
+      await managed.client.tripAssistanceCapability.findMany({
+        where: { tripId: emptyTrip.id },
+        select: { state: true, revision: true },
+      }),
+    ).toEqual([
+      { state: 'ENABLED', revision: 1 },
+      { state: 'ENABLED', revision: 1 },
+    ]);
+
+    await managed.client.temporalValue.createMany({
+      data: [
+        executionFact(fixture.nodeAId, 'ARRIVAL', '09:00'),
+        executionFact(fixture.nodeBId, 'ARRIVAL', '09:15'),
+        executionFact(fixture.nodeBId, 'DEPARTURE', '09:30'),
+      ],
+    });
+    const occurrence = await managed.client.itineraryNode.findUniqueOrThrow({
+      where: { id: fixture.nodeCId },
+      select: { dayOccurrenceId: true },
+    });
+    await service.executeCommand(executionActor(owner), fixture.tripId, 1, {
+      type: 'MOVE_NODE',
+      nodeId: fixture.nodeCId,
+      dayOccurrenceId: occurrence.dayOccurrenceId,
+      position: 1,
+    });
+    expect(await assistanceStates()).toEqual([
+      expect.objectContaining({ state: 'ENABLED', revision: 1 }),
+      expect.objectContaining({ state: 'ENABLED', revision: 1 }),
+    ]);
+  });
+
   it.each(['LOCATION_ASSISTANCE', 'AUTO_RECORD'] as const)(
     'fences an in-flight location sample when %s revision changes',
     async (kind) => {
@@ -1431,6 +1790,30 @@ function airportObservation() {
     longitude: 139,
     accuracyMeters: 10,
     observedAt: '2030-01-01T10:00:00.000Z',
+  };
+}
+
+function executionActor(identity: SyntheticIdentity) {
+  return {
+    userId: identity.userId,
+    email: 'synthetic-p5e1-owner@synthetic.example.test',
+    role: 'USER' as const,
+    status: 'ACTIVE' as const,
+  };
+}
+
+function executionFact(
+  nodeId: string,
+  pointKind: 'ARRIVAL' | 'DEPARTURE',
+  utcTime: string,
+) {
+  return {
+    nodeId,
+    layer: 'ACTUAL' as const,
+    pointKind,
+    instant: new Date(`2030-01-01T${utcTime}:00.000Z`),
+    timeZone: 'UTC',
+    sourceKind: 'USER_VALUE' as const,
   };
 }
 

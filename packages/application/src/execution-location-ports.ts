@@ -82,6 +82,12 @@ export type AirportTriggerClaimResult =
   | { readonly status: 'CLAIMED'; readonly claimToken: string }
   | { readonly status: 'BUSY' | 'COMPLETED' | 'NOT_ELIGIBLE' };
 
+export type LocationReplayValidationResult =
+  | { readonly status: 'VALID' }
+  | {
+      readonly status: 'NOT_FOUND' | 'RETRY' | 'CAPABILITY_CHANGED';
+    };
+
 export interface ExecutionLocationRepository {
   findOwnedContext(input: {
     readonly ownerUserId: string;
@@ -111,6 +117,14 @@ export interface ExecutionLocationRepository {
     readonly expectedAutoRecordCapabilityRevision: number;
     readonly autoRecordEnabled: boolean;
   }): Promise<CommitExecutionResult>;
+  validateLocationReplay(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly observedAt: Date;
+    readonly expectedLocationCapabilityRevision: number;
+    readonly expectedAutoRecordCapabilityRevision: number;
+    readonly autoRecordEnabled: boolean;
+  }): Promise<LocationReplayValidationResult>;
   commitManual(input: {
     readonly ownerUserId: string;
     readonly tripId: string;
@@ -139,6 +153,8 @@ export interface ExecutionLocationRepository {
     readonly claimToken: string;
     readonly claimedAt: Date;
     readonly expiredBefore: Date;
+    readonly expectedLocationCapabilityRevision: number | null;
+    readonly expectedAutoRecordCapabilityRevision: number | null;
   }): Promise<AirportTriggerClaimResult>;
   completeAirportTrigger(input: {
     readonly ownerUserId: string;

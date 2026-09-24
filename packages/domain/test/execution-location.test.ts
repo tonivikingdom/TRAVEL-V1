@@ -2,6 +2,7 @@ import {
   decideExecutionLocation,
   DEFAULT_EXECUTION_LOCATION_POLICY,
   haversineDistanceMeters,
+  isTripExecutionNaturallyComplete,
   resolveExecutionFrontier,
   type ExecutionDerivedLocationState,
   type ExecutionTimelineNode,
@@ -95,6 +96,30 @@ describe('execution location policy', () => {
       state: 'EN_ROUTE',
       conflict: null,
     });
+  });
+
+  it('naturally completes without backfilling earlier arrivals or a final departure', () => {
+    expect(
+      isTripExecutionNaturallyComplete([
+        { ...a, hasActualDeparture: true },
+        { ...b, hasActualArrival: true, hasActualDeparture: true },
+        { ...c, hasActualArrival: true },
+      ]),
+    ).toBe(true);
+  });
+
+  it('does not naturally complete an empty, planned-only, future, or inconsistent timeline', () => {
+    expect(isTripExecutionNaturallyComplete([])).toBe(false);
+    expect(isTripExecutionNaturallyComplete([a, b])).toBe(false);
+    expect(
+      isTripExecutionNaturallyComplete([{ ...a, hasActualDeparture: true }, b]),
+    ).toBe(false);
+    expect(
+      isTripExecutionNaturallyComplete([
+        { ...a, hasActualArrival: true },
+        { ...b, hasActualArrival: true, hasActualDeparture: true },
+      ]),
+    ).toBe(false);
   });
 
   it('confirms arrival immediately when a reliable sample is inside target radius', () => {

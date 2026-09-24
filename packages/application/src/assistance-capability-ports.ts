@@ -56,6 +56,7 @@ export interface AssistanceCapabilityRepository {
     readonly capability: AssistanceCapabilityRecord;
     readonly scheduledDepartureAt: Date | null;
     readonly flightStatus: string;
+    readonly hasActiveMonitoringWork: boolean;
   } | null>;
   mutateFlightCapability(input: {
     readonly ownerUserId: string;

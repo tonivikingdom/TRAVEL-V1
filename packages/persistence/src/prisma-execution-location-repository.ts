@@ -8,6 +8,7 @@ import type {
 import type { ExecutionDerivedLocationState } from '@travel/domain';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
+import { stopTripAssistanceIfNaturallyComplete } from './trip-assistance-natural-end.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -220,22 +221,15 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
       );
       if (trip === null) return { status: 'NOT_FOUND' as const };
-      const capabilities = await transaction.tripAssistanceCapability.findMany({
-        where: { tripId: input.tripId },
-      });
-      const locationCapability = capabilities.find(
-        (capability) => capability.kind === 'LOCATION_ASSISTANCE',
-      );
-      const autoRecordCapability = capabilities.find(
-        (capability) => capability.kind === 'AUTO_RECORD',
-      );
       if (
-        locationCapability?.state !== 'ENABLED' ||
-        locationCapability.revision !==
-          input.expectedLocationCapabilityRevision ||
-        (autoRecordCapability?.revision ?? 0) !==
-          input.expectedAutoRecordCapabilityRevision ||
-        (autoRecordCapability?.state === 'ENABLED') !== input.autoRecordEnabled
+        !(await hasExpectedLocationCapabilities(transaction, {
+          tripId: input.tripId,
+          expectedLocationCapabilityRevision:
+            input.expectedLocationCapabilityRevision,
+          expectedAutoRecordCapabilityRevision:
+            input.expectedAutoRecordCapabilityRevision,
+          autoRecordEnabled: input.autoRecordEnabled,
+        }))
       ) {
         return { status: 'CAPABILITY_CHANGED' as const };
       }
@@ -313,7 +307,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.observedAt,
       );
       if (event !== null && !idempotentReplay) {
-        await stopTripAssistanceIfComplete(
+        await stopTripAssistanceIfNaturallyComplete(
           transaction,
           input.tripId,
           input.observedAt,
@@ -325,6 +319,40 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         resultingTripVersion: version,
         idempotentReplay,
       };
+    });
+  }
+
+  async validateLocationReplay(
+    input: Parameters<ExecutionLocationRepository['validateLocationReplay']>[0],
+  ) {
+    return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const trip = await lockOwnedTrip(
+        transaction,
+        input.ownerUserId,
+        input.tripId,
+      );
+      if (trip === null) return { status: 'NOT_FOUND' as const };
+      if (
+        !(await hasExpectedLocationCapabilities(transaction, {
+          tripId: input.tripId,
+          expectedLocationCapabilityRevision:
+            input.expectedLocationCapabilityRevision,
+          expectedAutoRecordCapabilityRevision:
+            input.expectedAutoRecordCapabilityRevision,
+          autoRecordEnabled: input.autoRecordEnabled,
+        }))
+      ) {
+        return { status: 'CAPABILITY_CHANGED' as const };
+      }
+      const watermark =
+        await transaction.executionObservationWatermark.findUnique({
+          where: { tripId: input.tripId },
+          select: { lastObservedAt: true },
+        });
+      return watermark?.lastObservedAt.getTime() === input.observedAt.getTime()
+        ? { status: 'VALID' as const }
+        : { status: 'RETRY' as const };
     });
   }
 
@@ -416,7 +444,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
           data: { status: 'SKIPPED' },
         });
         await finishManualMutation(transaction, input.tripId);
-        await stopTripAssistanceIfComplete(
+        await stopTripAssistanceIfNaturallyComplete(
           transaction,
           input.tripId,
           input.occurredAt,
@@ -456,7 +484,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         });
       }
       await finishManualMutation(transaction, input.tripId);
-      await stopTripAssistanceIfComplete(
+      await stopTripAssistanceIfNaturallyComplete(
         transaction,
         input.tripId,
         input.occurredAt,
@@ -598,6 +626,33 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
     input: Parameters<ExecutionLocationRepository['claimAirportTrigger']>[0],
   ) {
     return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const trip = await lockOwnedTrip(
+        transaction,
+        input.ownerUserId,
+        input.tripId,
+      );
+      const requiresLocationGeneration =
+        input.expectedLocationCapabilityRevision !== null ||
+        input.expectedAutoRecordCapabilityRevision !== null;
+      if (trip === null) {
+        return { status: 'NOT_ELIGIBLE' as const };
+      }
+      if (
+        requiresLocationGeneration &&
+        (input.expectedLocationCapabilityRevision === null ||
+          input.expectedAutoRecordCapabilityRevision === null ||
+          !(await hasExpectedLocationCapabilities(transaction, {
+            tripId: input.tripId,
+            expectedLocationCapabilityRevision:
+              input.expectedLocationCapabilityRevision,
+            expectedAutoRecordCapabilityRevision:
+              input.expectedAutoRecordCapabilityRevision,
+            autoRecordEnabled: true,
+          })))
+      ) {
+        return { status: 'NOT_ELIGIBLE' as const };
+      }
       const rows = await transaction.$queryRaw<LockedAirportTriggerRow[]>(
         Prisma.sql`
           SELECT
@@ -685,6 +740,34 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
       },
     });
   }
+}
+
+async function hasExpectedLocationCapabilities(
+  transaction: Transaction,
+  input: {
+    readonly tripId: string;
+    readonly expectedLocationCapabilityRevision: number;
+    readonly expectedAutoRecordCapabilityRevision: number;
+    readonly autoRecordEnabled: boolean;
+  },
+): Promise<boolean> {
+  const capabilities = await transaction.tripAssistanceCapability.findMany({
+    where: { tripId: input.tripId },
+    select: { kind: true, state: true, revision: true },
+  });
+  const location = capabilities.find(
+    (capability) => capability.kind === 'LOCATION_ASSISTANCE',
+  );
+  const autoRecord = capabilities.find(
+    (capability) => capability.kind === 'AUTO_RECORD',
+  );
+  return (
+    location?.state === 'ENABLED' &&
+    location.revision === input.expectedLocationCapabilityRevision &&
+    (autoRecord?.revision ?? 0) ===
+      input.expectedAutoRecordCapabilityRevision &&
+    (autoRecord?.state === 'ENABLED') === input.autoRecordEnabled
+  );
 }
 
 async function createFactEvent(
@@ -776,45 +859,6 @@ async function finishManualMutation(
     where: { id: tripId },
     data: { version: { increment: 1 } },
   });
-}
-
-async function stopTripAssistanceIfComplete(
-  transaction: Transaction,
-  tripId: string,
-  now: Date,
-): Promise<void> {
-  const nodes = await transaction.itineraryNode.findMany({
-    where: { tripId },
-    select: {
-      temporalValues: {
-        where: { layer: 'ACTUAL', pointKind: 'ARRIVAL' },
-        select: { id: true },
-      },
-      executionState: { select: { status: true } },
-    },
-  });
-  if (
-    nodes.length === 0 ||
-    nodes.some(
-      (node) =>
-        node.temporalValues.length === 0 &&
-        node.executionState?.status !== 'SKIPPED',
-    )
-  ) {
-    return;
-  }
-  const stopped = await transaction.tripAssistanceCapability.updateMany({
-    where: { tripId, state: { in: ['ENABLED', 'PAUSED'] } },
-    data: {
-      state: 'STOPPED',
-      revision: { increment: 1 },
-      stoppedAt: now,
-      stopReason: 'NATURAL_END',
-    },
-  });
-  if (stopped.count > 0) {
-    await transaction.executionLocationState.deleteMany({ where: { tripId } });
-  }
 }
 
 async function upsertLocationState(

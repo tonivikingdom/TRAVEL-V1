@@ -100,6 +100,22 @@ export class ExecutionLocationService {
         previousObservedAt !== null &&
         sample.observedAt.getTime() === previousObservedAt.getTime()
       ) {
+        const validation = await this.repository.validateLocationReplay({
+          ownerUserId: actor.userId,
+          tripId,
+          observedAt: sample.observedAt,
+          expectedLocationCapabilityRevision:
+            context.locationAssistance.revision,
+          expectedAutoRecordCapabilityRevision: context.autoRecord.revision,
+          autoRecordEnabled: context.autoRecord.state === 'ENABLED',
+        });
+        if (validation.status === 'RETRY') continue;
+        if (validation.status === 'NOT_FOUND') {
+          throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
+        }
+        if (validation.status === 'CAPABILITY_CHANGED') {
+          throw capabilityChanged();
+        }
         const airportTriggerAttempted =
           context.autoRecord.state === 'ENABLED'
             ? await this.afterMutation(actor, context, null)
@@ -327,7 +343,7 @@ export class ExecutionLocationService {
       (item, index, values) =>
         values.findIndex((candidate) => candidate.id === item.id) === index,
     );
-    if (event !== null || arrivals.length > 0) {
+    if (event !== null) {
       await this.executionRiskService.evaluateTripRisks(actor, context.tripId);
     }
     let attempted = false;
@@ -347,6 +363,12 @@ export class ExecutionLocationService {
         expiredBefore: new Date(
           claimedAt.getTime() - this.airportTriggerClaimLeaseMs,
         ),
+        expectedLocationCapabilityRevision:
+          arrival.source === 'LOCATION'
+            ? context.locationAssistance.revision
+            : null,
+        expectedAutoRecordCapabilityRevision:
+          arrival.source === 'LOCATION' ? context.autoRecord.revision : null,
       });
       if (claim.status !== 'CLAIMED') continue;
       attempted = true;
@@ -504,12 +526,16 @@ function requireSuccess(result: CommitExecutionResult) {
         409,
       );
     case 'CAPABILITY_CHANGED':
-      throw new ApplicationError(
-        'CAPABILITY_CHANGED',
-        '辅助能力状态已变化；旧位置请求未被处理，请提交新的位置样本。',
-        409,
-      );
+      throw capabilityChanged();
   }
+}
+
+function capabilityChanged(): ApplicationError {
+  return new ApplicationError(
+    'CAPABILITY_CHANGED',
+    '辅助能力状态已变化；旧位置请求未被处理，请提交新的位置样本。',
+    409,
+  );
 }
 
 function detectedStatus(

@@ -93,6 +93,7 @@ export {
   decideExecutionLocation,
   DEFAULT_EXECUTION_LOCATION_POLICY,
   haversineDistanceMeters,
+  isTripExecutionNaturallyComplete,
   resolveExecutionFrontier,
   type ExecutionDerivedLocationState,
   type ExecutionFrontier,

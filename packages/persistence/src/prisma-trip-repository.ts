@@ -15,6 +15,7 @@ import type {
 } from '@travel/application';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
+import { stopTripAssistanceIfNaturallyComplete } from './trip-assistance-natural-end.js';
 
 const tripInclude = {
   dateOwnerships: { orderBy: { localDate: 'asc' } },
@@ -191,6 +192,11 @@ export class PrismaTripRepository implements TripRepository {
             version: { increment: 1 },
           },
         });
+        await stopTripAssistanceIfNaturallyComplete(
+          transaction,
+          input.tripId,
+          new Date(),
+        );
         return {
           status: 'SUCCESS',
           trip: toTripRecord(

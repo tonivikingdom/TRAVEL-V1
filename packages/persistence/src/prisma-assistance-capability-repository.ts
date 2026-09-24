@@ -153,23 +153,42 @@ export class PrismaAssistanceCapabilityRepository implements AssistanceCapabilit
         tripId: input.tripId,
         ownerUserId: input.ownerUserId,
       },
-      include: { monitoringCapability: true },
+      include: { monitoringCapability: true, monitorState: true },
     });
     if (binding === null) return null;
     const snapshot = binding.latestSnapshot as unknown as {
       readonly departure?: { readonly scheduledUtc?: unknown };
     };
     const value = snapshot.departure?.scheduledUtc;
+    const capability =
+      binding.monitoringCapability === null
+        ? absentFlightCapability(binding.id)
+        : toFlightRecord(binding.monitoringCapability);
+    const activeJob =
+      binding.monitoringCapability === null
+        ? null
+        : await this.client.job.findFirst({
+            where: {
+              type: 'FLIGHT_MONITOR',
+              payloadRef: binding.id,
+              capabilityRevision: binding.monitoringCapability.revision,
+              status: { in: ['QUEUED', 'RUNNING'] },
+              cancelRequested: false,
+            },
+            select: { id: true },
+          });
     return {
-      capability:
-        binding.monitoringCapability === null
-          ? absentFlightCapability(binding.id)
-          : toFlightRecord(binding.monitoringCapability),
+      capability,
       scheduledDepartureAt:
         typeof value === 'string' && !Number.isNaN(new Date(value).getTime())
           ? new Date(value)
           : null,
       flightStatus: binding.status,
+      hasActiveMonitoringWork:
+        binding.monitoringCapability?.state === 'ENABLED' &&
+        (activeJob !== null ||
+          binding.monitorState?.mode === 'BAGGAGE' ||
+          binding.monitorState?.mode === 'CANCELLED'),
     };
   }
 

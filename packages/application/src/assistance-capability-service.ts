@@ -98,11 +98,13 @@ export class AssistanceCapabilityService {
       flightBindingId,
     });
     if (result === null) throw notFound();
-    const eligible = isFlightEligible(
-      result.flightStatus,
-      result.scheduledDepartureAt,
-      this.now(),
-    );
+    const eligible =
+      result.hasActiveMonitoringWork ||
+      isFlightEligible(
+        result.flightStatus,
+        result.scheduledDepartureAt,
+        this.now(),
+      );
     return toView(
       result.capability,
       result.capability.state === 'ENABLED' && !eligible

@@ -6,6 +6,16 @@ export type {
   ServiceStatus,
 } from './health.js';
 export type {
+  AssistanceAction,
+  AssistanceCapabilityView,
+  AssistanceMutationRequest,
+  AssistanceMutationResponse,
+  AssistanceState,
+  AssistanceStopReason,
+  TripAssistanceKind,
+  TripAssistanceResponse,
+} from './assistance.js';
+export type {
   AccountAdminUserView,
   ApiErrorCode,
   ApiErrorResponse,

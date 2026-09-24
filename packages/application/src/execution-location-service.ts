@@ -80,6 +80,13 @@ export class ExecutionLocationService {
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const context = await this.requireContext(actor, tripId);
+      if (context.locationAssistance.state !== 'ENABLED') {
+        throw new ApplicationError(
+          'ASSISTANCE_INACTIVE',
+          '该行程的位置辅助尚未开启或当前已暂停。',
+          409,
+        );
+      }
       const frontier = resolveExecutionFrontier(toDomainNodes(context));
       requireConsistentFrontier(frontier);
       const previousObservedAt = context.observationWatermarkAt;
@@ -93,11 +100,26 @@ export class ExecutionLocationService {
         previousObservedAt !== null &&
         sample.observedAt.getTime() === previousObservedAt.getTime()
       ) {
-        const airportTriggerAttempted = await this.afterMutation(
-          actor,
-          context,
-          null,
-        );
+        const validation = await this.repository.validateLocationReplay({
+          ownerUserId: actor.userId,
+          tripId,
+          observedAt: sample.observedAt,
+          expectedLocationCapabilityRevision:
+            context.locationAssistance.revision,
+          expectedAutoRecordCapabilityRevision: context.autoRecord.revision,
+          autoRecordEnabled: context.autoRecord.state === 'ENABLED',
+        });
+        if (validation.status === 'RETRY') continue;
+        if (validation.status === 'NOT_FOUND') {
+          throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
+        }
+        if (validation.status === 'CAPABILITY_CHANGED') {
+          throw capabilityChanged();
+        }
+        const airportTriggerAttempted =
+          context.autoRecord.state === 'ENABLED'
+            ? await this.afterMutation(actor, context, null)
+            : false;
         return this.locationResponse(
           actor,
           context,
@@ -120,20 +142,22 @@ export class ExecutionLocationService {
         expectedObservationWatermarkAt: previousObservedAt,
         decision,
         observedAt: sample.observedAt,
+        expectedLocationCapabilityRevision: context.locationAssistance.revision,
+        expectedAutoRecordCapabilityRevision: context.autoRecord.revision,
+        autoRecordEnabled: context.autoRecord.state === 'ENABLED',
       });
       if (result.status === 'RETRY' || result.status === 'VERSION_CONFLICT') {
         continue;
       }
       const success = requireSuccess(result);
-      const airportTriggerAttempted = await this.afterMutation(
-        actor,
-        context,
-        success.event,
-      );
+      const autoRecordEnabled = context.autoRecord.state === 'ENABLED';
+      const airportTriggerAttempted = autoRecordEnabled
+        ? await this.afterMutation(actor, context, success.event)
+        : false;
       return this.locationResponse(
         actor,
         { ...context, tripVersion: success.resultingTripVersion },
-        decision.status,
+        autoRecordEnabled ? decision.status : detectedStatus(decision.status),
         success.event,
         airportTriggerAttempted,
       );
@@ -319,7 +343,7 @@ export class ExecutionLocationService {
       (item, index, values) =>
         values.findIndex((candidate) => candidate.id === item.id) === index,
     );
-    if (event !== null || arrivals.length > 0) {
+    if (event !== null) {
       await this.executionRiskService.evaluateTripRisks(actor, context.tripId);
     }
     let attempted = false;
@@ -339,6 +363,12 @@ export class ExecutionLocationService {
         expiredBefore: new Date(
           claimedAt.getTime() - this.airportTriggerClaimLeaseMs,
         ),
+        expectedLocationCapabilityRevision:
+          arrival.source === 'LOCATION'
+            ? context.locationAssistance.revision
+            : null,
+        expectedAutoRecordCapabilityRevision:
+          arrival.source === 'LOCATION' ? context.autoRecord.revision : null,
       });
       if (claim.status !== 'CLAIMED') continue;
       attempted = true;
@@ -348,8 +378,22 @@ export class ExecutionLocationService {
           context.tripId,
           flight.flightBindingId,
           { type: 'ARRIVED_AT_AIRPORT', airportIata: flight.airportIata },
+          flight.monitoringCapabilityRevision,
         );
       } catch (error) {
+        if (
+          error instanceof ApplicationError &&
+          error.code === 'ASSISTANCE_INACTIVE'
+        ) {
+          await this.repository.completeAirportTrigger({
+            ownerUserId: actor.userId,
+            tripId: context.tripId,
+            eventId: arrival.id,
+            claimToken: claim.claimToken,
+            completedAt: this.now(),
+          });
+          continue;
+        }
         await this.repository.releaseAirportTriggerClaim({
           ownerUserId: actor.userId,
           tripId: context.tripId,
@@ -481,7 +525,25 @@ function requireSuccess(result: CommitExecutionResult) {
         '执行上下文已变化，无法安全完成该操作。',
         409,
       );
+    case 'CAPABILITY_CHANGED':
+      throw capabilityChanged();
   }
+}
+
+function capabilityChanged(): ApplicationError {
+  return new ApplicationError(
+    'CAPABILITY_CHANGED',
+    '辅助能力状态已变化；旧位置请求未被处理，请提交新的位置样本。',
+    409,
+  );
+}
+
+function detectedStatus(
+  status: ExecutionLocationResponse['status'],
+): ExecutionLocationResponse['status'] {
+  if (status === 'CONFIRMED_ARRIVAL') return 'ARRIVAL_DETECTED';
+  if (status === 'CONFIRMED_DEPARTURE') return 'DEPARTURE_DETECTED';
+  return status;
 }
 
 function manualType(

@@ -8,6 +8,7 @@ import type {
 import type { ExecutionDerivedLocationState } from '@travel/domain';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
+import { stopTripAssistanceIfNaturallyComplete } from './trip-assistance-natural-end.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -27,6 +28,17 @@ interface LockedAirportTriggerRow {
   readonly airportTriggerCompletedAt: Date | null;
 }
 
+function capabilityBasis(
+  capability:
+    | {
+        readonly state: 'ENABLED' | 'PAUSED' | 'STOPPED';
+        readonly revision: number;
+      }
+    | undefined,
+) {
+  return capability ?? { state: 'NOT_ENABLED' as const, revision: 0 };
+}
+
 export class PrismaExecutionLocationRepository implements ExecutionLocationRepository {
   constructor(private readonly client: PrismaClient) {}
 
@@ -42,6 +54,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         version: true,
         executionLocationState: true,
         executionObservationWatermark: true,
+        assistanceCapabilities: true,
         executionArrivalSuppressions: {
           orderBy: [{ suppressedAt: 'asc' }, { nodeId: 'asc' }],
           select: { nodeId: true },
@@ -71,6 +84,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
             id: true,
             latestSnapshot: true,
             transportEdge: { select: { fromNodeId: true } },
+            monitoringCapability: { select: { state: true, revision: true } },
           },
         },
         executionEvents: {
@@ -133,6 +147,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         .filter((node) => node.executionStatus === 'SKIPPED')
         .map((node) => node.id),
       flightDepartures: trip.flightBindings.flatMap((binding) => {
+        if (binding.monitoringCapability?.state !== 'ENABLED') return [];
         const snapshot = binding.latestSnapshot as unknown as {
           readonly departure?: { readonly airportIata?: unknown };
         };
@@ -144,11 +159,23 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
                 flightBindingId: binding.id,
                 departureNodeId: binding.transportEdge.fromNodeId,
                 airportIata,
+                monitoringCapabilityRevision:
+                  binding.monitoringCapability.revision,
               },
             ]
           : [];
       }),
       pendingAirportArrivalEvents: trip.executionEvents.map(toEventRecord),
+      locationAssistance: capabilityBasis(
+        trip.assistanceCapabilities.find(
+          (capability) => capability.kind === 'LOCATION_ASSISTANCE',
+        ),
+      ),
+      autoRecord: capabilityBasis(
+        trip.assistanceCapabilities.find(
+          (capability) => capability.kind === 'AUTO_RECORD',
+        ),
+      ),
     };
   }
 
@@ -194,6 +221,18 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
       );
       if (trip === null) return { status: 'NOT_FOUND' as const };
+      if (
+        !(await hasExpectedLocationCapabilities(transaction, {
+          tripId: input.tripId,
+          expectedLocationCapabilityRevision:
+            input.expectedLocationCapabilityRevision,
+          expectedAutoRecordCapabilityRevision:
+            input.expectedAutoRecordCapabilityRevision,
+          autoRecordEnabled: input.autoRecordEnabled,
+        }))
+      ) {
+        return { status: 'CAPABILITY_CHANGED' as const };
+      }
       const currentWatermark =
         await transaction.executionObservationWatermark.findUnique({
           where: { tripId: input.tripId },
@@ -210,8 +249,10 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
       let version = trip.version;
       let idempotentReplay = false;
       if (
-        input.decision.status === 'CONFIRMED_ARRIVAL' ||
-        input.decision.status === 'CONFIRMED_DEPARTURE'
+        (input.autoRecordEnabled &&
+          input.decision.status === 'CONFIRMED_ARRIVAL') ||
+        (input.autoRecordEnabled &&
+          input.decision.status === 'CONFIRMED_DEPARTURE')
       ) {
         const type =
           input.decision.status === 'CONFIRMED_ARRIVAL'
@@ -265,12 +306,53 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         input.tripId,
         input.observedAt,
       );
+      if (event !== null && !idempotentReplay) {
+        await stopTripAssistanceIfNaturallyComplete(
+          transaction,
+          input.tripId,
+          input.observedAt,
+        );
+      }
       return {
         status: 'SUCCESS' as const,
         event,
         resultingTripVersion: version,
         idempotentReplay,
       };
+    });
+  }
+
+  async validateLocationReplay(
+    input: Parameters<ExecutionLocationRepository['validateLocationReplay']>[0],
+  ) {
+    return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const trip = await lockOwnedTrip(
+        transaction,
+        input.ownerUserId,
+        input.tripId,
+      );
+      if (trip === null) return { status: 'NOT_FOUND' as const };
+      if (
+        !(await hasExpectedLocationCapabilities(transaction, {
+          tripId: input.tripId,
+          expectedLocationCapabilityRevision:
+            input.expectedLocationCapabilityRevision,
+          expectedAutoRecordCapabilityRevision:
+            input.expectedAutoRecordCapabilityRevision,
+          autoRecordEnabled: input.autoRecordEnabled,
+        }))
+      ) {
+        return { status: 'CAPABILITY_CHANGED' as const };
+      }
+      const watermark =
+        await transaction.executionObservationWatermark.findUnique({
+          where: { tripId: input.tripId },
+          select: { lastObservedAt: true },
+        });
+      return watermark?.lastObservedAt.getTime() === input.observedAt.getTime()
+        ? { status: 'VALID' as const }
+        : { status: 'RETRY' as const };
     });
   }
 
@@ -362,6 +444,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
           data: { status: 'SKIPPED' },
         });
         await finishManualMutation(transaction, input.tripId);
+        await stopTripAssistanceIfNaturallyComplete(
+          transaction,
+          input.tripId,
+          input.occurredAt,
+        );
         return {
           status: 'SUCCESS' as const,
           event: toEventRecord(created),
@@ -397,6 +484,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         });
       }
       await finishManualMutation(transaction, input.tripId);
+      await stopTripAssistanceIfNaturallyComplete(
+        transaction,
+        input.tripId,
+        input.occurredAt,
+      );
       return {
         status: 'SUCCESS' as const,
         event: toEventRecord(result.event),
@@ -534,6 +626,33 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
     input: Parameters<ExecutionLocationRepository['claimAirportTrigger']>[0],
   ) {
     return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const trip = await lockOwnedTrip(
+        transaction,
+        input.ownerUserId,
+        input.tripId,
+      );
+      const requiresLocationGeneration =
+        input.expectedLocationCapabilityRevision !== null ||
+        input.expectedAutoRecordCapabilityRevision !== null;
+      if (trip === null) {
+        return { status: 'NOT_ELIGIBLE' as const };
+      }
+      if (
+        requiresLocationGeneration &&
+        (input.expectedLocationCapabilityRevision === null ||
+          input.expectedAutoRecordCapabilityRevision === null ||
+          !(await hasExpectedLocationCapabilities(transaction, {
+            tripId: input.tripId,
+            expectedLocationCapabilityRevision:
+              input.expectedLocationCapabilityRevision,
+            expectedAutoRecordCapabilityRevision:
+              input.expectedAutoRecordCapabilityRevision,
+            autoRecordEnabled: true,
+          })))
+      ) {
+        return { status: 'NOT_ELIGIBLE' as const };
+      }
       const rows = await transaction.$queryRaw<LockedAirportTriggerRow[]>(
         Prisma.sql`
           SELECT
@@ -621,6 +740,34 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
       },
     });
   }
+}
+
+async function hasExpectedLocationCapabilities(
+  transaction: Transaction,
+  input: {
+    readonly tripId: string;
+    readonly expectedLocationCapabilityRevision: number;
+    readonly expectedAutoRecordCapabilityRevision: number;
+    readonly autoRecordEnabled: boolean;
+  },
+): Promise<boolean> {
+  const capabilities = await transaction.tripAssistanceCapability.findMany({
+    where: { tripId: input.tripId },
+    select: { kind: true, state: true, revision: true },
+  });
+  const location = capabilities.find(
+    (capability) => capability.kind === 'LOCATION_ASSISTANCE',
+  );
+  const autoRecord = capabilities.find(
+    (capability) => capability.kind === 'AUTO_RECORD',
+  );
+  return (
+    location?.state === 'ENABLED' &&
+    location.revision === input.expectedLocationCapabilityRevision &&
+    (autoRecord?.revision ?? 0) ===
+      input.expectedAutoRecordCapabilityRevision &&
+    (autoRecord?.state === 'ENABLED') === input.autoRecordEnabled
+  );
 }
 
 async function createFactEvent(

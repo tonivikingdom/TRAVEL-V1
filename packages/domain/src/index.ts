@@ -1,4 +1,10 @@
 export {
+  decideAssistanceTransition,
+  type AssistanceTransitionAction,
+  type AssistanceTransitionDecision,
+  type PersistedAssistanceState,
+} from './assistance-capability.js';
+export {
   AbsoluteInstantError,
   parseAbsoluteIsoInstant,
   type AbsoluteInstantErrorReason,
@@ -87,6 +93,7 @@ export {
   decideExecutionLocation,
   DEFAULT_EXECUTION_LOCATION_POLICY,
   haversineDistanceMeters,
+  isTripExecutionNaturallyComplete,
   resolveExecutionFrontier,
   type ExecutionDerivedLocationState,
   type ExecutionFrontier,

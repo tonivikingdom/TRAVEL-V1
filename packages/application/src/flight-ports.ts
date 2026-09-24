@@ -40,7 +40,9 @@ export type FlightRefreshRepositoryResult =
       readonly observationDisposition: FlightObservationDisposition;
       readonly previousSnapshot: FlightSnapshotView;
     }
-  | { readonly status: 'NOT_FOUND' | 'FLIGHT_MISMATCH' };
+  | {
+      readonly status: 'NOT_FOUND' | 'FLIGHT_MISMATCH' | 'CAPABILITY_CHANGED';
+    };
 
 export interface FlightRepository {
   adopt(input: {
@@ -60,5 +62,6 @@ export interface FlightRepository {
     readonly tripId: string;
     readonly flightBindingId: string;
     readonly flight: FlightSnapshotView;
+    readonly expectedMonitoringCapabilityRevision?: number;
   }): Promise<FlightRefreshRepositoryResult>;
 }

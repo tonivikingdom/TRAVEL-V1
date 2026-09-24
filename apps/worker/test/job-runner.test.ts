@@ -77,15 +77,19 @@ describe('job runner lifecycle', () => {
       ...JOB,
       type: 'FLIGHT_MONITOR',
       payloadRef: '33333333-3333-4333-8333-333333333333',
+      capabilityRevision: 7,
     };
     const fake = new FakeJobRepository([flightJob]);
-    const handled: string[] = [];
+    const handled: Array<{
+      readonly payloadRef: string;
+      readonly capabilityRevision: number | null;
+    }> = [];
     const runner = createJobRunner({
       repository: fake,
       handlers: {
         FLIGHT_MONITOR: {
-          async execute(payloadRef) {
-            handled.push(payloadRef);
+          async execute(payloadRef, _signal, capabilityRevision) {
+            handled.push({ payloadRef, capabilityRevision });
           },
         },
       },
@@ -95,7 +99,9 @@ describe('job runner lifecycle', () => {
 
     await runner.start();
     await runner.stop();
-    expect(handled).toEqual([flightJob.payloadRef]);
+    expect(handled).toEqual([
+      { payloadRef: flightJob.payloadRef, capabilityRevision: 7 },
+    ]);
     expect(fake.succeeded).toEqual([flightJob.id]);
   });
 

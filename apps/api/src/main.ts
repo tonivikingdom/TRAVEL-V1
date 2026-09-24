@@ -1,4 +1,5 @@
 import {
+  AssistanceCapabilityService,
   AuthService,
   ExecutionLocationService,
   ExecutionRiskService,
@@ -15,6 +16,7 @@ import {
   createPostgresReadiness,
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaAssistanceCapabilityRepository,
   PrismaExecutionLocationRepository,
   PrismaExecutionRiskRepository,
   PrismaFlightRepository,
@@ -44,6 +46,7 @@ const databaseUrl = process.env.DATABASE_URL;
 const managedProbe = createPostgresReadiness(databaseUrl);
 let managedPrisma: ManagedPrismaClient | undefined;
 let authService: AuthService | undefined;
+let assistanceCapabilityService: AssistanceCapabilityService | undefined;
 let notificationService: NotificationService | undefined;
 let executionLocationService: ExecutionLocationService | undefined;
 let executionRiskService: ExecutionRiskService | undefined;
@@ -61,6 +64,9 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   authService = new AuthService(
     new PrismaAuthRepository(managedPrisma.client),
     authConfig.service,
+  );
+  assistanceCapabilityService = new AssistanceCapabilityService(
+    new PrismaAssistanceCapabilityRepository(managedPrisma.client),
   );
   notificationService = new NotificationService(
     new PrismaNotificationRepository(managedPrisma.client),
@@ -134,6 +140,9 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
 const app = buildApi({
   readinessProbe: managedProbe.probe,
   ...(authService === undefined ? {} : { authService }),
+  ...(assistanceCapabilityService === undefined
+    ? {}
+    : { assistanceCapabilityService }),
   ...(notificationService === undefined ? {} : { notificationService }),
   ...(executionLocationService === undefined
     ? {}

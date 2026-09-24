@@ -36,6 +36,30 @@ enum FlightMonitorMode {
   STOPPED
 }
 
+enum AssistanceState {
+  ENABLED
+  PAUSED
+  STOPPED
+}
+
+enum AssistanceStopReason {
+  USER
+  NATURAL_END
+}
+
+enum TripAssistanceKind {
+  LOCATION_ASSISTANCE
+  AUTO_RECORD
+}
+
+enum AssistanceAction {
+  ENABLE
+  PAUSE
+  RESUME
+  STOP
+  NATURAL_END
+}
+
 enum NotificationPriority {
   NORMAL
   STRONG
@@ -368,6 +392,7 @@ model Job {
   leaseUntil      DateTime? @db.Timestamptz(3)
   uniqueKey       String    @unique @db.VarChar(200)
   payloadRef      String    @db.Uuid
+  capabilityRevision Int?
   cancelRequested Boolean   @default(false)
   lastErrorCode   String?   @db.VarChar(64)
   createdAt       DateTime  @default(now()) @db.Timestamptz(3)
@@ -410,6 +435,7 @@ model Trip {
   executionLocationState  ExecutionLocationState?
   executionObservationWatermark ExecutionObservationWatermark?
   executionArrivalSuppressions  ExecutionArrivalSuppression[]
+  assistanceCapabilities TripAssistanceCapability[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -671,11 +697,94 @@ model FlightBinding {
   trip                  Trip                @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
   transportEdge         TransportEdge       @relation(fields: [transportEdgeId, tripId], references: [id, tripId], onDelete: Cascade)
   monitorState          FlightMonitorState?
+  monitoringCapability FlightMonitoringCapability?
 
   @@unique([id, tripId, ownerUserId])
   @@unique([transportEdgeId, tripId])
   @@index([ownerUserId, tripId, updatedAt(sort: Desc)])
   @@index([provider, canonicalFlightNumber, serviceDate])
+}
+
+model TripAssistanceCapability {
+  id            String               @id @default(uuid()) @db.Uuid
+  ownerUserId   String               @db.Uuid
+  tripId        String               @db.Uuid
+  kind          TripAssistanceKind
+  state         AssistanceState
+  revision      Int
+  enabledAt     DateTime?            @db.Timestamptz(3)
+  resumedAt     DateTime?            @db.Timestamptz(3)
+  pausedAt      DateTime?            @db.Timestamptz(3)
+  stoppedAt     DateTime?            @db.Timestamptz(3)
+  stopReason    AssistanceStopReason?
+  createdAt     DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime             @updatedAt @db.Timestamptz(3)
+  trip          Trip                 @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  receipts      TripAssistanceReceipt[]
+
+  @@unique([tripId, kind])
+  @@unique([id, ownerUserId])
+  @@index([ownerUserId, tripId])
+}
+
+model FlightMonitoringCapability {
+  id              String               @id @default(uuid()) @db.Uuid
+  ownerUserId     String               @db.Uuid
+  tripId          String               @db.Uuid
+  flightBindingId String               @unique @db.Uuid
+  state           AssistanceState
+  revision        Int
+  enabledAt       DateTime?            @db.Timestamptz(3)
+  resumedAt       DateTime?            @db.Timestamptz(3)
+  pausedAt        DateTime?            @db.Timestamptz(3)
+  stoppedAt       DateTime?            @db.Timestamptz(3)
+  stopReason      AssistanceStopReason?
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
+  flightBinding   FlightBinding        @relation(fields: [flightBindingId, tripId, ownerUserId], references: [id, tripId, ownerUserId], onDelete: Cascade)
+  receipts        FlightAssistanceReceipt[]
+
+  @@unique([id, ownerUserId])
+  @@unique([flightBindingId, tripId, ownerUserId])
+  @@index([ownerUserId, tripId])
+}
+
+model TripAssistanceReceipt {
+  id                  String                   @id @default(uuid()) @db.Uuid
+  ownerUserId         String                   @db.Uuid
+  capabilityId        String                   @db.Uuid
+  idempotencyKey      String                   @db.VarChar(200)
+  requestHash         String                   @db.VarChar(64)
+  action              AssistanceAction
+  baseRevision        Int
+  resultingRevision   Int
+  resultingState      AssistanceState
+  resultingStopReason AssistanceStopReason?
+  resultPayload       Json
+  createdAt           DateTime                 @default(now()) @db.Timestamptz(3)
+  capability          TripAssistanceCapability @relation(fields: [capabilityId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([capabilityId, createdAt])
+}
+
+model FlightAssistanceReceipt {
+  id                  String                       @id @default(uuid()) @db.Uuid
+  ownerUserId         String                       @db.Uuid
+  capabilityId        String                       @db.Uuid
+  idempotencyKey      String                       @db.VarChar(200)
+  requestHash         String                       @db.VarChar(64)
+  action              AssistanceAction
+  baseRevision        Int
+  resultingRevision   Int
+  resultingState      AssistanceState
+  resultingStopReason AssistanceStopReason?
+  resultPayload       Json
+  createdAt           DateTime                     @default(now()) @db.Timestamptz(3)
+  capability          FlightMonitoringCapability   @relation(fields: [capabilityId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([capabilityId, createdAt])
 }
 
 model FlightMonitorState {

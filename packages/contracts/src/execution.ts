@@ -95,6 +95,8 @@ export interface ExecutionLocationResponse {
   readonly status:
     | 'CONFIRMED_ARRIVAL'
     | 'CONFIRMED_DEPARTURE'
+    | 'ARRIVAL_DETECTED'
+    | 'DEPARTURE_DETECTED'
     | 'NO_CHANGE'
     | 'INDETERMINATE_LOCATION'
     | 'MANUAL_CONFIRMATION_AVAILABLE';

@@ -12,6 +12,11 @@ export interface FlightMonitorContext {
   readonly binding: FlightBindingView;
   readonly state: MonitorDecisionState & {
     readonly lastSuccessfulMonitorRefreshAt: Date | null;
+    readonly lastDecisionFetchedAt: Date | null;
+  };
+  readonly capability: {
+    readonly state: 'NOT_ENABLED' | 'ENABLED' | 'PAUSED' | 'STOPPED';
+    readonly revision: number;
   };
 }
 
@@ -23,6 +28,7 @@ export interface FlightMonitoringRepository {
     readonly tripId: string;
     readonly flightBindingId: string;
     readonly airportIata: string;
+    readonly expectedCapabilityRevision: number;
     readonly now: Date;
   }): Promise<FlightMonitorContext | null>;
   commitRefresh(input: {
@@ -31,6 +37,7 @@ export interface FlightMonitoringRepository {
     readonly hasDownstreamImpact: boolean;
     readonly recordSuccessfulRefresh: boolean;
     readonly now: Date;
+    readonly expectedCapabilityRevision: number;
   }): Promise<NotificationRecord | null>;
   commitProviderFailure(input: {
     readonly flightBindingId: string;
@@ -38,6 +45,7 @@ export interface FlightMonitoringRepository {
     readonly notification: FlightMonitorNotificationDecision | null;
     readonly nextCheckAt: Date | null;
     readonly now: Date;
+    readonly expectedCapabilityRevision: number;
   }): Promise<NotificationRecord | null>;
   cancelFutureMonitoring(flightBindingId: string, now: Date): Promise<void>;
 }

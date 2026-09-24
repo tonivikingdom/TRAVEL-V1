@@ -79,8 +79,12 @@ const jobRunner = createJobRunner({
         magicLinkHandler.execute(payloadRef, signal),
     },
     FLIGHT_MONITOR: {
-      execute: (payloadRef, signal) =>
-        flightMonitoringService.executeJob(payloadRef, signal),
+      execute: (payloadRef, signal, capabilityRevision) =>
+        flightMonitoringService.executeJob(
+          payloadRef,
+          capabilityRevision,
+          signal,
+        ),
     },
   },
   workerId: config.workerId,

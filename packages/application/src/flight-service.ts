@@ -107,6 +107,31 @@ export class FlightService {
     tripId: string,
     flightBindingId: string,
   ): Promise<RefreshFlightResponse> {
+    const result = await this.refreshInternal(actor, tripId, flightBindingId);
+    if (result === null) throw new Error('Manual refresh cannot be fenced');
+    return result;
+  }
+
+  async refreshForMonitoring(
+    actor: Actor,
+    tripId: string,
+    flightBindingId: string,
+    expectedMonitoringCapabilityRevision: number,
+  ): Promise<RefreshFlightResponse | null> {
+    return this.refreshInternal(
+      actor,
+      tripId,
+      flightBindingId,
+      expectedMonitoringCapabilityRevision,
+    );
+  }
+
+  private async refreshInternal(
+    actor: Actor,
+    tripId: string,
+    flightBindingId: string,
+    expectedMonitoringCapabilityRevision?: number,
+  ): Promise<RefreshFlightResponse | null> {
     requireUuid(tripId, 'tripId');
     requireUuid(flightBindingId, 'flightBindingId');
     authorize(actor, 'WRITE_PRIVATE_RESOURCE', {
@@ -132,6 +157,9 @@ export class FlightService {
       tripId,
       flightBindingId,
       flight,
+      ...(expectedMonitoringCapabilityRevision === undefined
+        ? {}
+        : { expectedMonitoringCapabilityRevision }),
     });
     if (result.status === 'NOT_FOUND') throw notFound();
     if (result.status === 'FLIGHT_MISMATCH') {
@@ -141,6 +169,7 @@ export class FlightService {
         409,
       );
     }
+    if (result.status === 'CAPABILITY_CHANGED') return null;
     if (result.status !== 'SUCCESS')
       throw new Error('Unhandled refresh status');
     const changes =

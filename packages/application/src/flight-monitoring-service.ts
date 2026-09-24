@@ -37,11 +37,19 @@ export class FlightMonitoringService {
 
   async executeJob(
     flightBindingId: string,
+    capabilityRevision: number | null = null,
     signal?: AbortSignal,
   ): Promise<void> {
     if (signal?.aborted) throw signal.reason;
     const context = await this.repository.findContext(flightBindingId);
-    if (context === null || context.state.mode === 'STOPPED') return;
+    if (
+      context === null ||
+      context.state.mode === 'STOPPED' ||
+      capabilityRevision === null ||
+      context.capability.state !== 'ENABLED' ||
+      context.capability.revision !== capabilityRevision
+    )
+      return;
     const now = this.now();
     if (
       context.state.mode === 'NORMAL' &&
@@ -53,6 +61,7 @@ export class FlightMonitoringService {
         hasDownstreamImpact: false,
         recordSuccessfulRefresh: false,
         now,
+        expectedCapabilityRevision: capabilityRevision,
       });
       return;
     }
@@ -60,6 +69,7 @@ export class FlightMonitoringService {
       context.actor,
       context.binding.tripId,
       flightBindingId,
+      capabilityRevision,
     );
   }
 
@@ -68,6 +78,7 @@ export class FlightMonitoringService {
     tripId: string,
     flightBindingId: string,
     input: FlightExecutionTriggerRequest,
+    expectedCapabilityRevision?: number,
   ): Promise<FlightExecutionTriggerResponse> {
     authorize(actor, 'WRITE_PRIVATE_RESOURCE', {
       kind: 'PRIVATE_RESOURCE',
@@ -84,6 +95,17 @@ export class FlightMonitoringService {
     const now = this.now();
     let current = context;
     if (input.type === 'ARRIVED_AT_AIRPORT') {
+      if (
+        context.capability.state !== 'ENABLED' ||
+        (expectedCapabilityRevision !== undefined &&
+          context.capability.revision !== expectedCapabilityRevision)
+      ) {
+        throw new ApplicationError(
+          'ASSISTANCE_INACTIVE',
+          '该航班的后台监控尚未开启或当前已暂停。',
+          409,
+        );
+      }
       const airportIata = normalizeAirport(input.airportIata);
       if (
         airportIata !== context.binding.latestSnapshot.departure.airportIata
@@ -94,14 +116,23 @@ export class FlightMonitoringService {
           400,
         );
       }
-      current =
-        (await this.repository.recordAirportArrival({
-          ownerUserId: actor.userId,
-          tripId,
-          flightBindingId,
-          airportIata,
-          now,
-        })) ?? context;
+      const recorded = await this.repository.recordAirportArrival({
+        ownerUserId: actor.userId,
+        tripId,
+        flightBindingId,
+        airportIata,
+        expectedCapabilityRevision:
+          expectedCapabilityRevision ?? context.capability.revision,
+        now,
+      });
+      if (recorded === null) {
+        throw new ApplicationError(
+          'ASSISTANCE_INACTIVE',
+          '该航班的后台监控状态已变化；旧触发请求未被处理。',
+          409,
+        );
+      }
+      current = recorded;
     } else if (
       input.type !== 'FLIGHT_DETAIL_OPENED' &&
       input.type !== 'POST_FLIGHT_CHECK'
@@ -122,7 +153,24 @@ export class FlightMonitoringService {
         notificationId: null,
       };
     }
-    const result = await this.performRefresh(actor, tripId, flightBindingId);
+    if (current.capability.state !== 'ENABLED') {
+      const response = await this.flightService.refresh(
+        actor,
+        tripId,
+        flightBindingId,
+      );
+      return {
+        flightBinding: response.flightBinding,
+        providerRefreshPerformed: true,
+        notificationId: null,
+      };
+    }
+    const result = await this.performRefresh(
+      actor,
+      tripId,
+      flightBindingId,
+      current.capability.revision,
+    );
     return {
       flightBinding: result.response?.flightBinding ?? current.binding,
       providerRefreshPerformed: true,
@@ -134,6 +182,7 @@ export class FlightMonitoringService {
     actor: Actor,
     tripId: string,
     flightBindingId: string,
+    expectedCapabilityRevision: number,
   ): Promise<{
     readonly response: RefreshFlightResponse | null;
     readonly notificationId: string | null;
@@ -142,19 +191,31 @@ export class FlightMonitoringService {
     if (before === null) return { response: null, notificationId: null };
     const now = this.now();
     try {
-      const response = await this.flightService.refresh(
+      const response = await this.flightService.refreshForMonitoring(
         actor,
         tripId,
         flightBindingId,
+        expectedCapabilityRevision,
       );
+      if (response === null) {
+        return { response: null, notificationId: null };
+      }
       const after = await this.repository.findContext(flightBindingId);
       if (after === null) return { response, notificationId: null };
+      const acceptedFetchedAt = new Date(
+        response.flightBinding.lastRefreshedAt,
+      );
+      const observationAdvanced =
+        before.state.lastDecisionFetchedAt === null ||
+        acceptedFetchedAt.getTime() >
+          before.state.lastDecisionFetchedAt.getTime();
       const notification = await this.repository.commitRefresh({
         flightBindingId,
-        acceptedFetchedAt: new Date(response.flightBinding.lastRefreshedAt),
+        acceptedFetchedAt,
         hasDownstreamImpact: hasFlightRelatedDownstreamImpact(response),
-        recordSuccessfulRefresh: true,
+        recordSuccessfulRefresh: observationAdvanced,
         now,
+        expectedCapabilityRevision,
       });
       return { response, notificationId: notification?.id ?? null };
     } catch (error) {
@@ -170,6 +231,7 @@ export class FlightMonitoringService {
         notification: failure.notification,
         nextCheckAt: failure.nextCheckAt,
         now,
+        expectedCapabilityRevision,
       });
       return { response: null, notificationId: notification?.id ?? null };
     }

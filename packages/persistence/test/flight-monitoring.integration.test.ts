@@ -1,4 +1,5 @@
 import {
+  AssistanceCapabilityService,
   ApplicationError,
   ExecutionRiskService,
   FlightMonitoringService,
@@ -6,11 +7,13 @@ import {
   type FlightSnapshotProvider,
 } from '@travel/application';
 import type { FlightSnapshotView } from '@travel/contracts';
+import { decideProviderFailure } from '@travel/domain';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   createPrismaClient,
+  PrismaAssistanceCapabilityRepository,
   PrismaExecutionRiskRepository,
   PrismaFlightMonitoringRepository,
   PrismaFlightRepository,
@@ -68,6 +71,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: initial,
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
 
     expect(await monitoring.service.ensureEligibleMonitoring()).toBe(1);
     expect(
@@ -83,7 +87,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       },
     });
     expect(job.status).toBe('QUEUED');
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
 
     expect(
       await managed.client.notificationEvent.findMany({
@@ -149,11 +153,12 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
 
     await Promise.all([
-      monitoring.service.executeJob(adopted.binding.id),
-      monitoring.service.executeJob(adopted.binding.id),
+      monitoring.service.executeJob(adopted.binding.id, 1),
+      monitoring.service.executeJob(adopted.binding.id, 1),
     ]);
     expect(
       await managed.client.notificationEvent.count({
@@ -195,6 +200,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
 
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
 
     expect(
@@ -250,11 +256,12 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await service.ensureEligibleMonitoring();
 
-    const olderRefresh = service.executeJob(adopted.binding.id);
+    const olderRefresh = service.executeJob(adopted.binding.id, 1);
     await waitFor(() => refreshCall === 1);
-    const newerRefresh = service.executeJob(adopted.binding.id);
+    const newerRefresh = service.executeJob(adopted.binding.id, 1);
     await newerRefresh;
     older.resolve([
       snapshot({
@@ -373,11 +380,12 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
       });
       if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+      await enableMonitoring(managed, fixture, adopted.binding.id);
       await service.ensureEligibleMonitoring();
 
-      const olderRefresh = service.executeJob(adopted.binding.id);
+      const olderRefresh = service.executeJob(adopted.binding.id, 1);
       await waitFor(() => refreshCall === 1);
-      const newerRefresh = service.executeJob(adopted.binding.id);
+      const newerRefresh = service.executeJob(adopted.binding.id, 1);
       await newerRefresh;
       older.resolve([
         snapshot({
@@ -444,6 +452,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     const repository = new PrismaFlightMonitoringRepository(managed.client);
     await repository.ensureEligibleMonitoring(now());
 
@@ -477,7 +486,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       staleProvider,
       now,
     );
-    await service.executeJob(adopted.binding.id);
+    await service.executeJob(adopted.binding.id, 1);
 
     const state = await managed.client.flightMonitorState.findUniqueOrThrow({
       where: { flightBindingId: adopted.binding.id },
@@ -521,6 +530,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (original.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, original.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
     const originalState =
       await managed.client.flightMonitorState.findUniqueOrThrow({
@@ -598,9 +608,10 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await service.ensureEligibleMonitoring();
-    await service.executeJob(adopted.binding.id);
-    await service.executeJob(adopted.binding.id);
+    await service.executeJob(adopted.binding.id, 1);
+    await service.executeJob(adopted.binding.id, 1);
     const notifications = await managed.client.notificationEvent.findMany({
       where: { flightBindingId: adopted.binding.id },
     });
@@ -611,6 +622,231 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         where: { id: adopted.binding.id },
       }),
     ).toMatchObject({ status: 'SCHEDULED' });
+  });
+
+  it.each(['BAGGAGE', 'CANCELLED'] as const)(
+    'naturally ends %s monitoring when its provider-failure tail reaches the existing deadline',
+    async (mode) => {
+      const fixture = await createFixture(managed);
+      const now = new Date('2030-01-02T14:00:00.000Z');
+      const flightRepository = new PrismaFlightRepository(managed.client);
+      const adopted = await flightRepository.adopt({
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        baseTripVersion: 1,
+        transportEdgeId: fixture.flightEdgeId,
+        flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+      });
+      if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+      await enableMonitoring(managed, fixture, adopted.binding.id);
+      const tailState =
+        mode === 'BAGGAGE'
+          ? {
+              mode,
+              baggageWindowStartedAt: new Date('2030-01-02T13:30:00.000Z'),
+              baggageWindowEndsAt: now,
+            }
+          : { mode, cancellationNotified: true };
+      await managed.client.flightMonitorState.upsert({
+        where: { flightBindingId: adopted.binding.id },
+        create: { flightBindingId: adopted.binding.id, ...tailState },
+        update: tailState,
+      });
+      const capability =
+        await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+          where: { flightBindingId: adopted.binding.id },
+        });
+      await managed.client.job.create({
+        data: {
+          type: 'FLIGHT_MONITOR',
+          runAt: now,
+          maxAttempts: 5,
+          uniqueKey: `synthetic-p5d3-tail:${randomUUID()}`,
+          payloadRef: adopted.binding.id,
+          capabilityRevision: capability.revision,
+        },
+      });
+      const repository = new PrismaFlightMonitoringRepository(managed.client);
+      const context = await repository.findContext(adopted.binding.id);
+      if (context === null) throw new Error('monitor context missing');
+      const failure = decideProviderFailure({
+        snapshot: context.binding.latestSnapshot,
+        state: context.state,
+        now,
+      });
+      expect(failure.nextCheckAt).toBeNull();
+      await repository.commitProviderFailure({
+        flightBindingId: adopted.binding.id,
+        state: failure.state,
+        notification: failure.notification,
+        nextCheckAt: failure.nextCheckAt,
+        now,
+        expectedCapabilityRevision: capability.revision,
+      });
+      expect(
+        await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+          where: { flightBindingId: adopted.binding.id },
+        }),
+      ).toMatchObject({
+        state: 'STOPPED',
+        revision: capability.revision + 1,
+        stopReason: 'NATURAL_END',
+      });
+      expect(
+        await managed.client.job.count({
+          where: {
+            type: 'FLIGHT_MONITOR',
+            payloadRef: adopted.binding.id,
+            status: 'QUEUED',
+          },
+        }),
+      ).toBe(0);
+      const capabilities = new AssistanceCapabilityService(
+        new PrismaAssistanceCapabilityRepository(managed.client),
+        { now: () => now },
+      );
+      expect(
+        await capabilities.getFlight(
+          {
+            userId: fixture.ownerUserId,
+            email: 'synthetic-p5d3-owner@synthetic.example.test',
+            role: 'USER',
+            status: 'ACTIVE',
+          },
+          fixture.tripId,
+          adopted.binding.id,
+        ),
+      ).toMatchObject({ state: 'STOPPED', effectiveEnabled: false });
+    },
+  );
+
+  it('keeps an unfinished baggage tail enabled and schedules its existing provider-failure fallback', async () => {
+    const fixture = await createFixture(managed);
+    const now = new Date('2030-01-02T14:00:00.000Z');
+    const flightRepository = new PrismaFlightRepository(managed.client);
+    const adopted = await flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
+    const tailState = {
+      mode: 'BAGGAGE' as const,
+      baggageWindowStartedAt: new Date('2030-01-02T13:30:00.000Z'),
+      baggageWindowEndsAt: new Date('2030-01-02T14:30:00.000Z'),
+    };
+    await managed.client.flightMonitorState.upsert({
+      where: { flightBindingId: adopted.binding.id },
+      create: { flightBindingId: adopted.binding.id, ...tailState },
+      update: tailState,
+    });
+    const capability =
+      await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      });
+    const repository = new PrismaFlightMonitoringRepository(managed.client);
+    const context = await repository.findContext(adopted.binding.id);
+    if (context === null) throw new Error('monitor context missing');
+    const failure = decideProviderFailure({
+      snapshot: context.binding.latestSnapshot,
+      state: context.state,
+      now,
+    });
+    expect(failure.nextCheckAt).toEqual(new Date('2030-01-02T14:05:00.000Z'));
+    await repository.commitProviderFailure({
+      flightBindingId: adopted.binding.id,
+      state: failure.state,
+      notification: failure.notification,
+      nextCheckAt: failure.nextCheckAt,
+      now,
+      expectedCapabilityRevision: capability.revision,
+    });
+    expect(
+      await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({ state: 'ENABLED', revision: capability.revision });
+    expect(
+      await managed.client.job.count({
+        where: {
+          type: 'FLIGHT_MONITOR',
+          payloadRef: adopted.binding.id,
+          status: 'QUEUED',
+          capabilityRevision: capability.revision,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('fences an old provider-failure result after monitoring pause and resume', async () => {
+    const fixture = await createFixture(managed);
+    const now = new Date('2030-01-02T14:00:00.000Z');
+    const flightRepository = new PrismaFlightRepository(managed.client);
+    const adopted = await flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
+    const tailState = {
+      mode: 'BAGGAGE' as const,
+      baggageWindowStartedAt: new Date('2030-01-02T13:30:00.000Z'),
+      baggageWindowEndsAt: now,
+    };
+    await managed.client.flightMonitorState.upsert({
+      where: { flightBindingId: adopted.binding.id },
+      create: { flightBindingId: adopted.binding.id, ...tailState },
+      update: tailState,
+    });
+    const capabilities = new AssistanceCapabilityService(
+      new PrismaAssistanceCapabilityRepository(managed.client),
+      { now: () => now },
+    );
+    const actor = {
+      userId: fixture.ownerUserId,
+      email: 'synthetic-p5d3-owner@synthetic.example.test',
+      role: 'USER' as const,
+      status: 'ACTIVE' as const,
+    };
+    await capabilities.mutateFlight(actor, fixture.tripId, adopted.binding.id, {
+      action: 'PAUSE',
+      baseCapabilityRevision: 1,
+      idempotencyKey: randomUUID(),
+    });
+    await capabilities.mutateFlight(actor, fixture.tripId, adopted.binding.id, {
+      action: 'RESUME',
+      baseCapabilityRevision: 2,
+      idempotencyKey: randomUUID(),
+    });
+    const repository = new PrismaFlightMonitoringRepository(managed.client);
+    const context = await repository.findContext(adopted.binding.id);
+    if (context === null) throw new Error('monitor context missing');
+    const failure = decideProviderFailure({
+      snapshot: context.binding.latestSnapshot,
+      state: context.state,
+      now,
+    });
+    expect(
+      await repository.commitProviderFailure({
+        flightBindingId: adopted.binding.id,
+        state: failure.state,
+        notification: failure.notification,
+        nextCheckAt: failure.nextCheckAt,
+        now,
+        expectedCapabilityRevision: 1,
+      }),
+    ).toBeNull();
+    expect(
+      await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({ state: 'ENABLED', revision: 3 });
   });
 
   it('aggregates boarding and a relevant first gate into one persisted notification', async () => {
@@ -635,8 +871,9 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
 
     expect(
       await managed.client.notificationEvent.findMany({
@@ -667,6 +904,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
     await monitoring.service.trigger(
       monitoring.actor,
@@ -675,7 +913,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       { type: 'ARRIVED_AT_AIRPORT', airportIata: 'HND' },
     );
     now = new Date('2030-01-02T10:00:00.000Z');
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
 
     expect(monitoring.refreshCalls()).toBe(1);
     expect(
@@ -702,6 +940,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
     await monitoring.service.trigger(
       monitoring.actor,
@@ -716,7 +955,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     ).toBe(0);
 
     now = new Date('2030-01-02T10:00:00.000Z');
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
 
     expect(monitoring.refreshCalls()).toBe(1);
     expect(
@@ -775,10 +1014,11 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
     now = new Date('2030-01-01T12:01:00.000Z');
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
     expect(
       await managed.client.job.count({
         where: {
@@ -797,9 +1037,26 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       { type: 'POST_FLIGHT_CHECK' },
     );
     now = new Date('2030-01-02T14:06:00.000Z');
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+    const capabilityService = new AssistanceCapabilityService(
+      new PrismaAssistanceCapabilityRepository(managed.client),
+      { now: () => now },
+    );
+    expect(
+      await capabilityService.getFlight(
+        monitoring.actor,
+        fixture.tripId,
+        adopted.binding.id,
+      ),
+    ).toMatchObject({
+      state: 'ENABLED',
+      effectiveEnabled: true,
+      effectiveReason: 'ENABLED',
+    });
     now = new Date('2030-01-02T14:11:00.000Z');
-    await monitoring.service.executeJob(adopted.binding.id);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+    now = new Date('2030-01-02T14:31:00.000Z');
+    await monitoring.service.executeJob(adopted.binding.id, 1);
 
     const notifications = await managed.client.notificationEvent.findMany({
       where: { flightBindingId: adopted.binding.id },
@@ -829,45 +1086,234 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         where: { flightBindingId: adopted.binding.id },
       }),
     ).toMatchObject({ mode: 'BAGGAGE', lastNotifiedBaggage: '5' });
+    expect(
+      await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({
+      state: 'STOPPED',
+      revision: 2,
+      stopReason: 'NATURAL_END',
+    });
+    expect(
+      await capabilityService.getFlight(
+        monitoring.actor,
+        fixture.tripId,
+        adopted.binding.id,
+      ),
+    ).toMatchObject({
+      state: 'STOPPED',
+      stopReason: 'NATURAL_END',
+      effectiveEnabled: false,
+      effectiveReason: 'STOPPED',
+    });
   });
-});
 
-async function createMonitoring(
-  managed: ManagedPrismaClient,
-  fixture: Fixture,
-  snapshots: readonly FlightSnapshotView[],
-  now: () => Date,
-) {
-  let call = 0;
-  const provider: FlightSnapshotProvider = {
-    search: async () => [],
-    refresh: async () => [snapshots[Math.min(call++, snapshots.length - 1)]!],
-  };
-  const flightRepository = new PrismaFlightRepository(managed.client);
-  const actor = {
-    userId: fixture.ownerUserId,
-    email: 'synthetic-p5d3-owner@synthetic.example.test',
-    role: 'USER' as const,
-    status: 'ACTIVE' as const,
-  };
-  const risk = new ExecutionRiskService(
-    new PrismaTripRepository(managed.client),
-    new PrismaExecutionRiskRepository(managed.client),
-    { now },
-  );
-  return {
-    actor,
-    flightRepository,
-    refreshCalls: () => call,
-    service: createMonitoringService(
+  async function createMonitoring(
+    managed: ManagedPrismaClient,
+    fixture: Fixture,
+    snapshots: readonly FlightSnapshotView[],
+    now: () => Date,
+  ) {
+    let call = 0;
+    const provider: FlightSnapshotProvider = {
+      search: async () => [],
+      refresh: async () => [snapshots[Math.min(call++, snapshots.length - 1)]!],
+    };
+    const flightRepository = new PrismaFlightRepository(managed.client);
+    const actor = {
+      userId: fixture.ownerUserId,
+      email: 'synthetic-p5d3-owner@synthetic.example.test',
+      role: 'USER' as const,
+      status: 'ACTIVE' as const,
+    };
+    const risk = new ExecutionRiskService(
+      new PrismaTripRepository(managed.client),
+      new PrismaExecutionRiskRepository(managed.client),
+      { now },
+    );
+    return {
+      actor,
+      flightRepository,
+      refreshCalls: () => call,
+      service: createMonitoringService(
+        managed,
+        flightRepository,
+        provider,
+        now,
+        risk,
+      ),
+    };
+  }
+
+  async function enableMonitoring(
+    managed: ManagedPrismaClient,
+    fixture: Fixture,
+    flightBindingId: string,
+  ): Promise<void> {
+    await managed.client.flightMonitoringCapability.upsert({
+      where: { flightBindingId },
+      create: {
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId,
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: new Date('2030-01-01T00:00:00.000Z'),
+      },
+      update: { state: 'ENABLED' },
+    });
+  }
+
+  it('does not enroll a binding without explicit monitoring opt-in', async () => {
+    const fixture = await createFixture(managed);
+    const monitoring = await createMonitoring(
+      managed,
+      fixture,
+      [snapshot({ fetchedAt: '2030-01-01T12:00:01.000Z' })],
+      () => new Date('2030-01-01T12:00:00.000Z'),
+    );
+    const adopted = await monitoring.flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    expect(await monitoring.service.ensureEligibleMonitoring()).toBe(0);
+    expect(
+      await managed.client.job.count({
+        where: { type: 'FLIGHT_MONITOR', payloadRef: adopted.binding.id },
+      }),
+    ).toBe(0);
+    const manual = await monitoring.service.trigger(
+      monitoring.actor,
+      fixture.tripId,
+      adopted.binding.id,
+      { type: 'FLIGHT_DETAIL_OPENED' },
+    );
+    expect(manual.providerRefreshPerformed).toBe(true);
+    expect(monitoring.refreshCalls()).toBe(1);
+    expect(
+      await managed.client.flightMonitoringCapability.findUnique({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toBeNull();
+    await managed.client.flightMonitoringCapability.create({
+      data: {
+        ownerUserId: fixture.ownerUserId,
+        tripId: fixture.tripId,
+        flightBindingId: adopted.binding.id,
+        state: 'STOPPED',
+        revision: 1,
+        stoppedAt: new Date('2030-01-01T12:00:00.000Z'),
+        stopReason: 'USER',
+      },
+    });
+    expect(await monitoring.service.ensureEligibleMonitoring()).toBe(0);
+    const capabilities = new AssistanceCapabilityService(
+      new PrismaAssistanceCapabilityRepository(managed.client),
+      { now: () => new Date('2030-01-01T12:00:00.000Z') },
+    );
+    const enabled = await capabilities.mutateFlight(
+      monitoring.actor,
+      fixture.tripId,
+      adopted.binding.id,
+      {
+        action: 'ENABLE',
+        baseCapabilityRevision: 1,
+        idempotencyKey: randomUUID(),
+      },
+    );
+    expect(enabled.capability).toMatchObject({ state: 'ENABLED', revision: 2 });
+    expect(await monitoring.service.ensureEligibleMonitoring()).toBe(1);
+  });
+
+  it('discards an in-flight provider result across pause and resume generations', async () => {
+    const fixture = await createFixture(managed);
+    let releaseProvider!: () => void;
+    let signalProvider!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      signalProvider = resolve;
+    });
+    const providerReleased = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const initial = snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' });
+    const next = snapshot({
+      status: 'BOARDING',
+      fetchedAt: '2030-01-01T12:00:01.000Z',
+      gate: 'A7',
+    });
+    const provider: FlightSnapshotProvider = {
+      search: async () => [],
+      refresh: async () => {
+        signalProvider();
+        await providerReleased;
+        return [next];
+      },
+    };
+    const flightRepository = new PrismaFlightRepository(managed.client);
+    const monitoring = createMonitoringService(
       managed,
       flightRepository,
       provider,
-      now,
-      risk,
-    ),
-  };
-}
+      () => new Date('2030-01-01T12:00:00.000Z'),
+    );
+    const adopted = await flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: initial,
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
+    await monitoring.ensureEligibleMonitoring();
+    const running = monitoring.executeJob(adopted.binding.id, 1);
+    await providerStarted;
+    const actor = {
+      userId: fixture.ownerUserId,
+      email: 'synthetic-p5d3-owner@synthetic.example.test',
+      role: 'USER' as const,
+      status: 'ACTIVE' as const,
+    };
+    const capabilities = new AssistanceCapabilityService(
+      new PrismaAssistanceCapabilityRepository(managed.client),
+      { now: () => new Date('2030-01-01T12:00:00.000Z') },
+    );
+    await capabilities.mutateFlight(actor, fixture.tripId, adopted.binding.id, {
+      action: 'PAUSE',
+      baseCapabilityRevision: 1,
+      idempotencyKey: randomUUID(),
+    });
+    await capabilities.mutateFlight(actor, fixture.tripId, adopted.binding.id, {
+      action: 'RESUME',
+      baseCapabilityRevision: 2,
+      idempotencyKey: randomUUID(),
+    });
+    releaseProvider();
+    await running;
+    const binding = await managed.client.flightBinding.findUniqueOrThrow({
+      where: { id: adopted.binding.id },
+    });
+    expect(binding.lastRefreshedAt).toEqual(new Date(initial.fetchedAt));
+    expect(binding.status).toBe('SCHEDULED');
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.flightMonitoringCapability.findUniqueOrThrow({
+        where: { flightBindingId: adopted.binding.id },
+      }),
+    ).toMatchObject({ state: 'ENABLED', revision: 3 });
+    await monitoring.executeJob(adopted.binding.id, 1);
+    expect(binding.lastRefreshedAt).toEqual(new Date(initial.fetchedAt));
+  });
+});
 
 function createMonitoringService(
   managed: ManagedPrismaClient,

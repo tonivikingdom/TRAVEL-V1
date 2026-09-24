@@ -1,4 +1,5 @@
 import {
+  AssistanceCapabilityService,
   ApplicationError,
   AuthService,
   ExecutionLocationService,
@@ -14,6 +15,8 @@ import {
   isApplicationError,
 } from '@travel/application';
 import type {
+  AssistanceAction,
+  AssistanceMutationRequest,
   ApiErrorResponse,
   FlightSnapshotView,
   FlightExecutionTriggerRequest,
@@ -29,6 +32,7 @@ import type {
   TemporalSubjectInput,
   TransportMode,
   TripCommandInput,
+  TripAssistanceKind,
 } from '@travel/contracts';
 import type { ReadinessProbe } from '@travel/persistence';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
@@ -41,6 +45,7 @@ import {
 export interface ApiDependencies {
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
+  readonly assistanceCapabilityService?: AssistanceCapabilityService;
   readonly notificationService?: NotificationService;
   readonly executionLocationService?: ExecutionLocationService;
   readonly executionRiskService?: ExecutionRiskService;
@@ -120,6 +125,71 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     );
     return authenticated.user;
   });
+
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/assistance',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireAssistanceCapabilityService(dependencies).getTrip(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+
+  app.post<{ Params: { tripId: string; kind: string } }>(
+    '/trips/:tripId/assistance/:kind',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireAssistanceCapabilityService(dependencies).mutateTrip(
+        authenticated.actor,
+        request.params.tripId,
+        parseTripAssistanceKind(request.params.kind),
+        parseAssistanceMutation(request.body),
+      );
+    },
+  );
+
+  app.get<{ Params: { tripId: string; flightBindingId: string } }>(
+    '/trips/:tripId/flights/:flightBindingId/assistance',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireAssistanceCapabilityService(dependencies).getFlight(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.flightBindingId,
+      );
+    },
+  );
+
+  app.post<{ Params: { tripId: string; flightBindingId: string } }>(
+    '/trips/:tripId/flights/:flightBindingId/assistance',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireAssistanceCapabilityService(dependencies).mutateFlight(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.flightBindingId,
+        parseAssistanceMutation(request.body),
+      );
+    },
+  );
 
   app.post('/flights/search', async (request) => {
     const authenticated = await authenticate(
@@ -762,6 +832,38 @@ function requireExecutionLocationService(
     );
   }
   return dependencies.executionLocationService;
+}
+
+function requireAssistanceCapabilityService(
+  dependencies: ApiDependencies,
+): AssistanceCapabilityService {
+  if (dependencies.assistanceCapabilityService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '辅助能力服务暂时不可用。',
+      503,
+      true,
+    );
+  }
+  return dependencies.assistanceCapabilityService;
+}
+
+function parseTripAssistanceKind(value: string): TripAssistanceKind {
+  if (value === 'LOCATION_ASSISTANCE' || value === 'AUTO_RECORD') return value;
+  throw new ApplicationError('VALIDATION_ERROR', '辅助能力类型无效。', 400);
+}
+
+function parseAssistanceMutation(value: unknown): AssistanceMutationRequest {
+  const body = requiredRecord(value);
+  const action = requiredString(body, 'action');
+  if (!['ENABLE', 'PAUSE', 'RESUME', 'STOP'].includes(action)) {
+    throw new ApplicationError('VALIDATION_ERROR', '辅助能力操作无效。', 400);
+  }
+  return {
+    action: action as AssistanceAction,
+    baseCapabilityRevision: requiredNumber(body, 'baseCapabilityRevision'),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
 }
 
 function requireFlightService(dependencies: ApiDependencies): FlightService {

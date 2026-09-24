@@ -75,6 +75,7 @@ export interface ClaimedJob {
   readonly id: string;
   readonly type: JobType;
   readonly payloadRef: string;
+  readonly capabilityRevision?: number | null;
   readonly attempts: number;
   readonly maxAttempts: number;
   readonly leaseOwner: string;

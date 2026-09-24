@@ -48,6 +48,10 @@
   捕获的旧 monitoring revision 不能跨 pause/resume 触发 Provider。
 - Provider observation 的 decision marker 与 time-driven baggage/cancellation tail 分开：同一 observation
   不重复通知，但 tail 到达既有上限时仍能自然终止。
+- `commitRefresh` 与 `commitProviderFailure` 共用同一个 Flight tail Natural End helper：当既有
+  `BAGGAGE/CANCELLED` tail 已无 `nextCheckAt` 时，在当前 capability generation 内停止 capability、取消
+  queued monitor job，且不延长既有 tail、不增加 Trip version 或制造新通知。尚未到终点的 Provider failure
+  保持 enabled 并沿用既有 fallback schedule。
 - Flight effective state 同时考虑初始 T-24 eligibility 与既有有效 monitor work。`ARRIVED/LANDED` 后仍在
   `BAGGAGE/CANCELLED` tail 或仍有同 revision queued/running job 时保持 `effectiveEnabled=true`；tail 真正
   结束后才随 capability 的 `STOPPED/NATURAL_END` 变为 false。
@@ -60,6 +64,8 @@
 - 同一个 persistence helper 同时用于 execution fact transaction 与 Trip command transaction；删除最后 future
   target 会自然停止能力，保留 future target、空 Trip、纯计划 Trip 或 inconsistent frontier 均不会停止。
   Natural End 后再添加 future node 也不会静默重新开启。
+- 合法公开 `USER_VALUE / ACTUAL` TemporalValue 写入也复用同一个 Trip helper；因此 final ACTUAL arrival
+  可以完成辅助，但 PLANNED/ESTIMATED、仍有 future target 或 inconsistent frontier 都不会触发 Natural End。
 - Flight capability 不因 `DEPARTED / EN_ROUTE` 单独停止；沿用 P5D3 已有取消与行李 tail 窗口。已实现的
   tail 到达终点且无 next check 时才转为 `STOPPED/NATURAL_END`。
 - Natural End 只增加 capability revision，不增加 Trip version；之后 heartbeat 不会复活，必须由用户显式
@@ -72,8 +78,8 @@
 - 独立 migration tests 覆盖 clean deploy 与 populated main → 本 migration；CI 是隔离数据库的正式证据。
 - 本机真实 PostgreSQL 已覆盖 capability API、owner/admin isolation、并发 revision、Location/Auto-record
   分权、pause/resume fencing、manual operation、Trip natural end、Flight late-result fencing 与 Flight
-  natural end。Unit `41 files / 472 tests`、API PostgreSQL integration `9 files / 196 tests`、非 migration
-  persistence integration `6 files / 50 tests`、Worker `4 files / 17 tests` 均通过。本机 PostgreSQL 账号无
+  natural end。Unit `41 files / 472 tests`、API PostgreSQL integration `9 files / 201 tests`、非 migration
+  persistence integration `6 files / 54 tests`、Worker `4 files / 17 tests` 均通过。本机 PostgreSQL 账号无
   `CREATE DATABASE` 权限，因此 clean/populated 隔离 migration suite 与 Compose/P5B 以 Draft PR CI 为
   正式结果。
 

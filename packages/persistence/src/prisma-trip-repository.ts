@@ -228,6 +228,13 @@ export class PrismaTripRepository implements TripRepository {
           where: { id: input.tripId },
           data: { version: { increment: 1 } },
         });
+        if (input.value.layer === 'ACTUAL') {
+          await stopTripAssistanceIfNaturallyComplete(
+            transaction,
+            input.tripId,
+            new Date(),
+          );
+        }
         return {
           status: 'SUCCESS',
           trip: toTripRecord(

@@ -274,25 +274,13 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
       if (replaceSchedule) {
         await cancelQueuedJobs(transaction, input.flightBindingId, input.now);
       }
-      if (
-        decision.nextCheckAt === null &&
-        (decision.state.mode === 'BAGGAGE' ||
-          decision.state.mode === 'CANCELLED')
-      ) {
-        await transaction.flightMonitoringCapability.updateMany({
-          where: {
-            flightBindingId: input.flightBindingId,
-            state: { in: ['ENABLED', 'PAUSED'] },
-            revision: capability.revision,
-          },
-          data: {
-            state: 'STOPPED',
-            revision: { increment: 1 },
-            stoppedAt: input.now,
-            stopReason: 'NATURAL_END',
-          },
-        });
-      }
+      await stopFlightMonitoringIfNaturallyComplete(transaction, {
+        flightBindingId: input.flightBindingId,
+        capabilityRevision: capability.revision,
+        state: decision.state,
+        nextCheckAt: decision.nextCheckAt,
+        now: input.now,
+      });
       if (decision.state.mode === 'NORMAL' && replaceSchedule) {
         const snapshot =
           binding.latestSnapshot as unknown as FlightSnapshotView;
@@ -357,6 +345,13 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
       ) {
         await cancelQueuedJobs(transaction, input.flightBindingId, input.now);
       }
+      await stopFlightMonitoringIfNaturallyComplete(transaction, {
+        flightBindingId: input.flightBindingId,
+        capabilityRevision: capability.revision,
+        state: input.state,
+        nextCheckAt: input.nextCheckAt,
+        now: input.now,
+      });
       if (input.nextCheckAt !== null) {
         await scheduleJob(
           transaction,
@@ -500,6 +495,40 @@ async function cancelQueuedJobs(
       completedAt: now,
     },
   });
+}
+
+async function stopFlightMonitoringIfNaturallyComplete(
+  transaction: Transaction,
+  input: {
+    readonly flightBindingId: string;
+    readonly capabilityRevision: number;
+    readonly state: MonitorDecisionState;
+    readonly nextCheckAt: Date | null;
+    readonly now: Date;
+  },
+): Promise<boolean> {
+  if (
+    input.nextCheckAt !== null ||
+    !['BAGGAGE', 'CANCELLED'].includes(input.state.mode)
+  ) {
+    return false;
+  }
+  const stopped = await transaction.flightMonitoringCapability.updateMany({
+    where: {
+      flightBindingId: input.flightBindingId,
+      state: 'ENABLED',
+      revision: input.capabilityRevision,
+    },
+    data: {
+      state: 'STOPPED',
+      revision: { increment: 1 },
+      stoppedAt: input.now,
+      stopReason: 'NATURAL_END',
+    },
+  });
+  if (stopped.count === 0) return false;
+  await cancelQueuedJobs(transaction, input.flightBindingId, input.now);
+  return true;
 }
 
 function stateUpdate(

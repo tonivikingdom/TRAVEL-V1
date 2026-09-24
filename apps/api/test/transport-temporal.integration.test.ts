@@ -938,6 +938,143 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
     });
   });
 
+  it('[REGRESSION F-10] naturally ends enabled trip assistance after a public USER_VALUE final ACTUAL arrival', async () => {
+    const trip = await tripWithPlaces(userA, ['A', 'B']);
+    const [nodeA, nodeB] = trip.days[0]!.nodes;
+    if (nodeA === undefined || nodeB === undefined)
+      throw new Error('nodes missing');
+    await enableTripAssistance(trip.id);
+    await seedActual(nodeA.id, 'DEPARTURE');
+
+    const response = await temporalValueResponse(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      {
+        layer: 'ACTUAL',
+        sourceKind: 'USER_VALUE',
+        observedAt: '2030-10-01T19:31:00+08:00',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect((response.json() as TripView).version).toBe(trip.version + 1);
+    expect(
+      await managed.client.tripAssistanceCapability.findMany({
+        where: { tripId: trip.id },
+        orderBy: { kind: 'asc' },
+        select: { kind: true, state: true, revision: true, stopReason: true },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'LOCATION_ASSISTANCE',
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      }),
+      expect.objectContaining({
+        kind: 'AUTO_RECORD',
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      }),
+    ]);
+  });
+
+  it('[REGRESSION F-10] keeps assistance enabled when a public ACTUAL write leaves a future target', async () => {
+    const trip = await tripWithPlaces(userA, ['A', 'B', 'C']);
+    const [nodeA, nodeB] = trip.days[0]!.nodes;
+    if (nodeA === undefined || nodeB === undefined)
+      throw new Error('nodes missing');
+    await enableTripAssistance(trip.id);
+    await seedActual(nodeA.id, 'DEPARTURE');
+
+    const response = await temporalValueResponse(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeB.id },
+      {
+        layer: 'ACTUAL',
+        sourceKind: 'USER_VALUE',
+        observedAt: '2030-10-01T19:31:00+08:00',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      await managed.client.tripAssistanceCapability.findMany({
+        where: { tripId: trip.id },
+        select: { state: true, revision: true },
+      }),
+    ).toEqual([
+      { state: 'ENABLED', revision: 1 },
+      { state: 'ENABLED', revision: 1 },
+    ]);
+  });
+
+  it.each(['PLANNED', 'ESTIMATED'] as const)(
+    '[REGRESSION F-10] does not end assistance for public %s writes',
+    async (layer) => {
+      const trip = await tripWithPlaces(userA, ['A', 'B']);
+      const [nodeA, nodeB] = trip.days[0]!.nodes;
+      if (nodeA === undefined || nodeB === undefined)
+        throw new Error('nodes missing');
+      await enableTripAssistance(trip.id);
+      await seedActual(nodeA.id, 'DEPARTURE');
+      await seedActual(nodeB.id, 'ARRIVAL');
+
+      const response = await temporalValueResponse(
+        userA,
+        trip,
+        { type: 'NODE', nodeId: nodeB.id },
+        { layer, sourceKind: 'USER_VALUE' },
+      );
+
+      expect(response.statusCode).toBe(200);
+      expect(
+        await managed.client.tripAssistanceCapability.findMany({
+          where: { tripId: trip.id },
+          select: { state: true, revision: true },
+        }),
+      ).toEqual([
+        { state: 'ENABLED', revision: 1 },
+        { state: 'ENABLED', revision: 1 },
+      ]);
+    },
+  );
+
+  it('[REGRESSION F-10] does not end assistance when a public ACTUAL write leaves an inconsistent frontier', async () => {
+    const trip = await tripWithPlaces(userA, ['A', 'B', 'C']);
+    const [nodeA, nodeB, nodeC] = trip.days[0]!.nodes;
+    if (nodeA === undefined || nodeB === undefined || nodeC === undefined)
+      throw new Error('nodes missing');
+    await enableTripAssistance(trip.id);
+    await seedActual(nodeA.id, 'ARRIVAL');
+    await seedActual(nodeB.id, 'ARRIVAL');
+
+    const response = await temporalValueResponse(
+      userA,
+      trip,
+      { type: 'NODE', nodeId: nodeC.id },
+      {
+        layer: 'ACTUAL',
+        sourceKind: 'USER_VALUE',
+        observedAt: '2030-10-01T19:31:00+08:00',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      await managed.client.tripAssistanceCapability.findMany({
+        where: { tripId: trip.id },
+        select: { state: true, revision: true },
+      }),
+    ).toEqual([
+      { state: 'ENABLED', revision: 1 },
+      { state: 'ENABLED', revision: 1 },
+    ]);
+  });
+
   it('hides temporal-value Trip existence from another owner and ADMIN', async () => {
     const trip = await tripWithPlaces(userA, ['A']);
     const subject = { type: 'NODE', nodeId: trip.days[0]!.nodes[0]!.id };
@@ -1296,6 +1433,43 @@ describe('P2B transport adjacency and temporal values with PostgreSQL 17', () =>
           sourceRef: null,
           ...valueOverrides,
         },
+      },
+    });
+  }
+
+  async function enableTripAssistance(tripId: string): Promise<void> {
+    await managed.client.tripAssistanceCapability.createMany({
+      data: [
+        {
+          ownerUserId: userA.actor.userId,
+          tripId,
+          kind: 'LOCATION_ASSISTANCE',
+          state: 'ENABLED',
+          revision: 1,
+        },
+        {
+          ownerUserId: userA.actor.userId,
+          tripId,
+          kind: 'AUTO_RECORD',
+          state: 'ENABLED',
+          revision: 1,
+        },
+      ],
+    });
+  }
+
+  async function seedActual(
+    nodeId: string,
+    pointKind: 'ARRIVAL' | 'DEPARTURE',
+  ): Promise<void> {
+    await managed.client.temporalValue.create({
+      data: {
+        nodeId,
+        layer: 'ACTUAL',
+        pointKind,
+        instant: new Date('2030-10-01T11:00:00.000Z'),
+        timeZone: 'UTC',
+        sourceKind: 'USER_VALUE',
       },
     });
   }

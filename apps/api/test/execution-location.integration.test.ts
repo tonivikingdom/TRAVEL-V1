@@ -958,10 +958,6 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       where: { id: fixture.nodeBId },
       select: { placeId: true },
     });
-    await managed.client.place.update({
-      where: { id: nodeB.placeId! },
-      data: { latitude: 35.0005, longitude: 139.0005 },
-    });
     const first = await observe(owner, {
       latitude: 35,
       longitude: 139,
@@ -969,6 +965,11 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       observedAt: '2030-01-01T10:00:00.000Z',
     });
     const firstBody = first.json<ExecutionLocationResponse>();
+    expect(firstBody.status).toBe('CONFIRMED_ARRIVAL');
+    await managed.client.place.update({
+      where: { id: nodeB.placeId! },
+      data: { latitude: 35.0005, longitude: 139.0005 },
+    });
     await app.inject({
       method: 'POST',
       url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,

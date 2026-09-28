@@ -162,6 +162,10 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     await managed.client.transportEdge.deleteMany({
       where: { tripId: fixture.tripId, id: { not: fixture.flightEdgeId } },
     });
+    await managed.client.transportEdge.update({
+      where: { id: fixture.flightEdgeId },
+      data: { fixedService: false },
+    });
     const monitoring = await createMonitoring(
       managed,
       fixture,

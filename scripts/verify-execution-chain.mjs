@@ -127,7 +127,9 @@ export async function verifyExecutionChain({
       },
     });
   };
-  await setEdge(airport.id, arrival.id, 'FLIGHT', true);
+  // Keep the synthetic flight leg outside P5D1's fixed-service target list so
+  // the nearest protected execution target is the downstream rail connection.
+  await setEdge(airport.id, arrival.id, 'FLIGHT', false);
   await setEdge(arrival.id, onward.id, 'RAIL', true);
   const flightEdge = trip.connections.find(
     (connection) => connection.fromNodeId === airport.id,

@@ -38,6 +38,8 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
     readonly basisTripVersion: number;
     readonly now: Date;
     readonly desiredRisks: readonly DesiredExecutionRisk[];
+    readonly correlationGroupKey?: string | undefined;
+    readonly correlationSourceTransportEdgeId?: string | undefined;
   }): Promise<ReconcileExecutionRisksResult> {
     return this.client.$transaction(async (transaction) => {
       await lockOwner(transaction, input.ownerUserId);
@@ -104,6 +106,9 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
               risk: created,
               desired,
               now: input.now,
+              correlationGroupKey: input.correlationGroupKey,
+              correlationSourceTransportEdgeId:
+                input.correlationSourceTransportEdgeId,
             }),
           );
           continue;
@@ -148,6 +153,9 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
               risk: updated,
               desired,
               now: input.now,
+              correlationGroupKey: input.correlationGroupKey,
+              correlationSourceTransportEdgeId:
+                input.correlationSourceTransportEdgeId,
             }),
           );
         }
@@ -280,8 +288,31 @@ async function createNotification(
     readonly risk: ExecutionRisk;
     readonly desired: DesiredExecutionRisk;
     readonly now: Date;
+    readonly correlationGroupKey?: string | undefined;
+    readonly correlationSourceTransportEdgeId?: string | undefined;
   },
 ): Promise<NotificationRecord> {
+  const groupKey =
+    input.correlationGroupKey !== undefined &&
+    (input.risk.sourceTransportEdgeId ===
+      input.correlationSourceTransportEdgeId ||
+      (input.correlationSourceTransportEdgeId !== undefined &&
+        input.desired.evidenceRefs.includes(
+          `transport:${input.correlationSourceTransportEdgeId}`,
+        )))
+      ? input.correlationGroupKey
+      : null;
+  const alreadyActive =
+    groupKey === null
+      ? null
+      : await transaction.notificationEvent.findFirst({
+          where: {
+            ownerUserId: input.risk.ownerUserId,
+            presentationGroupKey: groupKey,
+            presentationActive: true,
+          },
+          select: { id: true },
+        });
   return transaction.notificationEvent.create({
     data: {
       ownerUserId: input.risk.ownerUserId,
@@ -290,6 +321,9 @@ async function createNotification(
       title: input.desired.notificationTitle,
       body: input.desired.notificationBody,
       occurredAt: input.now,
+      tripId: input.risk.tripId,
+      presentationGroupKey: groupKey,
+      presentationActive: alreadyActive === null,
     },
   });
 }

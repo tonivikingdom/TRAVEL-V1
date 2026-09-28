@@ -305,12 +305,24 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           replaceSchedule,
         );
       }
+      if (decision.notification !== null && input.hasDownstreamImpact) {
+        await transaction.notificationEvent.updateMany({
+          where: {
+            ownerUserId: binding.ownerUserId,
+            presentationGroupKey: input.correlationGroupKey,
+            kind: 'EXECUTION_RISK',
+            presentationActive: true,
+          },
+          data: { presentationActive: false },
+        });
+      }
       return createNotification(transaction, {
         binding,
         notification: decision.notification,
         hasDownstreamImpact: input.hasDownstreamImpact,
         occurredAt: input.now,
         generation: `${current.generation}:${input.acceptedFetchedAt.toISOString()}`,
+        presentationGroupKey: input.correlationGroupKey,
       });
     });
   }
@@ -573,6 +585,7 @@ async function createNotification(
     readonly hasDownstreamImpact: boolean;
     readonly occurredAt: Date;
     readonly generation: string;
+    readonly presentationGroupKey?: string;
   },
 ): Promise<NotificationRecord | null> {
   if (input.notification === null) return null;
@@ -601,13 +614,18 @@ async function createNotification(
         input.notification.priority === 'STRONG'
           ? '航班重要状态变化'
           : '航班状态更新',
-      body: input.notification.summary,
+      body: input.hasDownstreamImpact
+        ? `${input.notification.summary}；可能影响后续已安排项目。`
+        : input.notification.summary,
       priority: input.notification.priority,
-      summary: input.notification.summary,
+      summary: input.hasDownstreamImpact
+        ? `${input.notification.summary}；可能影响后续已安排项目。`
+        : input.notification.summary,
       changeKinds: input.notification
         .changeKinds as unknown as Prisma.InputJsonValue,
       hasDownstreamImpact: input.hasDownstreamImpact,
       occurredAt: input.occurredAt,
+      presentationGroupKey: input.presentationGroupKey ?? null,
     },
     update: {},
   });

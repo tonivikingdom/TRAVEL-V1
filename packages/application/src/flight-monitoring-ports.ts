@@ -34,6 +34,7 @@ export interface FlightMonitoringRepository {
   commitRefresh(input: {
     readonly flightBindingId: string;
     readonly acceptedFetchedAt: Date;
+    readonly correlationGroupKey: string;
     readonly hasDownstreamImpact: boolean;
     readonly recordSuccessfulRefresh: boolean;
     readonly now: Date;

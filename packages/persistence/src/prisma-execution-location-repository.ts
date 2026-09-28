@@ -6,6 +6,10 @@ import type {
   TemporalValueRecord,
 } from '@travel/application';
 import type { ExecutionDerivedLocationState } from '@travel/domain';
+import type {
+  ExecutionDecisionEvidence,
+  ExecutionEvidenceReasonCode,
+} from '@travel/domain';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { stopTripAssistanceIfNaturallyComplete } from './trip-assistance-natural-end.js';
@@ -254,6 +258,11 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         (input.autoRecordEnabled &&
           input.decision.status === 'CONFIRMED_DEPARTURE')
       ) {
+        if (input.decision.evidence.reliability !== 'SUFFICIENT') {
+          throw new Error(
+            'Execution location fact requires sufficient decision evidence.',
+          );
+        }
         const type =
           input.decision.status === 'CONFIRMED_ARRIVAL'
             ? 'ARRIVAL'
@@ -271,6 +280,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
             input.decision.status === 'CONFIRMED_ARRIVAL'
               ? input.decision.possiblySkippedNodeIds
               : [],
+          evidence: input.decision.evidence,
         });
         if (result.status === 'FACT_PROTECTED') {
           return { status: 'FACT_PROTECTED' as const };
@@ -466,6 +476,7 @@ export class PrismaExecutionLocationRepository implements ExecutionLocationRepos
         idempotencyKey: input.idempotencyKey,
         requestHash: input.requestHash,
         possiblySkippedNodeIds: [],
+        evidence: null,
       });
       if (result.status === 'FACT_PROTECTED') {
         return { status: 'FACT_PROTECTED' as const };
@@ -782,6 +793,7 @@ async function createFactEvent(
     readonly idempotencyKey: string | null;
     readonly requestHash: string | null;
     readonly possiblySkippedNodeIds: readonly string[];
+    readonly evidence: ExecutionDecisionEvidence | null;
   },
 ) {
   const node = await transaction.itineraryNode.findFirst({
@@ -817,6 +829,14 @@ async function createFactEvent(
       occurredAt: input.occurredAt,
       idempotencyKey: input.idempotencyKey,
       requestHash: input.requestHash,
+      ...(input.evidence === null
+        ? {}
+        : {
+            evidenceReliability: input.evidence.reliability,
+            evidencePolicyVersion: input.evidence.policyVersion,
+            evidenceReasonCodes: [...input.evidence.reasonCodes],
+            evidenceCompetingNodeIds: [...input.evidence.competingNodeIds],
+          }),
     },
   });
   await transaction.temporalValue.create({
@@ -931,8 +951,52 @@ function toEventRecord(event: {
   readonly createdAt: Date;
   readonly undoneAt: Date | null;
   readonly airportTriggerCompletedAt: Date | null;
+  readonly evidenceReliability: 'SUFFICIENT' | 'WEAK' | 'INDETERMINATE' | null;
+  readonly evidencePolicyVersion: string | null;
+  readonly evidenceReasonCodes: unknown;
+  readonly evidenceCompetingNodeIds: unknown;
 }): ExecutionEventRecord {
-  return event;
+  return {
+    ...event,
+    evidence:
+      event.evidenceReliability === null || event.evidencePolicyVersion === null
+        ? null
+        : {
+            reliability: event.evidenceReliability,
+            policyVersion: event.evidencePolicyVersion,
+            reasonCodes: stringArray(event.evidenceReasonCodes).filter(
+              isEvidenceReasonCode,
+            ),
+            competingNodeIds: stringArray(event.evidenceCompetingNodeIds),
+          },
+  };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+const EVIDENCE_REASON_CODES = new Set<string>([
+  'TARGET_UNIQUE',
+  'WITHIN_ARRIVAL_RADIUS',
+  'ACCURACY_SUFFICIENT',
+  'ACCURACY_INSUFFICIENT',
+  'MULTIPLE_CANDIDATES',
+  'SUPPRESSION_ACTIVE',
+  'MOTION_CONTRADICTS_ARRIVAL',
+  'TARGET_COORDINATES_UNAVAILABLE',
+  'FRONTIER_INCONSISTENT',
+  'TARGET_OUTSIDE_RADIUS',
+  'DEPARTURE_EVIDENCE_SUFFICIENT',
+  'DUPLICATE_OBSERVATION',
+]);
+
+function isEvidenceReasonCode(
+  value: string,
+): value is ExecutionEvidenceReasonCode {
+  return EVIDENCE_REASON_CODES.has(value);
 }
 
 function toTemporal(

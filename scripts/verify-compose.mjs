@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { verifyExecutionChain } from './verify-execution-chain.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -321,6 +322,17 @@ async function verifyCompose(compose, composeQuiet, env) {
     }
     return payload;
   };
+  if (env.FLIGHT_PROVIDER === 'synthetic') {
+    await verifyExecutionChain({
+      baseUrl: `http://127.0.0.1:${apiPort}`,
+      adminCredential: session.credential,
+      composeQuiet,
+      waitFor,
+      databaseUser,
+      databaseName,
+      scheduledUtc: env.SYNTHETIC_FLIGHT_SCHEDULED_UTC,
+    });
+  }
   let routeTrip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC Compose route adoption',
     planningAnchorDate: '2030-10-01',

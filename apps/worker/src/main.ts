@@ -21,6 +21,7 @@ import {
   AeroDataBoxFlightProvider,
   readFlightProviderConfig,
   UnconfiguredFlightProvider,
+  SyntheticFlightProvider,
 } from '@travel/providers';
 
 import { readWorkerConfig } from './config.js';
@@ -40,13 +41,22 @@ const executionRiskService = new ExecutionRiskService(
 );
 const flightProviderConfig = readFlightProviderConfig(process.env);
 const flightProvider =
-  flightProviderConfig.provider === 'aerodatabox' &&
-  flightProviderConfig.liveApiEnabled &&
-  flightProviderConfig.apiKey !== null
-    ? new AeroDataBoxFlightProvider(flightProviderConfig.apiKey, {
-        host: flightProviderConfig.host,
+  flightProviderConfig.provider === 'synthetic' &&
+  flightProviderConfig.syntheticScheduledUtc !== null &&
+  flightProviderConfig.syntheticObservedAt !== null
+    ? new SyntheticFlightProvider({
+        scheduledUtc: flightProviderConfig.syntheticScheduledUtc,
+        observedAt: flightProviderConfig.syntheticObservedAt,
+        refreshMode: flightProviderConfig.syntheticRefreshMode,
+        failFirstRefresh: flightProviderConfig.syntheticFailFirst,
       })
-    : new UnconfiguredFlightProvider();
+    : flightProviderConfig.provider === 'aerodatabox' &&
+        flightProviderConfig.liveApiEnabled &&
+        flightProviderConfig.apiKey !== null
+      ? new AeroDataBoxFlightProvider(flightProviderConfig.apiKey, {
+          host: flightProviderConfig.host,
+        })
+      : new UnconfiguredFlightProvider();
 const flightMonitoringRepository = new PrismaFlightMonitoringRepository(
   managedPrisma.client,
 );

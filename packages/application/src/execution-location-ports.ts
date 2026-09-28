@@ -1,5 +1,6 @@
 import type {
   ExecutionDerivedLocationState,
+  ExecutionDecisionEvidence,
   ExecutionLocationDecision,
 } from '@travel/domain';
 
@@ -16,6 +17,7 @@ export interface ExecutionEventRecord {
   readonly createdAt: Date;
   readonly undoneAt: Date | null;
   readonly airportTriggerCompletedAt: Date | null;
+  readonly evidence: ExecutionDecisionEvidence | null;
 }
 
 export interface ExecutionContextNodeRecord {

@@ -65,6 +65,8 @@ export interface ExecutionRiskRepository {
     readonly basisTripVersion: number;
     readonly now: Date;
     readonly desiredRisks: readonly DesiredExecutionRisk[];
+    readonly correlationGroupKey?: string;
+    readonly correlationSourceTransportEdgeId?: string;
   }): Promise<ReconcileExecutionRisksResult>;
   listActiveOwned(input: {
     readonly ownerUserId: string;

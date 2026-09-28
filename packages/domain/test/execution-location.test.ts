@@ -133,7 +133,76 @@ describe('execution location policy', () => {
       status: 'CONFIRMED_ARRIVAL',
       nodeId: 'a',
       possiblySkippedNodeIds: [],
+      evidence: {
+        reliability: 'SUFFICIENT',
+        policyVersion: 'execution-location-v2',
+        reasonCodes: [
+          'ACCURACY_SUFFICIENT',
+          'TARGET_UNIQUE',
+          'WITHIN_ARRIVAL_RADIUS',
+        ],
+      },
     });
+  });
+
+  it('[REGRESSION F-04] withholds arrival when distinct unresolved places overlap', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, node('overlap', 0, 1, 35.0001, 139.0001)],
+      previousState: null,
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['ACCURACY_SUFFICIENT', 'MULTIPLE_CANDIDATES'],
+        competingNodeIds: ['a', 'overlap'],
+      },
+    });
+  });
+
+  it('[REGRESSION F-04] withholds arrival for repeated visits to identical coordinates', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, { ...a, id: 'hotel-second-visit', sequence: 2 }],
+      previousState: null,
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result.status).toBe('NO_CHANGE');
+    expect(result.evidence).toMatchObject({
+      reliability: 'WEAK',
+      competingNodeIds: ['a', 'hotel-second-visit'],
+    });
+  });
+
+  it('[REGRESSION F-04] treats fast motion directed away from the target as contradictory', () => {
+    const result = decideExecutionLocation({
+      nodes: [a],
+      previousState: null,
+      sample: {
+        ...sample(35.0002, 139),
+        speedMetersPerSecond: 15,
+        headingDegrees: 0,
+      },
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result.status).toBe('NO_CHANGE');
+    expect(result.evidence).toMatchObject({
+      reliability: 'WEAK',
+      reasonCodes: ['ACCURACY_SUFFICIENT', 'MOTION_CONTRADICTS_ARRIVAL'],
+    });
+  });
+
+  it('[REGRESSION F-04] keeps a unique single point sufficient when motion data is absent', () => {
+    const result = decideExecutionLocation({
+      nodes: [a],
+      previousState: null,
+      sample: sample(35.0002, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result.status).toBe('CONFIRMED_ARRIVAL');
+    expect(result.evidence.reliability).toBe('SUFFICIENT');
   });
 
   it('does not create a fact for poor accuracy or an outside sample', () => {

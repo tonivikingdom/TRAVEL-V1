@@ -182,6 +182,15 @@ export class FlightService {
     const riskEvaluation = await this.executionRiskService.evaluateTripRisks(
       actor,
       tripId,
+      expectedMonitoringCapabilityRevision === undefined
+        ? undefined
+        : {
+            groupKey: flightObservationGroupKey(
+              result.binding.id,
+              result.binding.lastRefreshedAt,
+            ),
+            sourceTransportEdgeId: result.binding.transportEdgeId,
+          },
     );
     const acceptedStatus = result.binding.latestSnapshot.status;
     const requiresAttention =
@@ -199,6 +208,13 @@ export class FlightService {
       riskEvaluation,
     };
   }
+}
+
+export function flightObservationGroupKey(
+  flightBindingId: string,
+  acceptedFetchedAt: string,
+): string {
+  return `flight-observation:${flightBindingId}:${acceptedFetchedAt}`;
 }
 
 export function emptyFlightChanges(): FlightChangeSummaryView {

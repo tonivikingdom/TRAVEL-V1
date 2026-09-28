@@ -162,10 +162,6 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     await managed.client.transportEdge.deleteMany({
       where: { tripId: fixture.tripId, id: { not: fixture.flightEdgeId } },
     });
-    await managed.client.transportEdge.update({
-      where: { id: fixture.flightEdgeId },
-      data: { fixedService: false },
-    });
     const monitoring = await createMonitoring(
       managed,
       fixture,
@@ -187,6 +183,20 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
       flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
     });
     if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    const flightEdge = await managed.client.transportEdge.findUniqueOrThrow({
+      where: { id: fixture.flightEdgeId },
+      select: { fromNodeId: true },
+    });
+    await managed.client.temporalValue.create({
+      data: {
+        nodeId: flightEdge.fromNodeId,
+        layer: 'ACTUAL',
+        pointKind: 'ARRIVAL',
+        instant: new Date('2030-01-01T12:00:00.000Z'),
+        timeZone: 'UTC',
+        sourceKind: 'USER_VALUE',
+      },
+    });
     await enableMonitoring(managed, fixture, adopted.binding.id);
     await monitoring.service.ensureEligibleMonitoring();
     await monitoring.service.executeJob(adopted.binding.id, 1);

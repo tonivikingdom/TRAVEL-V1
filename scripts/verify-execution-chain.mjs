@@ -127,9 +127,7 @@ export async function verifyExecutionChain({
       },
     });
   };
-  // Keep the synthetic flight leg outside P5D1's fixed-service target list so
-  // the nearest protected execution target is the downstream rail connection.
-  await setEdge(airport.id, arrival.id, 'FLIGHT', false);
+  await setEdge(airport.id, arrival.id, 'FLIGHT', true);
   await setEdge(arrival.id, onward.id, 'RAIL', true);
   const flightEdge = trip.connections.find(
     (connection) => connection.fromNodeId === airport.id,
@@ -179,6 +177,21 @@ export async function verifyExecutionChain({
       },
     },
   );
+  // P5D1 evaluates the nearest protected execution target. Protect the
+  // selected flight departure itself so its delayed provider estimate yields
+  // a correlated risk while the airport arrival remains the current frontier.
+  trip = await request(credential, `/trips/${trip.id}/commands`, 'POST', {
+    baseTripVersion: trip.version,
+    command: {
+      type: 'SET_TIME_INTENT',
+      nodeId: airport.id,
+      pointKind: 'DEPARTURE',
+      operator: 'NOT_AFTER',
+      instant: scheduledUtc,
+      timeZone: 'UTC',
+      locked: true,
+    },
+  });
   const enable = async (path) =>
     request(credential, path, 'POST', {
       action: 'ENABLE',
@@ -188,6 +201,15 @@ export async function verifyExecutionChain({
   await enable(`/trips/${trip.id}/assistance/LOCATION_ASSISTANCE`);
   await enable(`/trips/${trip.id}/assistance/AUTO_RECORD`);
   await enable(`/trips/${trip.id}/flights/${bindingId}/assistance`);
+  // Establish the unchanged provider estimate before the location arrival.
+  // This keeps the protected departure satisfied at the first risk evaluation;
+  // the later Worker revision is the objective change under test.
+  await request(
+    credential,
+    `/trips/${trip.id}/flights/${bindingId}/refresh`,
+    'POST',
+    {},
+  );
   const forbidden = await fetch(`${baseUrl}/trips/${trip.id}`, {
     headers: { authorization: `Bearer ${adminCredential}` },
   });

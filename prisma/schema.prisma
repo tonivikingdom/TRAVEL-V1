@@ -175,6 +175,12 @@ enum ExecutionEventSource {
   MANUAL
 }
 
+enum ExecutionEvidenceReliability {
+  SUFFICIENT
+  WEAK
+  INDETERMINATE
+}
+
 enum NodeExecutionStatus {
   POSSIBLY_SKIPPED
   SKIPPED
@@ -280,12 +286,15 @@ model NotificationEvent {
   changeKinds         Json                 @default("[]") @db.JsonB
   hasDownstreamImpact Boolean              @default(false)
   viewedAt            DateTime?            @db.Timestamptz(3)
+  presentationGroupKey String?              @db.VarChar(200)
+  presentationActive   Boolean              @default(true)
   owner               User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
 
   @@unique([ownerUserId, dedupeKey])
   @@index([ownerUserId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([ownerUserId, dismissedAt])
   @@index([flightBindingId, createdAt(sort: Desc)])
+  @@index([ownerUserId, presentationGroupKey])
 }
 
 model StoredObject {
@@ -948,6 +957,10 @@ model ExecutionEvent {
   nodeId                    String               @db.Uuid
   type                      ExecutionEventType
   source                    ExecutionEventSource
+  evidenceReliability       ExecutionEvidenceReliability?
+  evidencePolicyVersion     String?              @db.VarChar(80)
+  evidenceReasonCodes       Json?                @db.JsonB
+  evidenceCompetingNodeIds  Json?                @db.JsonB
   occurredAt                DateTime             @db.Timestamptz(3)
   idempotencyKey            String?              @db.VarChar(200)
   requestHash               String?              @db.VarChar(64)

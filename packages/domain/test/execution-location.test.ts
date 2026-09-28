@@ -133,7 +133,76 @@ describe('execution location policy', () => {
       status: 'CONFIRMED_ARRIVAL',
       nodeId: 'a',
       possiblySkippedNodeIds: [],
+      evidence: {
+        reliability: 'SUFFICIENT',
+        policyVersion: 'execution-location-v2',
+        reasonCodes: [
+          'ACCURACY_SUFFICIENT',
+          'TARGET_UNIQUE',
+          'WITHIN_ARRIVAL_RADIUS',
+        ],
+      },
     });
+  });
+
+  it('[REGRESSION F-04] withholds arrival when distinct unresolved places overlap', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, node('overlap', 0, 1, 35.0001, 139.0001)],
+      previousState: null,
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['ACCURACY_SUFFICIENT', 'MULTIPLE_CANDIDATES'],
+        competingNodeIds: ['a', 'overlap'],
+      },
+    });
+  });
+
+  it('[REGRESSION F-04] withholds arrival for repeated visits to identical coordinates', () => {
+    const result = decideExecutionLocation({
+      nodes: [a, { ...a, id: 'hotel-second-visit', sequence: 2 }],
+      previousState: null,
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result.status).toBe('NO_CHANGE');
+    expect(result.evidence).toMatchObject({
+      reliability: 'WEAK',
+      competingNodeIds: ['a', 'hotel-second-visit'],
+    });
+  });
+
+  it('[REGRESSION F-04] treats fast motion directed away from the target as contradictory', () => {
+    const result = decideExecutionLocation({
+      nodes: [a],
+      previousState: null,
+      sample: {
+        ...sample(35.0002, 139),
+        speedMetersPerSecond: 15,
+        headingDegrees: 0,
+      },
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result.status).toBe('NO_CHANGE');
+    expect(result.evidence).toMatchObject({
+      reliability: 'WEAK',
+      reasonCodes: ['ACCURACY_SUFFICIENT', 'MOTION_CONTRADICTS_ARRIVAL'],
+    });
+  });
+
+  it('[REGRESSION F-04] keeps a unique single point sufficient when motion data is absent', () => {
+    const result = decideExecutionLocation({
+      nodes: [a],
+      previousState: null,
+      sample: sample(35.0002, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result.status).toBe('CONFIRMED_ARRIVAL');
+    expect(result.evidence.reliability).toBe('SUFFICIENT');
   });
 
   it('does not create a fact for poor accuracy or an outside sample', () => {
@@ -175,6 +244,70 @@ describe('execution location policy', () => {
       status: 'CONFIRMED_DEPARTURE',
       nodeId: 'a',
     });
+  });
+
+  it('[REGRESSION F-04/F-13] does not open an overlapping next node before current departure', () => {
+    const arrivedA = { ...a, hasActualArrival: true };
+    const overlappingB = node('overlapping-b', 0, 1, 35.0001, 139.0001);
+    const result = decideExecutionLocation({
+      nodes: [arrivedA, overlappingB],
+      previousState: null,
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['CURRENT_NODE_OPEN', 'MULTIPLE_CANDIDATES'],
+        competingNodeIds: ['a', 'overlapping-b'],
+      },
+    });
+    expect(resolveExecutionFrontier([arrivedA, overlappingB]).state).not.toBe(
+      'INCONSISTENT',
+    );
+  });
+
+  it('[REGRESSION F-04/F-13] confirms departure before a later arrival', () => {
+    const arrivedA = { ...a, hasActualArrival: true };
+    const distantB = node('distant-b', 0, 1, 35.01, 139.01);
+    const first = decideExecutionLocation({
+      nodes: [arrivedA, distantB],
+      previousState: null,
+      sample: sample(35.002, 139.002),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(first.status).toBe('NO_CHANGE');
+    const second = decideExecutionLocation({
+      nodes: [arrivedA, distantB],
+      previousState: first.state,
+      sample: sample(35.004, 139.004),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(second).toMatchObject({
+      status: 'CONFIRMED_DEPARTURE',
+      nodeId: 'a',
+    });
+    const departedA = { ...arrivedA, hasActualDeparture: true };
+    expect(resolveExecutionFrontier([departedA, distantB]).state).not.toBe(
+      'INCONSISTENT',
+    );
+    const third = decideExecutionLocation({
+      nodes: [departedA, distantB],
+      previousState: second.state,
+      sample: sample(35.01, 139.01),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(third).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      nodeId: 'distant-b',
+    });
+    expect(
+      resolveExecutionFrontier([
+        { ...departedA },
+        { ...distantB, hasActualArrival: true },
+      ]).state,
+    ).not.toBe('INCONSISTENT');
   });
 
   it('does not confirm departure for a single jump or movement away from next target', () => {

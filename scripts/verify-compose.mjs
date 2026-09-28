@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { verifyExecutionChain } from './verify-execution-chain.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +17,11 @@ const composeFile = path.join(
   'compose.yml',
 );
 const defaultTimeoutMs = 120_000;
+const providerSecretSentinel = `SYNTHETIC_F09_PROVIDER_SECRET_DO_NOT_LOG_${randomUUID()}`;
+const composeEnvironment = {
+  ...process.env,
+  AERODATABOX_RAPIDAPI_KEY: providerSecretSentinel,
+};
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
@@ -82,6 +89,7 @@ function composeCommand(envFile, project) {
       ],
       {
         cwd: repoRoot,
+        env: composeEnvironment,
         timeout: args.includes('--build') ? 300_000 : defaultTimeoutMs,
         maxBuffer: 2 * 1024 * 1024,
       },
@@ -111,7 +119,12 @@ function quietComposeCommand(envFile, project) {
         composeFile,
         ...args,
       ],
-      { cwd: repoRoot, timeout: defaultTimeoutMs, maxBuffer: 2 * 1024 * 1024 },
+      {
+        cwd: repoRoot,
+        env: composeEnvironment,
+        timeout: defaultTimeoutMs,
+        maxBuffer: 2 * 1024 * 1024,
+      },
     );
     return stdout;
   };
@@ -321,6 +334,18 @@ async function verifyCompose(compose, composeQuiet, env) {
     }
     return payload;
   };
+  if (env.FLIGHT_PROVIDER === 'synthetic') {
+    await verifyExecutionChain({
+      baseUrl: `http://127.0.0.1:${apiPort}`,
+      adminCredential: session.credential,
+      composeQuiet,
+      waitFor,
+      databaseUser,
+      databaseName,
+      scheduledUtc: env.SYNTHETIC_FLIGHT_SCHEDULED_UTC,
+      providerSecretSentinel,
+    });
+  }
   let routeTrip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC Compose route adoption',
     planningAnchorDate: '2030-10-01',
@@ -663,7 +688,7 @@ async function verifyCompose(compose, composeQuiet, env) {
   }
 
   await compose('stop', '--timeout', '10', 'worker');
-  const workerLogs = await compose(
+  const workerLogs = await composeQuiet(
     'logs',
     '--no-color',
     '--tail',
@@ -704,7 +729,8 @@ try {
   );
   try {
     await compose('ps');
-    await compose('logs', '--no-color', '--tail', '300');
+    // Ordinary service logs can contain the very secret sentinels under test.
+    // Never print them as failure diagnostics before redaction is proven.
   } catch (diagnosticError) {
     process.stderr.write(
       `Compose diagnostics failed: ${diagnosticError instanceof Error ? diagnosticError.message : 'UnknownError'}\n`,

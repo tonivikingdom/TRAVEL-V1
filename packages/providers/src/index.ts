@@ -21,3 +21,4 @@ export {
   type FlightProviderRuntimeConfig,
 } from './flight-config.js';
 export { UnconfiguredFlightProvider } from './unconfigured-flight-provider.js';
+export { SyntheticFlightProvider } from './synthetic-flight-provider.js';

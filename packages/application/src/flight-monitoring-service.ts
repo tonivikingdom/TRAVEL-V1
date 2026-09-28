@@ -11,7 +11,10 @@ import {
 
 import { isApplicationError } from './errors.js';
 import type { FlightMonitoringRepository } from './flight-monitoring-ports.js';
-import type { FlightService } from './flight-service.js';
+import {
+  flightObservationGroupKey,
+  type FlightService,
+} from './flight-service.js';
 import type { Actor } from './authorization.js';
 import { authorize } from './authorization.js';
 import { ApplicationError } from './errors.js';
@@ -58,6 +61,10 @@ export class FlightMonitoringService {
       await this.repository.commitRefresh({
         flightBindingId,
         acceptedFetchedAt: new Date(context.binding.lastRefreshedAt),
+        correlationGroupKey: flightObservationGroupKey(
+          flightBindingId,
+          context.binding.lastRefreshedAt,
+        ),
         hasDownstreamImpact: false,
         recordSuccessfulRefresh: false,
         now,
@@ -212,6 +219,10 @@ export class FlightMonitoringService {
       const notification = await this.repository.commitRefresh({
         flightBindingId,
         acceptedFetchedAt,
+        correlationGroupKey: flightObservationGroupKey(
+          flightBindingId,
+          acceptedFetchedAt.toISOString(),
+        ),
         hasDownstreamImpact: hasFlightRelatedDownstreamImpact(response),
         recordSuccessfulRefresh: observationAdvanced,
         now,

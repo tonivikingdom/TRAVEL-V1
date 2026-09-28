@@ -89,6 +89,14 @@ export interface ExecutionEventView {
   readonly occurredAt: string;
   readonly createdAt: string;
   readonly undoneAt: string | null;
+  readonly evidence: ExecutionLocationEvidenceView | null;
+}
+
+export interface ExecutionLocationEvidenceView {
+  readonly reliability: 'SUFFICIENT' | 'WEAK' | 'INDETERMINATE';
+  readonly policyVersion: string;
+  readonly reasonCodes: readonly string[];
+  readonly competingNodeIds: readonly string[];
 }
 
 export interface ExecutionLocationResponse {
@@ -104,6 +112,8 @@ export interface ExecutionLocationResponse {
   readonly resultingTripVersion: number;
   readonly confirmationRecommended: boolean;
   readonly airportTriggerAttempted: boolean;
+  readonly evidence: ExecutionLocationEvidenceView;
+  readonly recorded: boolean;
 }
 
 export interface ExecutionMutationResponse {

@@ -48,7 +48,7 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
     await managed.close();
   });
 
-  it('[AUDIT NOTIFICATION PATHS] records separate risk and flight notifications for one refresh', async () => {
+  it('[REGRESSION F-12] retains separate facts with one active reminder for one flight observation', async () => {
     const fixture = await createFixture(managed);
     const initial = snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' });
     const delayed = snapshot({
@@ -120,6 +120,31 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         })
       ).map((notification) => notification.kind),
     ).toEqual(['EXECUTION_RISK', 'FLIGHT_IMPORTANT_CHANGE']);
+    const presentations = await managed.client.notificationEvent.findMany({
+      where: { ownerUserId: fixture.ownerUserId, presentationActive: true },
+    });
+    expect(presentations).toHaveLength(1);
+    expect(presentations[0]).toMatchObject({
+      kind: 'FLIGHT_IMPORTANT_CHANGE',
+      hasDownstreamImpact: true,
+      presentationGroupKey: `flight-observation:${adopted.binding.id}:2030-01-01T12:00:01.000Z`,
+    });
+    expect(presentations[0]!.body).toContain('后续已安排项目');
+    expect(
+      await managed.client.notificationEvent.count({
+        where: {
+          ownerUserId: fixture.ownerUserId,
+          kind: 'EXECUTION_RISK',
+          presentationActive: false,
+        },
+      }),
+    ).toBe(1);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { ownerUserId: fixture.ownerUserId, presentationActive: true },
+      }),
+    ).toBe(1);
     expect(
       await managed.client.job.count({
         where: {
@@ -130,6 +155,149 @@ describe('P5D3 flight monitoring with PostgreSQL', () => {
         },
       }),
     ).toBe(1);
+  });
+
+  it('[REGRESSION F-12] keeps a flight-only change visible without a downstream risk', async () => {
+    const fixture = await createFixture(managed);
+    await managed.client.transportEdge.deleteMany({
+      where: { tripId: fixture.tripId, id: { not: fixture.flightEdgeId } },
+    });
+    const monitoring = await createMonitoring(
+      managed,
+      fixture,
+      [
+        snapshot({
+          status: 'DELAYED',
+          fetchedAt: '2030-01-01T12:00:01.000Z',
+          revisedDeparture: '2030-01-02T13:00:00.000Z',
+          revisedArrival: '2030-01-02T15:00:00.000Z',
+        }),
+      ],
+      () => new Date('2030-01-01T12:00:00.000Z'),
+    );
+    const adopted = await monitoring.flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    const flightEdge = await managed.client.transportEdge.findUniqueOrThrow({
+      where: { id: fixture.flightEdgeId },
+      select: { fromNodeId: true },
+    });
+    await managed.client.temporalValue.create({
+      data: {
+        nodeId: flightEdge.fromNodeId,
+        layer: 'ACTUAL',
+        pointKind: 'ARRIVAL',
+        instant: new Date('2030-01-01T12:00:00.000Z'),
+        timeZone: 'UTC',
+        sourceKind: 'USER_VALUE',
+      },
+    });
+    await enableMonitoring(managed, fixture, adopted.binding.id);
+    await monitoring.service.ensureEligibleMonitoring();
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+
+    expect(
+      await managed.client.executionRisk.count({
+        where: { tripId: fixture.tripId, status: 'OPEN' },
+      }),
+    ).toBe(0);
+    const visible = await managed.client.notificationEvent.findMany({
+      where: { ownerUserId: fixture.ownerUserId, presentationActive: true },
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toMatchObject({
+      kind: 'FLIGHT_IMPORTANT_CHANGE',
+      hasDownstreamImpact: false,
+    });
+  });
+
+  it('[REGRESSION F-12] gives a later material observation a new active presentation', async () => {
+    const fixture = await createFixture(managed);
+    const monitoring = await createMonitoring(
+      managed,
+      fixture,
+      [
+        snapshot({
+          status: 'DELAYED',
+          fetchedAt: '2030-01-01T12:00:01.000Z',
+          revisedDeparture: '2030-01-02T13:00:00.000Z',
+          revisedArrival: '2030-01-02T15:00:00.000Z',
+        }),
+        snapshot({
+          status: 'DELAYED',
+          fetchedAt: '2030-01-01T13:00:01.000Z',
+          revisedDeparture: '2030-01-02T14:00:00.000Z',
+          revisedArrival: '2030-01-02T16:00:00.000Z',
+        }),
+      ],
+      () => new Date('2030-01-01T13:00:00.000Z'),
+    );
+    const adopted = await monitoring.flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
+    await monitoring.service.ensureEligibleMonitoring();
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+
+    const visible = await managed.client.notificationEvent.findMany({
+      where: { ownerUserId: fixture.ownerUserId, presentationActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(visible).toHaveLength(2);
+    expect(new Set(visible.map((item) => item.presentationGroupKey)).size).toBe(
+      2,
+    );
+    expect(
+      visible.every((item) => item.kind === 'FLIGHT_IMPORTANT_CHANGE'),
+    ).toBe(true);
+  });
+
+  it('[REGRESSION F-12] leaves a risk-only observation visible without inventing a flight alert', async () => {
+    const fixture = await createFixture(managed);
+    const monitoring = await createMonitoring(
+      managed,
+      fixture,
+      [
+        snapshot({
+          fetchedAt: '2030-01-01T12:00:01.000Z',
+          revisedArrival: '2030-01-02T14:20:00.000Z',
+        }),
+      ],
+      () => new Date('2030-01-01T12:00:00.000Z'),
+    );
+    const adopted = await monitoring.flightRepository.adopt({
+      ownerUserId: fixture.ownerUserId,
+      tripId: fixture.tripId,
+      baseTripVersion: 1,
+      transportEdgeId: fixture.flightEdgeId,
+      flight: snapshot({ fetchedAt: '2030-01-01T11:00:00.000Z' }),
+    });
+    if (adopted.status !== 'SUCCESS') throw new Error('adopt failed');
+    await enableMonitoring(managed, fixture, adopted.binding.id);
+    await monitoring.service.ensureEligibleMonitoring();
+    await monitoring.service.executeJob(adopted.binding.id, 1);
+
+    expect(
+      await managed.client.executionRisk.count({
+        where: { tripId: fixture.tripId, status: 'OPEN' },
+      }),
+    ).toBeGreaterThan(0);
+    const visible = await managed.client.notificationEvent.findMany({
+      where: { ownerUserId: fixture.ownerUserId, presentationActive: true },
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toMatchObject({ kind: 'EXECUTION_RISK' });
   });
 
   it('dedupes concurrent accepted refreshes into one notification generation', async () => {

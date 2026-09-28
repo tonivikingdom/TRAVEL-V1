@@ -40,6 +40,10 @@ export class ExecutionRiskService {
   async evaluateTripRisks(
     actor: Actor,
     tripId: string,
+    correlation?: {
+      readonly groupKey: string;
+      readonly sourceTransportEdgeId: string;
+    },
   ): Promise<ExecutionRiskEvaluationResponse> {
     requireUuid(tripId, 'tripId');
     authorize(actor, 'READ_PRIVATE_RESOURCE', {
@@ -62,6 +66,13 @@ export class ExecutionRiskService {
         basisTripVersion: trip.version,
         now: this.now(),
         desiredRisks,
+        ...(correlation === undefined
+          ? {}
+          : {
+              correlationGroupKey: correlation.groupKey,
+              correlationSourceTransportEdgeId:
+                correlation.sourceTransportEdgeId,
+            }),
       });
       if (result.status === 'NOT_FOUND') throw notFound();
       if (result.status === 'VERSION_CONFLICT') continue;

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AeroDataBoxFlightProvider,
   readFlightProviderConfig,
+  SyntheticFlightProvider,
   UnconfiguredFlightProvider,
 } from '../src/index.js';
 
@@ -178,6 +179,57 @@ describe('AeroDataBoxFlightProvider', () => {
 });
 
 describe('flight provider configuration', () => {
+  const fixture = {
+    FLIGHT_PROVIDER: 'synthetic',
+    SYNTHETIC_CI_ONLY: 'true',
+    SYNTHETIC_FLIGHT_SCHEDULED_UTC: '2030-01-02T12:00:00Z',
+    SYNTHETIC_FLIGHT_OBSERVED_AT: '2030-01-01T12:00:00Z',
+  };
+
+  it('permits synthetic flight data only with explicit development/test isolation', () => {
+    expect(() =>
+      readFlightProviderConfig({ ...fixture, APP_ENV: 'production' }),
+    ).toThrow(/restricted/u);
+    expect(() =>
+      readFlightProviderConfig({ ...fixture, APP_ENV: 'staging' }),
+    ).toThrow(/restricted/u);
+    expect(() =>
+      readFlightProviderConfig({
+        ...fixture,
+        APP_ENV: 'test',
+        SYNTHETIC_CI_ONLY: 'false',
+      }),
+    ).toThrow(/restricted/u);
+    expect(
+      readFlightProviderConfig({ ...fixture, APP_ENV: 'test' }),
+    ).toMatchObject({ provider: 'synthetic' });
+  });
+
+  it('provides stable synthetic observation identity across a retry', async () => {
+    const provider = new SyntheticFlightProvider({
+      scheduledUtc: '2030-01-02T12:00:00Z',
+      observedAt: '2030-01-01T12:00:00Z',
+      refreshMode: 'delayed',
+      failFirstRefresh: true,
+    });
+    const lookup = { flightNumber: 'SY53', date: '2030-01-02' };
+    const [selected] = await provider.search(lookup);
+    expect(selected).toMatchObject({
+      rawStatus: 'SYNTHETIC_CI_ONLY',
+      status: 'SCHEDULED',
+    });
+    await expect(provider.refresh(lookup)).rejects.toThrow(
+      'SYNTHETIC_FLIGHT_RETRY_INJECTION',
+    );
+    const [accepted] = await provider.refresh(lookup);
+    const [replayed] = await provider.refresh(lookup);
+    expect(accepted).toEqual(replayed);
+    expect(accepted).toMatchObject({
+      status: 'DELAYED',
+      departureDelayMinutes: 45,
+      departure: { revisedUtc: '2030-01-02T12:45:00.000Z' },
+    });
+  });
   it('prioritizes the AeroDataBox-specific key', () => {
     expect(
       readFlightProviderConfig({

@@ -305,12 +305,36 @@ export class PrismaFlightMonitoringRepository implements FlightMonitoringReposit
           replaceSchedule,
         );
       }
+      const groupedRisk =
+        decision.notification === null
+          ? null
+          : await transaction.notificationEvent.findFirst({
+              where: {
+                ownerUserId: binding.ownerUserId,
+                presentationGroupKey: input.correlationGroupKey,
+                kind: 'EXECUTION_RISK',
+                presentationActive: true,
+              },
+              select: { id: true },
+            });
+      if (groupedRisk !== null) {
+        await transaction.notificationEvent.updateMany({
+          where: {
+            ownerUserId: binding.ownerUserId,
+            presentationGroupKey: input.correlationGroupKey,
+            kind: 'EXECUTION_RISK',
+            presentationActive: true,
+          },
+          data: { presentationActive: false },
+        });
+      }
       return createNotification(transaction, {
         binding,
         notification: decision.notification,
-        hasDownstreamImpact: input.hasDownstreamImpact,
+        hasDownstreamImpact: input.hasDownstreamImpact || groupedRisk !== null,
         occurredAt: input.now,
         generation: `${current.generation}:${input.acceptedFetchedAt.toISOString()}`,
+        presentationGroupKey: input.correlationGroupKey,
       });
     });
   }
@@ -573,10 +597,59 @@ async function createNotification(
     readonly hasDownstreamImpact: boolean;
     readonly occurredAt: Date;
     readonly generation: string;
+    readonly presentationGroupKey?: string;
   },
 ): Promise<NotificationRecord | null> {
   if (input.notification === null) return null;
   const kind = 'FLIGHT_IMPORTANT_CHANGE';
+  const incomingSummary = input.hasDownstreamImpact
+    ? `${input.notification.summary}；可能影响后续已安排项目。`
+    : input.notification.summary;
+  if (input.presentationGroupKey !== undefined) {
+    const prior = await transaction.notificationEvent.findFirst({
+      where: {
+        ownerUserId: input.binding.ownerUserId,
+        presentationGroupKey: input.presentationGroupKey,
+        presentationActive: true,
+        kind,
+      },
+    });
+    if (prior !== null) {
+      const priorKinds = Array.isArray(prior.changeKinds)
+        ? prior.changeKinds.filter(
+            (value): value is string => typeof value === 'string',
+          )
+        : [];
+      const changeKinds = [
+        ...new Set([...priorKinds, ...input.notification.changeKinds]),
+      ];
+      const summary = [
+        ...new Set(
+          [prior.summary, incomingSummary].filter(
+            (value): value is string => value !== null,
+          ),
+        ),
+      ]
+        .join('；')
+        .slice(0, 500);
+      const priority =
+        prior.priority === 'STRONG' || input.notification.priority === 'STRONG'
+          ? 'STRONG'
+          : 'NORMAL';
+      return transaction.notificationEvent.update({
+        where: { id: prior.id },
+        data: {
+          changeKinds,
+          summary,
+          body: summary,
+          priority,
+          title: priority === 'STRONG' ? '航班重要状态变化' : '航班状态更新',
+          hasDownstreamImpact:
+            prior.hasDownstreamImpact || input.hasDownstreamImpact,
+        },
+      });
+    }
+  }
   const dedupeKey = [
     'flight-monitor',
     input.binding.id,
@@ -601,13 +674,14 @@ async function createNotification(
         input.notification.priority === 'STRONG'
           ? '航班重要状态变化'
           : '航班状态更新',
-      body: input.notification.summary,
+      body: incomingSummary,
       priority: input.notification.priority,
-      summary: input.notification.summary,
+      summary: incomingSummary,
       changeKinds: input.notification
         .changeKinds as unknown as Prisma.InputJsonValue,
       hasDownstreamImpact: input.hasDownstreamImpact,
       occurredAt: input.occurredAt,
+      presentationGroupKey: input.presentationGroupKey ?? null,
     },
     update: {},
   });

@@ -13,6 +13,7 @@ import {
   DEFAULT_EXECUTION_LOCATION_POLICY,
   resolveExecutionFrontier,
   type ExecutionLocationPolicy,
+  type ExecutionDecisionEvidence,
   type ExecutionTargetKind,
   type ExecutionTimelineNode,
 } from '@travel/domain';
@@ -74,6 +75,12 @@ export class ExecutionLocationService {
       longitude: coordinate(input.longitude, 'longitude', -180, 180),
       accuracyMeters: positiveFinite(input.accuracyMeters, 'accuracyMeters'),
       observedAt: parseAbsoluteInstantInput(input.observedAt, 'observedAt'),
+      ...(input.speedMetersPerSecond === undefined
+        ? {}
+        : { speedMetersPerSecond: input.speedMetersPerSecond }),
+      ...(input.headingDegrees === undefined
+        ? {}
+        : { headingDegrees: input.headingDegrees }),
     };
     validateOptionalMotion(input);
     validateObservedAt(sample.observedAt, this.now(), this.policy, true);
@@ -126,6 +133,12 @@ export class ExecutionLocationService {
           'NO_CHANGE',
           null,
           airportTriggerAttempted,
+          {
+            reliability: 'INDETERMINATE',
+            policyVersion: this.policy.version,
+            reasonCodes: ['DUPLICATE_OBSERVATION'],
+            competingNodeIds: [],
+          },
         );
       }
       const decision = decideExecutionLocation({
@@ -160,6 +173,7 @@ export class ExecutionLocationService {
         autoRecordEnabled ? decision.status : detectedStatus(decision.status),
         success.event,
         airportTriggerAttempted,
+        decision.evidence,
       );
     }
     throw new ApplicationError(
@@ -419,6 +433,7 @@ export class ExecutionLocationService {
     status: ExecutionLocationResponse['status'],
     event: ExecutionEventRecord | null,
     airportTriggerAttempted: boolean,
+    evidence: ExecutionDecisionEvidence,
   ): Promise<ExecutionLocationResponse> {
     const confirmationRecommended =
       (status === 'INDETERMINATE_LOCATION' ||
@@ -431,6 +446,8 @@ export class ExecutionLocationService {
       resultingTripVersion: context.tripVersion,
       confirmationRecommended,
       airportTriggerAttempted,
+      evidence,
+      recorded: event !== null,
     };
   }
 }
@@ -588,6 +605,7 @@ function toEventView(record: ExecutionEventRecord): ExecutionEventView {
     occurredAt: record.occurredAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
     undoneAt: record.undoneAt?.toISOString() ?? null,
+    evidence: record.evidence,
   };
 }
 

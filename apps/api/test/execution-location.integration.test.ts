@@ -135,8 +135,30 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     expect(response.json<ExecutionLocationResponse>()).toMatchObject({
       status: 'CONFIRMED_ARRIVAL',
       resultingTripVersion: 2,
-      event: { nodeId: fixture.nodeAId, source: 'LOCATION' },
+      recorded: true,
+      evidence: {
+        reliability: 'SUFFICIENT',
+        policyVersion: 'execution-location-v2',
+      },
+      event: {
+        nodeId: fixture.nodeAId,
+        source: 'LOCATION',
+        evidence: {
+          reliability: 'SUFFICIENT',
+          policyVersion: 'execution-location-v2',
+        },
+      },
     });
+    const event = await managed.client.executionEvent.findFirstOrThrow({
+      where: { tripId: fixture.tripId, source: 'LOCATION' },
+    });
+    expect(event.evidenceReliability).toBe('SUFFICIENT');
+    expect(event.evidenceReasonCodes).toEqual([
+      'ACCURACY_SUFFICIENT',
+      'TARGET_UNIQUE',
+      'WITHIN_ARRIVAL_RADIUS',
+    ]);
+    expect(JSON.stringify(event)).not.toMatch(/"latitude"|"longitude"/u);
     const value = await managed.client.temporalValue.findFirstOrThrow({
       where: {
         nodeId: fixture.nodeAId,
@@ -159,6 +181,166 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
         AND column_name IN ('latitude', 'longitude', 'accuracyMeters', 'speed', 'heading')
     `;
     expect(columns).toEqual([]);
+  });
+
+  it('[REGRESSION F-04] treats overlapping unresolved visits as weak without persisting a fact', async () => {
+    const later = await managed.client.itineraryNode.findUniqueOrThrow({
+      where: { id: fixture.nodeBId },
+      select: { placeId: true },
+    });
+    await managed.client.place.update({
+      where: { id: later.placeId! },
+      data: { latitude: 35.0001, longitude: 139.0001 },
+    });
+    const response = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    expect(response.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      recorded: false,
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['ACCURACY_SUFFICIENT', 'MULTIPLE_CANDIDATES'],
+        competingNodeIds: [fixture.nodeAId, fixture.nodeBId],
+      },
+    });
+    expect(
+      await managed.client.executionEvent.count({
+        where: { tripId: fixture.tripId },
+      }),
+    ).toBe(0);
+    expect(await tripVersion()).toBe(1);
+  });
+
+  it('[REGRESSION F-04/F-13] never opens an overlapping later node while A arrival is open', async () => {
+    expect(
+      (
+        await observe(owner, {
+          latitude: 35,
+          longitude: 139,
+          accuracyMeters: 10,
+          observedAt: '2030-01-01T10:00:00.000Z',
+        })
+      ).json<ExecutionLocationResponse>().status,
+    ).toBe('CONFIRMED_ARRIVAL');
+    const later = await managed.client.itineraryNode.findUniqueOrThrow({
+      where: { id: fixture.nodeBId },
+      select: { placeId: true },
+    });
+    await managed.client.place.update({
+      where: { id: later.placeId! },
+      data: { latitude: 35.0001, longitude: 139.0001 },
+    });
+    const result = await observe(owner, {
+      latitude: 35,
+      longitude: 139,
+      accuracyMeters: 10,
+      observedAt: '2030-01-01T10:01:00.000Z',
+    });
+    expect(result.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      recorded: false,
+      resultingTripVersion: 2,
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['CURRENT_NODE_OPEN', 'MULTIPLE_CANDIDATES'],
+        competingNodeIds: [fixture.nodeAId, fixture.nodeBId],
+      },
+    });
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          nodeId: fixture.nodeBId,
+          pointKind: 'ARRIVAL',
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(0);
+    expect(await tripVersion()).toBe(2);
+    expect(
+      (await getExecution(owner)).json<ExecutionContextResponse>(),
+    ).toMatchObject({
+      currentState: 'AT_NODE',
+      currentNodeId: fixture.nodeAId,
+      targetNodeId: fixture.nodeBId,
+      frontierConflict: null,
+    });
+  });
+
+  it('[REGRESSION F-04/F-13] records A departure before the next observation can record B arrival', async () => {
+    const sampleAt = (latitude: number, longitude: number, minute: number) =>
+      observe(owner, {
+        latitude,
+        longitude,
+        accuracyMeters: 10,
+        observedAt: `2030-01-01T10:0${minute}:00.000Z`,
+      });
+    expect(
+      (await sampleAt(35, 139, 0)).json<ExecutionLocationResponse>().status,
+    ).toBe('CONFIRMED_ARRIVAL');
+    const first = (
+      await sampleAt(35.002, 139.002, 1)
+    ).json<ExecutionLocationResponse>();
+    expect(first).toMatchObject({
+      status: 'NO_CHANGE',
+      recorded: false,
+      resultingTripVersion: 2,
+    });
+    const second = (
+      await sampleAt(35.004, 139.004, 2)
+    ).json<ExecutionLocationResponse>();
+    expect(second).toMatchObject({
+      status: 'CONFIRMED_DEPARTURE',
+      recorded: true,
+      resultingTripVersion: 3,
+    });
+    expect(second.event?.nodeId).toBe(fixture.nodeAId);
+    expect(
+      (await getExecution(owner)).json<ExecutionContextResponse>()
+        .frontierConflict,
+    ).toBeNull();
+    const third = (
+      await sampleAt(35.01, 139.01, 3)
+    ).json<ExecutionLocationResponse>();
+    expect(third).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      recorded: true,
+      resultingTripVersion: 4,
+    });
+    expect(third.event?.nodeId).toBe(fixture.nodeBId);
+    expect(
+      (await getExecution(owner)).json<ExecutionContextResponse>()
+        .frontierConflict,
+    ).toBeNull();
+    expect(await tripVersion()).toBe(4);
+  });
+
+  it('[REGRESSION F-04] keeps fast directed pass-through evidence out of ACTUAL', async () => {
+    const response = await observe(owner, {
+      latitude: 35.0002,
+      longitude: 139,
+      accuracyMeters: 10,
+      speedMetersPerSecond: 15,
+      headingDegrees: 0,
+      observedAt: '2030-01-01T10:00:00.000Z',
+    });
+    expect(response.json<ExecutionLocationResponse>()).toMatchObject({
+      status: 'NO_CHANGE',
+      recorded: false,
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['ACCURACY_SUFFICIENT', 'MOTION_CONTRADICTS_ARRIVAL'],
+      },
+    });
+    expect(
+      await managed.client.executionEvent.count({
+        where: { tripId: fixture.tripId },
+      }),
+    ).toBe(0);
+    expect(await tripVersion()).toBe(1);
   });
 
   it('does not bump Trip version for low-accuracy or duplicate observations', async () => {
@@ -879,10 +1061,6 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       where: { id: fixture.nodeBId },
       select: { placeId: true },
     });
-    await managed.client.place.update({
-      where: { id: nodeB.placeId! },
-      data: { latitude: 35.0005, longitude: 139.0005 },
-    });
     const first = await observe(owner, {
       latitude: 35,
       longitude: 139,
@@ -890,6 +1068,11 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       observedAt: '2030-01-01T10:00:00.000Z',
     });
     const firstBody = first.json<ExecutionLocationResponse>();
+    expect(firstBody.status).toBe('CONFIRMED_ARRIVAL');
+    await managed.client.place.update({
+      where: { id: nodeB.placeId! },
+      data: { latitude: 35.0005, longitude: 139.0005 },
+    });
     await app.inject({
       method: 'POST',
       url: `/trips/${fixture.tripId}/execution/events/${firstBody.event!.id}/undo`,
@@ -1442,6 +1625,11 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
     expect(response.json<ExecutionLocationResponse>()).toMatchObject({
       status: 'ARRIVAL_DETECTED',
       event: null,
+      recorded: false,
+      evidence: {
+        reliability: 'SUFFICIENT',
+        policyVersion: 'execution-location-v2',
+      },
       resultingTripVersion: 1,
       airportTriggerAttempted: false,
     });

@@ -48,6 +48,7 @@ export class PrismaNotificationRepository implements NotificationRepository {
     return this.client.notificationEvent.findMany({
       where: {
         ownerUserId: input.ownerUserId,
+        presentationActive: true,
         ...(input.before === undefined
           ? {}
           : {
@@ -75,12 +76,17 @@ export class PrismaNotificationRepository implements NotificationRepository {
         where: {
           id: input.notificationId,
           ownerUserId: input.ownerUserId,
+          presentationActive: true,
           dismissedAt: null,
         },
         data: { dismissedAt: input.now },
       });
       return transaction.notificationEvent.findFirst({
-        where: { id: input.notificationId, ownerUserId: input.ownerUserId },
+        where: {
+          id: input.notificationId,
+          ownerUserId: input.ownerUserId,
+          presentationActive: true,
+        },
       });
     });
   }
@@ -95,12 +101,17 @@ export class PrismaNotificationRepository implements NotificationRepository {
         where: {
           id: input.notificationId,
           ownerUserId: input.ownerUserId,
+          presentationActive: true,
           viewedAt: null,
         },
         data: { viewedAt: input.now },
       });
       return transaction.notificationEvent.findFirst({
-        where: { id: input.notificationId, ownerUserId: input.ownerUserId },
+        where: {
+          id: input.notificationId,
+          ownerUserId: input.ownerUserId,
+          presentationActive: true,
+        },
       });
     });
   }

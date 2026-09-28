@@ -82,11 +82,19 @@ jobs:
           OBJECT_MAX_USER_TOTAL_BYTES=4194304
           OBJECT_ALLOWED_MEDIA_TYPES=application/pdf,image/jpeg,image/png,text/plain
           ROUTE_PROVIDER=synthetic
+          APP_ENV=test
+          FLIGHT_PROVIDER=synthetic
+          SYNTHETIC_CI_ONLY=true
+          SYNTHETIC_FLIGHT_API_REFRESH_MODE=baseline
+          SYNTHETIC_FLIGHT_WORKER_REFRESH_MODE=delayed
+          SYNTHETIC_FLIGHT_WORKER_FAIL_FIRST=true
           ROUTE_UNDO_WINDOW_SECONDS=600
           WORKER_SHUTDOWN_TIMEOUT_MS=5000
           WORKER_HEARTBEAT_INTERVAL_MS=1000
           WORKER_HEARTBEAT_MAX_AGE_MS=3000
           EOF
+          echo "SYNTHETIC_FLIGHT_SCHEDULED_UTC=$(date -u -d '+23 hours' +%Y-%m-%dT%H:%M:%SZ)" >> "$RUNNER_TEMP/travel-v1-compose.env"
+          echo "SYNTHETIC_FLIGHT_OBSERVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$RUNNER_TEMP/travel-v1-compose.env"
       - name: Build and verify Compose services
         run: node scripts/verify-compose.mjs --env-file "$RUNNER_TEMP/travel-v1-compose.env"
 

@@ -9,6 +9,7 @@ export async function verifyExecutionChain({
   databaseUser,
   databaseName,
   scheduledUtc,
+  providerSecretSentinel,
 }) {
   const email = 'synthetic-compose-execution@synthetic.example.test';
   const request = async (credential, path, method = 'GET', body) => {
@@ -72,6 +73,7 @@ export async function verifyExecutionChain({
           )?.[1];
     return token !== undefined;
   });
+  const magicLinkToken = token;
   const session = await request(null, '/auth/magic-link/consume', 'POST', {
     token,
   });
@@ -217,8 +219,8 @@ export async function verifyExecutionChain({
     throw new Error('F-09 ADMIN crossed owner boundary');
 
   const observation = {
-    latitude: 35.5494,
-    longitude: 139.7798,
+    latitude: 35.54940127,
+    longitude: 139.77980131,
     accuracyMeters: 10,
     observedAt: new Date().toISOString(),
   };
@@ -353,7 +355,23 @@ export async function verifyExecutionChain({
   );
   if (rawEvidence !== '0')
     throw new Error('F-09 raw coordinates persisted in evidence schema');
+  const serviceLogs = await composeQuiet('logs', '--no-color', 'api', 'worker');
+  const forbiddenLogValues = [
+    ['bearer', credential],
+    ['magic-link', magicLinkToken],
+    ['provider', providerSecretSentinel],
+    ['location', String(observation.latitude)],
+    ['location', String(observation.longitude)],
+  ];
+  for (const [kind, secret] of forbiddenLogValues) {
+    if (typeof secret !== 'string' || secret.length === 0)
+      throw new Error(`SECRET_REDACTION_SETUP_FAILED: ${kind}`);
+    if (serviceLogs.includes(secret))
+      throw new Error(`SECRET_REDACTION_FAILED: ${kind}`);
+  }
+  if (/authorization["':\s]+Bearer\s+\S+/iu.test(serviceLogs))
+    throw new Error('SECRET_REDACTION_FAILED: bearer');
   process.stdout.write(
-    'F-09 full chain passed: HTTP owner, PostgreSQL evidence/ACTUAL/risk, durable Worker retry, synthetic flight observation, one active reminder, replay isolation.\n',
+    'F-09 full chain passed: HTTP owner, PostgreSQL evidence/ACTUAL/risk, durable Worker retry, synthetic flight observation, one active reminder, replay isolation, API/Worker log redaction.\n',
   );
 }

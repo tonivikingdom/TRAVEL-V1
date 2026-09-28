@@ -91,6 +91,7 @@ export type ExecutionEvidenceReasonCode =
   | 'ACCURACY_SUFFICIENT'
   | 'ACCURACY_INSUFFICIENT'
   | 'MULTIPLE_CANDIDATES'
+  | 'CURRENT_NODE_OPEN'
   | 'SUPPRESSION_ACTIVE'
   | 'MOTION_CONTRADICTS_ARRIVAL'
   | 'TARGET_COORDINATES_UNAVAILABLE'
@@ -282,6 +283,91 @@ export function decideExecutionLocation(input: {
     targetDistance >
     arrivalRadius(target.targetKind, input.policy) +
       input.policy.exitHysteresisMeters;
+  const current = frontier.currentNode;
+  // An open ARRIVAL is a causal barrier. Location may establish its DEPARTURE
+  // first, but may not create a later ARRIVAL in the same decision.
+  if (current !== null) {
+    if (!hasCoordinates(current)) {
+      return {
+        status: 'NO_CHANGE',
+        state: { ...baseState, lastDistanceToNextTargetMeters: targetDistance },
+        releasedArrivalSuppressionNodeIds:
+          targetSuppressed && outsideSuppressedTarget ? [target.id] : [],
+        evidence: evidence('INDETERMINATE', ['CURRENT_NODE_OPEN']),
+      };
+    }
+    const currentDistance = haversineDistanceMeters(input.sample, current);
+    const outside =
+      currentDistance >
+      arrivalRadius(current.targetKind, input.policy) +
+        input.policy.exitHysteresisMeters;
+    const sameFrontier =
+      input.previousState?.currentNodeId === current.id &&
+      input.previousState.targetNodeId === target.id;
+    const movementTowardNext =
+      sameFrontier &&
+      input.previousState.lastDistanceToCurrentTargetMeters !== null &&
+      input.previousState.lastDistanceToNextTargetMeters !== null &&
+      currentDistance > input.previousState.lastDistanceToCurrentTargetMeters &&
+      targetDistance < input.previousState.lastDistanceToNextTargetMeters;
+    const outsideCount = outside
+      ? sameFrontier
+        ? (input.previousState?.outsideTargetConsecutiveCount ?? 0) + 1
+        : 1
+      : 0;
+    const state = {
+      ...baseState,
+      lastDistanceToCurrentTargetMeters: currentDistance,
+      lastDistanceToNextTargetMeters: targetDistance,
+      outsideTargetConsecutiveCount: outsideCount,
+    };
+    const releasedArrivalSuppressionNodeIds =
+      targetSuppressed && outsideSuppressedTarget ? [target.id] : [];
+    if (
+      outside &&
+      movementTowardNext &&
+      outsideCount >= input.policy.minimumDepartureSamples
+    ) {
+      return {
+        status: 'CONFIRMED_DEPARTURE',
+        nodeId: current.id,
+        state,
+        releasedArrivalSuppressionNodeIds,
+        evidence: evidence('SUFFICIENT', [
+          'ACCURACY_SUFFICIENT',
+          'DEPARTURE_EVIDENCE_SUFFICIENT',
+        ]),
+      };
+    }
+    const overlappingLaterNodes = outside
+      ? []
+      : frontier.orderedNodes
+          .slice(
+            frontier.orderedNodes.findIndex((node) => node.id === target.id),
+          )
+          .filter(
+            (node) =>
+              node.executionStatus !== 'SKIPPED' &&
+              !node.hasActualArrival &&
+              !suppressedArrivalNodeIds.has(node.id) &&
+              hasCoordinates(node) &&
+              haversineDistanceMeters(input.sample, node) <=
+                arrivalRadius(node.targetKind, input.policy),
+          );
+    return {
+      status: 'NO_CHANGE',
+      state,
+      releasedArrivalSuppressionNodeIds,
+      evidence:
+        overlappingLaterNodes.length > 0
+          ? evidence(
+              'WEAK',
+              ['CURRENT_NODE_OPEN', 'MULTIPLE_CANDIDATES'],
+              [current.id, ...overlappingLaterNodes.map((node) => node.id)],
+            )
+          : evidence('INDETERMINATE', ['CURRENT_NODE_OPEN']),
+    };
+  }
   // A later arrival cannot by itself prove that the user has left a node whose
   // automatic arrival they explicitly corrected. This is important when place
   // radii overlap: preserve the correction until the sample is outside that
@@ -387,62 +473,12 @@ export function decideExecutionLocation(input: {
     };
   }
 
-  const current = frontier.currentNode;
-  if (current === null || !hasCoordinates(current)) {
-    return {
-      status: 'NO_CHANGE',
-      releasedArrivalSuppressionNodeIds: [],
-      evidence: evidence('INDETERMINATE', ['TARGET_OUTSIDE_RADIUS']),
-      state: {
-        ...baseState,
-        lastDistanceToNextTargetMeters: targetDistance,
-      },
-    };
-  }
-  const currentDistance = haversineDistanceMeters(input.sample, current);
-  const outside =
-    currentDistance >
-    arrivalRadius(current.targetKind, input.policy) +
-      input.policy.exitHysteresisMeters;
-  const sameFrontier =
-    input.previousState?.currentNodeId === current.id &&
-    input.previousState.targetNodeId === target.id;
-  const movementTowardNext =
-    sameFrontier &&
-    input.previousState.lastDistanceToCurrentTargetMeters !== null &&
-    input.previousState.lastDistanceToNextTargetMeters !== null &&
-    currentDistance > input.previousState.lastDistanceToCurrentTargetMeters &&
-    targetDistance < input.previousState.lastDistanceToNextTargetMeters;
-  const outsideCount = outside
-    ? sameFrontier
-      ? (input.previousState?.outsideTargetConsecutiveCount ?? 0) + 1
-      : 1
-    : 0;
-  const state = {
-    ...baseState,
-    lastDistanceToCurrentTargetMeters: currentDistance,
-    lastDistanceToNextTargetMeters: targetDistance,
-    outsideTargetConsecutiveCount: outsideCount,
-  };
-  if (
-    outside &&
-    movementTowardNext &&
-    outsideCount >= input.policy.minimumDepartureSamples
-  ) {
-    return {
-      status: 'CONFIRMED_DEPARTURE',
-      nodeId: current.id,
-      state,
-      releasedArrivalSuppressionNodeIds: [],
-      evidence: evidence('SUFFICIENT', [
-        'ACCURACY_SUFFICIENT',
-        'DEPARTURE_EVIDENCE_SUFFICIENT',
-      ]),
-    };
-  }
   return {
     status: 'NO_CHANGE',
-    state,
+    state: {
+      ...baseState,
+      lastDistanceToNextTargetMeters: targetDistance,
+    },
     releasedArrivalSuppressionNodeIds: [],
     evidence: evidence('INDETERMINATE', ['TARGET_OUTSIDE_RADIUS']),
   };

@@ -246,6 +246,70 @@ describe('execution location policy', () => {
     });
   });
 
+  it('[REGRESSION F-04/F-13] does not open an overlapping next node before current departure', () => {
+    const arrivedA = { ...a, hasActualArrival: true };
+    const overlappingB = node('overlapping-b', 0, 1, 35.0001, 139.0001);
+    const result = decideExecutionLocation({
+      nodes: [arrivedA, overlappingB],
+      previousState: null,
+      sample: sample(35, 139),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(result).toMatchObject({
+      status: 'NO_CHANGE',
+      evidence: {
+        reliability: 'WEAK',
+        reasonCodes: ['CURRENT_NODE_OPEN', 'MULTIPLE_CANDIDATES'],
+        competingNodeIds: ['a', 'overlapping-b'],
+      },
+    });
+    expect(resolveExecutionFrontier([arrivedA, overlappingB]).state).not.toBe(
+      'INCONSISTENT',
+    );
+  });
+
+  it('[REGRESSION F-04/F-13] confirms departure before a later arrival', () => {
+    const arrivedA = { ...a, hasActualArrival: true };
+    const distantB = node('distant-b', 0, 1, 35.01, 139.01);
+    const first = decideExecutionLocation({
+      nodes: [arrivedA, distantB],
+      previousState: null,
+      sample: sample(35.002, 139.002),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(first.status).toBe('NO_CHANGE');
+    const second = decideExecutionLocation({
+      nodes: [arrivedA, distantB],
+      previousState: first.state,
+      sample: sample(35.004, 139.004),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(second).toMatchObject({
+      status: 'CONFIRMED_DEPARTURE',
+      nodeId: 'a',
+    });
+    const departedA = { ...arrivedA, hasActualDeparture: true };
+    expect(resolveExecutionFrontier([departedA, distantB]).state).not.toBe(
+      'INCONSISTENT',
+    );
+    const third = decideExecutionLocation({
+      nodes: [departedA, distantB],
+      previousState: second.state,
+      sample: sample(35.01, 139.01),
+      policy: DEFAULT_EXECUTION_LOCATION_POLICY,
+    });
+    expect(third).toMatchObject({
+      status: 'CONFIRMED_ARRIVAL',
+      nodeId: 'distant-b',
+    });
+    expect(
+      resolveExecutionFrontier([
+        { ...departedA },
+        { ...distantB, hasActualArrival: true },
+      ]).state,
+    ).not.toBe('INCONSISTENT');
+  });
+
   it('does not confirm departure for a single jump or movement away from next target', () => {
     const arrivedA = { ...a, hasActualArrival: true };
     const distantB = node('b', 0, 1, 35.01, 139.01);

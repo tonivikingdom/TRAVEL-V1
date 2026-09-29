@@ -123,4 +123,37 @@ describe('synthetic ground transit provider safety', () => {
       status: 'UNAVAILABLE',
     });
   });
+
+  it('provides normalized cancellation, short-turn and correction fixtures without a paid provider', async () => {
+    const outcomes = await Promise.all(
+      (['CANCEL_FIXED', 'SHORT_TURN', 'RECOVERY'] as const).map(
+        async (scenario) =>
+          new SyntheticGroundTransitProvider(
+            scenario,
+            () => now,
+          ).fetchObservation({ leg }),
+      ),
+    );
+    expect(outcomes[0]).toMatchObject({
+      status: 'SUCCESS',
+      observation: {
+        serviceStatus: 'CANCELLED',
+        serviceIdentityKey: 'synthetic:service-1',
+      },
+    });
+    expect(outcomes[1]).toMatchObject({
+      status: 'SUCCESS',
+      observation: {
+        alightingTargetServiceability: 'NOT_SERVED',
+        currentTerminusRef: 'synthetic:short-terminus',
+      },
+    });
+    expect(outcomes[2]).toMatchObject({
+      status: 'SUCCESS',
+      observation: {
+        serviceStatus: 'ON_TIME',
+        alightingTargetServiceability: 'SERVED',
+      },
+    });
+  });
 });

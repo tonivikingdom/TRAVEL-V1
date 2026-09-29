@@ -7,6 +7,13 @@ import type { GroundTransitObservation } from '@travel/domain';
 export type SyntheticGroundTransitScenario =
   | 'ON_TIME'
   | 'FIXED_DELAY'
+  | 'MATERIAL_DELAY'
+  | 'EARLY_DEPARTURE'
+  | 'PLATFORM_CHANGE'
+  | 'CANCEL_FIXED'
+  | 'SHORT_TURN'
+  | 'RECOVERY'
+  | 'FAIL_FIRST_THEN_CANCEL_FIXED'
   | 'ACTUAL_DEPARTURE'
   | 'IDENTITY_MISMATCH'
   | 'HIGH_FREQUENCY_3_TO_5'
@@ -34,7 +41,11 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
   ): Promise<GroundTransitProviderResult> {
     if (input.signal?.aborted) return { status: 'UNAVAILABLE' };
     this.calls += 1;
-    if (this.scenario === 'FAIL_FIRST' && this.calls === 1) {
+    if (
+      (this.scenario === 'FAIL_FIRST' ||
+        this.scenario === 'FAIL_FIRST_THEN_CANCEL_FIXED') &&
+      this.calls === 1
+    ) {
       return { status: 'UNAVAILABLE' };
     }
     const baseline = input.leg.baseline;
@@ -52,7 +63,14 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
       this.scenario === 'STALE'
         ? new Date(this.now().getTime() - 10 * 60_000)
         : this.now();
-    const delayMs = this.scenario === 'FIXED_DELAY' ? 10 * 60_000 : 0;
+    const delayMs =
+      this.scenario === 'FIXED_DELAY'
+        ? 10 * 60_000
+        : this.scenario === 'MATERIAL_DELAY'
+          ? 25 * 60_000
+          : this.scenario === 'EARLY_DEPARTURE'
+            ? -7 * 60_000
+            : 0;
     const delayed = (value: Date | null) =>
       value === null ? null : new Date(value.getTime() + delayMs);
     const observation: GroundTransitObservation = {
@@ -74,19 +92,40 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
       scheduledDeparture: baseline.plannedDeparture,
       scheduledArrival: baseline.plannedArrival,
       estimatedDeparture:
-        this.scenario === 'FIXED_DELAY'
-          ? delayed(baseline.plannedDeparture)
-          : null,
-      estimatedArrival:
-        this.scenario === 'FIXED_DELAY'
-          ? delayed(baseline.plannedArrival)
-          : null,
+        delayMs !== 0 ? delayed(baseline.plannedDeparture) : null,
+      estimatedArrival: delayMs > 0 ? delayed(baseline.plannedArrival) : null,
       actualDeparture:
         this.scenario === 'ACTUAL_DEPARTURE' ? baseline.plannedDeparture : null,
       actualArrival: null,
-      departurePlatform: null,
+      departurePlatform:
+        this.scenario === 'PLATFORM_CHANGE'
+          ? this.calls === 1
+            ? '2'
+            : '5'
+          : null,
       arrivalPlatform: null,
-      serviceStatus: this.scenario === 'FIXED_DELAY' ? 'DELAYED' : 'ON_TIME',
+      serviceStatus:
+        (this.scenario === 'CANCEL_FIXED' ||
+          this.scenario === 'FAIL_FIRST_THEN_CANCEL_FIXED') &&
+        baseline.serviceClass === 'FIXED_SERVICE'
+          ? 'CANCELLED'
+          : delayMs > 0
+            ? 'DELAYED'
+            : 'ON_TIME',
+      boardingTargetServiceability: 'SERVED',
+      alightingTargetServiceability:
+        this.scenario === 'SHORT_TURN' ? 'NOT_SERVED' : 'SERVED',
+      currentTerminusRef:
+        this.scenario === 'SHORT_TURN'
+          ? 'synthetic:short-terminus'
+          : baseline.alightingHubRef,
+      currentTerminusLabel:
+        this.scenario === 'SHORT_TURN' ? 'Synthetic short terminus' : null,
+      operatingFromHubRef: baseline.boardingHubRef,
+      operatingToHubRef:
+        this.scenario === 'SHORT_TURN'
+          ? 'synthetic:short-terminus'
+          : baseline.alightingHubRef,
       headwayMinSeconds:
         this.scenario === 'HIGH_FREQUENCY_3_TO_5'
           ? 180
@@ -129,6 +168,13 @@ export function createGroundTransitProvider(
   const scenarios: readonly SyntheticGroundTransitScenario[] = [
     'ON_TIME',
     'FIXED_DELAY',
+    'MATERIAL_DELAY',
+    'EARLY_DEPARTURE',
+    'PLATFORM_CHANGE',
+    'CANCEL_FIXED',
+    'SHORT_TURN',
+    'RECOVERY',
+    'FAIL_FIRST_THEN_CANCEL_FIXED',
     'ACTUAL_DEPARTURE',
     'IDENTITY_MISMATCH',
     'HIGH_FREQUENCY_3_TO_5',

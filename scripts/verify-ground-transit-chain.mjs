@@ -7,6 +7,7 @@ export async function verifyGroundTransitChain({
   waitFor,
   databaseUser,
   databaseName,
+  expectOperationalDisruption = false,
 }) {
   const sql = async (query) =>
     (
@@ -168,6 +169,67 @@ export async function verifyGroundTransitChain({
     throw new Error(
       'P5E2 worker failed to record both normalized observations',
     );
+  if (expectOperationalDisruption) {
+    const fixed = afterWorker.legs.find(
+      (leg) => leg.serviceClass === 'FIXED_SERVICE',
+    );
+    if (
+      fixed?.state !== 'NO_LONGER_FEASIBLE' ||
+      fixed.operational.disposition !== 'CURRENT_PLAN_NO_LONGER_FEASIBLE' ||
+      fixed.operational.requiredAction !== 'ROUTE_REEVALUATION_REQUIRED' ||
+      !fixed.operational.changeKinds.includes('SERVICE_CANCELLED')
+    ) {
+      throw new Error(
+        'P5E2 Batch 2 cancellation did not invalidate the adopted fixed service',
+      );
+    }
+    const activePresentations = await sql(
+      `SELECT count(*) FROM "NotificationEvent" WHERE "tripId"='${trip.id}' AND "presentationGroupKey" LIKE 'ground-transit-observation:${fixed.id}:%' AND "presentationActive"=TRUE AND "priority"='STRONG' AND "changeKinds" ? 'SERVICE_CANCELLED';`,
+    );
+    if (activePresentations !== '1')
+      throw new Error(
+        `P5E2 disruption did not aggregate into one STRONG presentation (${activePresentations})`,
+      );
+    const stableTopology = await sql(
+      `SELECT (SELECT count(*) FROM "AdoptedRoute" WHERE "id"='${adopted.operationReceipt.adoptedRouteId}' AND "status"='ACTIVE') || ':' || (SELECT count(*) FROM "TransportEdge" WHERE "id"='${fixed.transportEdgeId}') || ':' || (SELECT count(*) FROM "RoutePreview" WHERE "tripId"='${trip.id}');`,
+    );
+    if (stableTopology !== '1:1:1')
+      throw new Error(
+        `P5E2 disruption changed the formal route topology (${stableTopology})`,
+      );
+    const replay = await apiJson(
+      `/trips/${trip.id}/execution/ground-transit/${fixed.transportEdgeId}/refresh`,
+      'POST',
+      {},
+    );
+    if (
+      replay.status !== 'APPLIED' ||
+      replay.leg.operational.disposition !== 'CONTINUE_CURRENT_PLAN' ||
+      !replay.leg.operational.changeKinds.includes('SERVICE_RESTORED')
+    )
+      throw new Error(
+        'P5E2 trusted correction did not restore current assessment',
+      );
+    const residualRisk = await sql(
+      `SELECT count(*) FROM "ExecutionRisk" WHERE "tripId"='${trip.id}' AND "sourceTransportEdgeId"='${fixed.transportEdgeId}' AND "status"='OPEN' AND "fingerprint" IN (SELECT "fingerprint" FROM "ExecutionRisk" WHERE "tripId"='${trip.id}' AND "kind"='PROTECTED_TIME_INFEASIBLE');`,
+    );
+    if (residualRisk !== '0')
+      throw new Error(
+        'P5E2 service recovery left the cancellation risk active',
+      );
+    const observations = await sql(
+      `SELECT count(*) FROM "GroundTransitObservation" WHERE "legExecutionId"='${fixed.id}';`,
+    );
+    if (Number(observations) < 2)
+      throw new Error('P5E2 recovery discarded prior observation history');
+    const activeAfter = await sql(
+      `SELECT count(*) FROM "NotificationEvent" WHERE "tripId"='${trip.id}' AND "presentationGroupKey" LIKE 'ground-transit-observation:${fixed.id}:%' AND "presentationActive"=TRUE;`,
+    );
+    if (activeAfter !== '1')
+      throw new Error(
+        'P5E2 recovery left stale operational presentations active',
+      );
+  }
   const high = afterWorker.legs.find(
     (leg) => leg.serviceClass === 'HIGH_FREQUENCY',
   );

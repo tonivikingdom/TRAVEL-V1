@@ -65,6 +65,7 @@ export interface ExecutionBufferEvidence {
     | 'PROTECTED_TIME_INFEASIBLE'
     | 'UNKNOWN_EXECUTION_MARGIN';
   readonly requiresRouteReevaluation?: boolean;
+  readonly explanation?: string;
 }
 
 export interface ExecutionRiskEvaluationInput {
@@ -493,13 +494,14 @@ function evaluateBufferEvidence(
     protectedTransportEdgeId: buffer.protectedTransportEdgeId ?? null,
     evidenceRefs: [`buffer:${buffer.id}`],
     explanation:
-      buffer.riskKind === 'PROTECTED_TIME_INFEASIBLE'
+      buffer.explanation ??
+      (buffer.riskKind === 'PROTECTED_TIME_INFEASIBLE'
         ? '已确认固定班次取消，原 Adopt 交通不再可执行，需要重新评估路线。'
         : buffer.riskKind === 'FIXED_SERVICE_MISSED'
           ? '可靠的到站事实晚于已采用固定班次的实际出发时间，原路线需要重新评估。'
           : minimum
             ? '当前连接余量低于可靠的系统最低换乘要求；确认风险不会改变该最低要求。'
-            : '当前余量低于建议或用户偏好值，可由用户确认后保持安静。',
+            : '当前余量低于建议或用户偏好值，可由用户确认后保持安静。'),
     requiresRouteReevaluation: buffer.requiresRouteReevaluation ?? false,
   };
 }

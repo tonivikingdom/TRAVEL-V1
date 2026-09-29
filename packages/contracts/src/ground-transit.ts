@@ -52,6 +52,24 @@ export interface GroundTransitLegView {
   readonly deviationConsecutiveObservations: number;
   readonly deviationStartedAt: string | null;
   readonly current: boolean;
+  readonly operational: {
+    readonly policyVersion: string;
+    readonly disposition:
+      | 'CONTINUE_CURRENT_PLAN'
+      | 'CURRENT_PLAN_AT_RISK'
+      | 'CURRENT_PLAN_NO_LONGER_FEASIBLE';
+    readonly requiredAction: 'NONE' | 'ROUTE_REEVALUATION_REQUIRED';
+    readonly changeKinds: readonly string[];
+    readonly reasonCodes: readonly string[];
+    readonly targetServiceability: {
+      readonly boarding: 'SERVED' | 'NOT_SERVED' | 'UNKNOWN';
+      readonly alighting: 'SERVED' | 'NOT_SERVED' | 'UNKNOWN';
+    };
+    readonly requiresUserAttention: boolean;
+    readonly notificationPriority: 'NORMAL' | 'STRONG' | null;
+    readonly observationEvidenceRef: string | null;
+    readonly irreversibleActualMiss: boolean;
+  };
   readonly safety: {
     readonly boarding: GroundTransitBoardingSafetyView;
     readonly transferToNext: GroundTransitTransferSafetyView | null;

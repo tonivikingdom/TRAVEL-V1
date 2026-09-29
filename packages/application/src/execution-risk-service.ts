@@ -5,10 +5,10 @@ import type {
   NotificationView,
 } from '@travel/contracts';
 import {
+  assessGroundTransitOperational,
   assessGroundTransitSafety,
   evaluateExecutionRisks,
   matchGroundTransitIdentity,
-  isSustainedGroundTransitDeviation,
   GROUND_TRANSIT_POLICY,
   type ExecutionBufferEvidence,
   type EvaluatedExecutionRisk,
@@ -56,6 +56,9 @@ export class ExecutionRiskService {
       readonly groupKey: string;
       readonly sourceTransportEdgeId: string;
       readonly expectedGroundTransitCapabilityRevision?: number;
+      readonly observationIdentity?: string;
+      readonly observationFetchedAt?: Date;
+      readonly requireSourceMatch?: boolean;
     },
   ): Promise<ExecutionRiskEvaluationResponse> {
     requireUuid(tripId, 'tripId');
@@ -89,6 +92,9 @@ export class ExecutionRiskService {
               correlationGroupKey: correlation.groupKey,
               correlationSourceTransportEdgeId:
                 correlation.sourceTransportEdgeId,
+              ...(correlation.requireSourceMatch === true
+                ? { correlationRequireSourceMatch: true }
+                : {}),
               ...(correlation.expectedGroundTransitCapabilityRevision ===
               undefined
                 ? {}
@@ -96,10 +102,27 @@ export class ExecutionRiskService {
                     expectedGroundTransitCapabilityRevision:
                       correlation.expectedGroundTransitCapabilityRevision,
                   }),
+              ...(correlation.observationIdentity === undefined ||
+              correlation.observationFetchedAt === undefined
+                ? {}
+                : {
+                    expectedGroundTransitObservation: {
+                      transportEdgeId: correlation.sourceTransportEdgeId,
+                      identity: correlation.observationIdentity,
+                      fetchedAt: correlation.observationFetchedAt,
+                    },
+                  }),
             }),
       });
       if (result.status === 'NOT_FOUND') throw notFound();
       if (result.status === 'VERSION_CONFLICT') continue;
+      if (result.status === 'OBSERVATION_OBSOLETE') {
+        throw new ApplicationError(
+          'GROUND_TRANSIT_OBSERVATION_OBSOLETE',
+          '地面交通观测已被更新的事实取代。',
+          409,
+        );
+      }
       if (result.status === 'CAPABILITY_CHANGED') {
         throw new ApplicationError(
           'CAPABILITY_CHANGED',
@@ -219,12 +242,7 @@ function toDomainInput(
           (ground.latestObservation !== null &&
             ground.latestObservation.fetchedAt.getTime() <= now.getTime() &&
             now.getTime() - ground.latestObservation.fetchedAt.getTime() <=
-              GROUND_TRANSIT_POLICY.realtimeFreshnessMs &&
-            isSustainedGroundTransitDeviation({
-              consecutiveObservations: ground.deviationCount,
-              startedAt: ground.deviationStartedAt,
-              now,
-            }))
+              GROUND_TRANSIT_POLICY.realtimeFreshnessMs)
         );
       }),
     })),
@@ -253,11 +271,6 @@ function groundTransitBuffers(
       observation.fetchedAt.getTime() <= now.getTime() &&
       now.getTime() - observation.fetchedAt.getTime() <=
         GROUND_TRANSIT_POLICY.realtimeFreshnessMs;
-    const sustained = isSustainedGroundTransitDeviation({
-      consecutiveObservations: leg.deviationCount,
-      startedAt: leg.deviationStartedAt,
-      now,
-    });
     const sourceNode = trip.dayOccurrences
       .flatMap((item) => item.nodes)
       .find((item) => item.id === edge.fromNodeId);
@@ -265,40 +278,32 @@ function groundTransitBuffers(
       sourceNode?.timeValues.find(
         (value) => value.pointKind === 'ARRIVAL' && value.layer === 'ACTUAL',
       )?.instant ?? null;
-    if (
-      leg.baseline.serviceClass === 'FIXED_SERVICE' &&
-      matched &&
-      fresh &&
-      observation.serviceStatus === 'CANCELLED'
-    ) {
+    const operational = assessGroundTransitOperational({
+      baseline: leg.baseline,
+      previousObservation: leg.previousObservation ?? null,
+      latestObservation: observation,
+      now,
+      state: leg.state,
+      current: leg.current,
+      availableAtBoarding: actualAtBoarding,
+      actualServiceDeparture: leg.actualServiceDeparture ?? null,
+      downstreamProtectedDeparture: leg.downstreamProtectedDeparture ?? null,
+    });
+    if (operational.disposition === 'CURRENT_PLAN_NO_LONGER_FEASIBLE') {
       buffers.push({
-        id: `ground-cancelled:${edge.id}`,
+        id: `ground-operational:${edge.id}`,
         kind: 'SYSTEM_MINIMUM_CONNECTION',
         availableSeconds: -1,
         requiredSeconds: 0,
         sourceNodeId: edge.fromNodeId,
         sourceTransportEdgeId: edge.id,
         protectedTransportEdgeId: edge.id,
-        riskKind: 'PROTECTED_TIME_INFEASIBLE',
-        requiresRouteReevaluation: true,
-      });
-    }
-    if (
-      leg.baseline.serviceClass === 'FIXED_SERVICE' &&
-      matched &&
-      observation.actualDeparture !== null &&
-      actualAtBoarding !== null &&
-      actualAtBoarding.getTime() > observation.actualDeparture.getTime()
-    ) {
-      buffers.push({
-        id: `ground-missed:${leg.transportEdgeId}`,
-        kind: 'SYSTEM_MINIMUM_CONNECTION',
-        availableSeconds: -1,
-        requiredSeconds: 0,
-        sourceNodeId: edge.fromNodeId,
-        sourceTransportEdgeId: edge.id,
-        protectedTransportEdgeId: edge.id,
-        riskKind: 'FIXED_SERVICE_MISSED',
+        riskKind: operational.irreversibleActualMiss
+          ? 'FIXED_SERVICE_MISSED'
+          : 'PROTECTED_TIME_INFEASIBLE',
+        explanation: operational.irreversibleActualMiss
+          ? '可靠的到站事实晚于班次实际出发时间，原路线需要重新评估。'
+          : '当前服务无法完成原采用的上下车目标，需要重新评估路线。',
         requiresRouteReevaluation: true,
       });
     }
@@ -346,13 +351,13 @@ function groundTransitBuffers(
     const protectedDeparture = selectTime(downstream.timeValues, 'DEPARTURE');
     const currentArrival = matched
       ? (observation.actualArrival ??
-        (fresh && sustained ? observation.estimatedArrival : null) ??
+        (fresh ? observation.estimatedArrival : null) ??
         leg.baseline.plannedArrival)
       : leg.baseline.plannedArrival;
     if (protectedDeparture === null) continue;
     const safety = assessGroundTransitSafety({
       baseline: leg.baseline,
-      observation: fresh && sustained ? observation : null,
+      observation: fresh ? observation : null,
       now,
       availableAt: currentArrival,
       downstreamLatestAt: protectedDeparture,

@@ -167,6 +167,103 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   }
 
+  async function adoptedFixedGroundTrip() {
+    currentNow = new Date('2030-10-01T09:50:00Z');
+    const trip = await tripWithVisits(userA, [
+      'Ground origin',
+      'Ground destination',
+    ]);
+    const [from, to] = trip.days[0]!.nodes;
+    const base = candidate(
+      '2030-10-01T10:00:00Z',
+      '2030-10-01T11:00:00Z',
+      'UTC',
+      'UTC',
+    );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...base,
+          observedAt: currentNow,
+          candidateId: `ground-operational-${randomUUID()}`,
+          legs: [
+            {
+              ...base.legs[0]!,
+              mode: 'RAIL',
+              groundTransit: {
+                serviceClass: 'FIXED_SERVICE',
+                serviceIdentityKey: 'synthetic:operational:1',
+                lineRef: 'rail-1',
+                lineName: 'Rail 1',
+                directionRef: 'east',
+                directionLabel: 'East',
+                boardingHubRef: 'A',
+                alightingHubRef: 'D',
+                headwayMinSeconds: null,
+                headwayMaxSeconds: null,
+                minimumTransferSeconds: 300,
+                boardingAccessMinimumSeconds: 0,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `ground-operational-${randomUUID()}`,
+    );
+    const leg = await managed.client.groundTransitLegExecution.findFirstOrThrow(
+      {
+        where: { tripId: trip.id },
+      },
+    );
+    return { trip, adopted, leg, from: from! };
+  }
+
+  function groundSequence(
+    changes: readonly (
+      'CANCELLED' | 'RECOVERY' | 'SHORT_TURN' | 'ACTUAL_MISS'
+    )[],
+  ): GroundTransitProvider {
+    let index = 0;
+    let replay = false;
+    return {
+      name: 'SYNTHETIC',
+      async fetchObservation({ leg }) {
+        const selected = replay ? index - 1 : index++;
+        const kind = changes[Math.min(selected, changes.length - 1)]!;
+        const source = new SyntheticGroundTransitProvider(
+          kind === 'SHORT_TURN' ? 'SHORT_TURN' : 'RECOVERY',
+          () => currentNow,
+        );
+        const result = await source.fetchObservation({ leg });
+        if (result.status !== 'SUCCESS') return result;
+        return {
+          status: 'SUCCESS',
+          observation: {
+            ...result.observation,
+            observationIdentity: `operational:${leg.id}:${selected}`,
+            serviceStatus:
+              kind === 'CANCELLED'
+                ? ('CANCELLED' as const)
+                : ('ON_TIME' as const),
+            actualDeparture:
+              kind === 'ACTUAL_MISS' ? new Date('2030-10-01T10:00:00Z') : null,
+          },
+        };
+      },
+      // Tests switch this flag only for an exact accepted-observation replay.
+      setReplay(value: boolean) {
+        replay = value;
+      },
+    } as GroundTransitProvider & { setReplay(value: boolean): void };
+  }
+
   afterEach(async () => {
     await app.close();
   });
@@ -574,6 +671,379 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         where: { tripId: trip.id },
       }),
     ).toBe(notificationCountBeforePause);
+  });
+
+  it('accepts cancellation once, aggregates one strong presentation, and restores the same adopted route', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    const groundProvider = groundSequence([
+      'CANCELLED',
+      'RECOVERY',
+    ]) as GroundTransitProvider & { setReplay(value: boolean): void };
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundProvider,
+    );
+    const url = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    const first = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        state: 'NO_LONGER_FEASIBLE',
+        operational: {
+          disposition: 'CURRENT_PLAN_NO_LONGER_FEASIBLE',
+          requiredAction: 'ROUTE_REEVALUATION_REQUIRED',
+          changeKinds: ['SERVICE_CANCELLED'],
+        },
+      },
+    });
+    const active = await managed.client.notificationEvent.findMany({
+      where: {
+        tripId: trip.id,
+        presentationGroupKey: {
+          startsWith: `ground-transit-observation:${leg.id}:`,
+        },
+        presentationActive: true,
+      },
+    });
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({ priority: 'STRONG' });
+    expect(active[0]!.changeKinds).toContain('SERVICE_CANCELLED');
+    expect(
+      await managed.client.transportEdge.count({
+        where: { id: leg.transportEdgeId, adoptedRoute: { status: 'ACTIVE' } },
+      }),
+    ).toBe(1);
+    const countBeforeReplay = await managed.client.notificationEvent.count({
+      where: { tripId: trip.id },
+    });
+    groundProvider.setReplay(true);
+    const replay = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(replay.json()).toMatchObject({ status: 'IDEMPOTENT' });
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(countBeforeReplay);
+    expect(
+      (
+        await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+          where: { id: leg.id },
+          select: { latestObservation: true },
+        })
+      ).latestObservation,
+    ).toMatchObject({
+      __groundTransitRiskDecision: `operational:${leg.id}:0:2030-10-01T09:50:00.000Z`,
+    });
+    groundProvider.setReplay(false);
+    currentNow = new Date('2030-10-01T09:51:00Z');
+    const correction = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(correction.statusCode).toBe(200);
+    expect(correction.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        state: 'PENDING',
+        operational: {
+          disposition: 'CONTINUE_CURRENT_PLAN',
+          changeKinds: ['SERVICE_RESTORED'],
+        },
+      },
+    });
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(2);
+    expect(
+      (
+        await managed.client.groundTransitStateTransition.findMany({
+          where: { legExecutionId: leg.id },
+          orderBy: { occurredAt: 'asc' },
+        })
+      ).map((item) => item.toState),
+    ).toEqual(['PENDING', 'NO_LONGER_FEASIBLE', 'PENDING']);
+    const presentations = await managed.client.notificationEvent.findMany({
+      where: {
+        tripId: trip.id,
+        presentationGroupKey: {
+          startsWith: `ground-transit-observation:${leg.id}:`,
+        },
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+    expect(
+      presentations.filter((item) => item.presentationActive),
+    ).toHaveLength(1);
+    expect(
+      presentations.some(
+        (item) =>
+          Array.isArray(item.changeKinds) &&
+          item.changeKinds.includes('SERVICE_RESTORED'),
+      ),
+    ).toBe(true);
+    expect(
+      await managed.client.executionRisk.count({
+        where: {
+          tripId: trip.id,
+          sourceTransportEdgeId: leg.transportEdgeId,
+          kind: 'PROTECTED_TIME_INFEASIBLE',
+          status: 'OPEN',
+        },
+      }),
+    ).toBe(0);
+    const oldDecision = await new PrismaExecutionRiskRepository(
+      managed.client,
+    ).reconcile({
+      ownerUserId: userA.actor.userId,
+      tripId: trip.id,
+      basisTripVersion: (
+        await managed.client.trip.findUniqueOrThrow({
+          where: { id: trip.id },
+          select: { version: true },
+        })
+      ).version,
+      now: currentNow,
+      desiredRisks: [],
+      expectedGroundTransitObservation: {
+        transportEdgeId: leg.transportEdgeId,
+        identity: `operational:${leg.id}:0`,
+        fetchedAt: new Date('2030-10-01T09:50:00Z'),
+      },
+    });
+    expect(oldDecision).toEqual({ status: 'OBSERVATION_OBSOLETE' });
+  });
+
+  it('marks a skipped adopted stop infeasible and refuses to revive an actual missed service', async () => {
+    const { trip, leg, adopted, from } = await adoptedFixedGroundTrip();
+    const groundProvider = groundSequence([
+      'SHORT_TURN',
+      'RECOVERY',
+      'ACTUAL_MISS',
+      'RECOVERY',
+    ]);
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundProvider,
+    );
+    const url = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    const shortTurn = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(shortTurn.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        operational: {
+          targetServiceability: { alighting: 'NOT_SERVED' },
+          disposition: 'CURRENT_PLAN_NO_LONGER_FEASIBLE',
+        },
+      },
+    });
+    currentNow = new Date('2030-10-01T09:51:00Z');
+    const restored = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(restored.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        operational: { disposition: 'CONTINUE_CURRENT_PLAN' },
+      },
+    });
+    currentNow = new Date('2030-10-01T10:11:00Z');
+    const actualArrival = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: adopted.trip.version,
+        subject: { type: 'NODE', nodeId: from.id },
+        value: {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T10:10:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(actualArrival.statusCode).toBe(200);
+    const missed = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(missed.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        operational: {
+          disposition: 'CURRENT_PLAN_NO_LONGER_FEASIBLE',
+          irreversibleActualMiss: true,
+        },
+      },
+    });
+    currentNow = new Date('2030-10-01T10:12:00Z');
+    const impossibleCorrection = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(impossibleCorrection.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        operational: {
+          disposition: 'CURRENT_PLAN_NO_LONGER_FEASIBLE',
+          irreversibleActualMiss: true,
+        },
+      },
+    });
+    expect(
+      await managed.client.transportEdge.count({
+        where: { id: leg.transportEdgeId },
+      }),
+    ).toBe(1);
+  });
+
+  it('fences an old service recovery after the user adopts a replacement', async () => {
+    const { trip, leg, from } = await adoptedFixedGroundTrip();
+    const previousTo = trip.days[0]!.nodes[1]!;
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED', 'RECOVERY']),
+    );
+    const oldUrl = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: oldUrl,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({ status: 'APPLIED' });
+    const changed = providerResult;
+    if (changed.status !== 'SUCCESS')
+      throw new Error('synthetic candidate missing');
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: changed.candidates.map((item) => ({
+        ...item,
+        candidateId: `replacement-${randomUUID()}`,
+        legs: item.legs.map((segment) => ({
+          ...segment,
+          groundTransit:
+            segment.groundTransit === null ||
+            segment.groundTransit === undefined
+              ? null
+              : {
+                  ...segment.groundTransit,
+                  serviceIdentityKey: 'synthetic:replacement:2',
+                },
+        })),
+      })),
+    };
+    const preview = await createPreview(userA, trip, from.id, previousTo.id);
+    await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `replacement-${randomUUID()}`,
+    );
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: leg.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'REPLACED' });
+    const oldRefresh = await app.inject({
+      method: 'POST',
+      url: oldUrl,
+      headers: bearer(userA),
+    });
+    expect(oldRefresh.statusCode).toBe(404);
+    const oldGround =
+      await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+        where: { id: leg.id },
+      });
+    expect(oldGround).toMatchObject({
+      latestObservationId: `operational:${leg.id}:0`,
+      state: 'NO_LONGER_FEASIBLE',
+    });
+  });
+
+  it('fences a delayed cancellation response after monitoring is paused', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: trip.id,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: currentNow,
+      },
+    });
+    const synthetic = new SyntheticGroundTransitProvider(
+      'CANCEL_FIXED',
+      () => currentNow,
+    );
+    const repository = new PrismaGroundTransitRepository(managed.client);
+    const monitor = new GroundTransitService(
+      repository,
+      {
+        name: 'SYNTHETIC',
+        async fetchObservation(input) {
+          await managed.client.tripAssistanceCapability.update({
+            where: {
+              tripId_kind: {
+                tripId: trip.id,
+                kind: 'GROUND_TRANSIT_MONITORING',
+              },
+            },
+            data: { state: 'PAUSED', revision: 2, pausedAt: currentNow },
+          });
+          return synthetic.fetchObservation(input);
+        },
+      },
+      () => currentNow,
+      new ExecutionRiskService(
+        tripRepository,
+        new PrismaExecutionRiskRepository(managed.client),
+        { now: () => currentNow, groundTransitRepository: repository },
+      ),
+    );
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
+    expect(
+      await managed.client.executionRisk.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
   });
 
   it('persists adopted fixed-service ground identity, refreshes owner-only, and retains archived evidence', async () => {

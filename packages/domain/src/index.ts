@@ -7,6 +7,8 @@ export {
 export {
   GROUND_TRANSIT_POLICY,
   assessGroundTransitSafety,
+  assessGroundTransitOperational,
+  GROUND_TRANSIT_OPERATIONAL_POLICY,
   decideGroundTransitObservationOrdering,
   matchGroundTransitIdentity,
   isSustainedGroundTransitDeviation,
@@ -17,6 +19,9 @@ export {
   type GroundTransitLegState,
   type GroundTransitObservation,
   type GroundTransitSafetyAssessment,
+  type GroundTransitOperationalAssessment,
+  type GroundTransitChangeKind,
+  type GroundTransitTargetServiceability,
   type GroundTransitServiceClass,
 } from './ground-transit-execution.js';
 export {

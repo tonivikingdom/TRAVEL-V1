@@ -167,6 +167,7 @@ export async function verifyGroundTransitChain({
   const refreshed = await apiJson(
     `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
     'POST',
+    {},
   );
   if (
     refreshed.status !== 'APPLIED' ||

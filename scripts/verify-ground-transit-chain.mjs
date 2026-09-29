@@ -70,7 +70,7 @@ export async function verifyGroundTransitChain({
     hint: {
       type: 'DEPART_AT',
       instant: departure.toISOString(),
-      timeZone: 'Etc/UTC',
+      timeZone: 'Asia/Tokyo',
     },
   });
   if (query.candidates.length !== 1 || query.candidates[0].legs.length !== 2)

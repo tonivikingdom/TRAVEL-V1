@@ -6,6 +6,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { verifyExecutionChain } from './verify-execution-chain.mjs';
+import { verifyGroundTransitChain } from './verify-ground-transit-chain.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -329,7 +330,7 @@ async function verifyCompose(compose, composeQuiet, env) {
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(
-        `Synthetic P4B2 API ${method} ${pathname} failed with ${response.status}: ${payload?.error?.code ?? 'UNKNOWN'}`,
+        `Synthetic P4B2 API ${method} ${pathname} failed with ${response.status}: ${payload?.error?.code ?? 'UNKNOWN'} (${payload?.error?.message ?? 'no explanation'})`,
       );
     }
     return payload;
@@ -393,7 +394,7 @@ async function verifyCompose(compose, composeQuiet, env) {
       hint: {
         type: 'DEPART_AT',
         instant: '2030-10-01T10:00:00Z',
-        timeZone: 'UTC',
+        timeZone: 'Asia/Tokyo',
       },
     },
   );
@@ -486,6 +487,18 @@ async function verifyCompose(compose, composeQuiet, env) {
   if (undoEvidence.trim() !== '1:1:1:1:UNDONE') {
     throw new Error(
       'Synthetic P4B3 receipt/outbox/lifecycle evidence is missing',
+    );
+  }
+  if (env.GROUND_TRANSIT_WORKER_SYNTHETIC_SCENARIO === 'FAIL_FIRST') {
+    const ground = await verifyGroundTransitChain({
+      apiJson,
+      composeQuiet,
+      waitFor,
+      databaseUser,
+      databaseName,
+    });
+    process.stdout.write(
+      `P5E2 synthetic ground transit: ${JSON.stringify(ground)}\n`,
     );
   }
 

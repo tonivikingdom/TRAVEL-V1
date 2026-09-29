@@ -82,6 +82,8 @@ jobs:
           OBJECT_MAX_USER_TOTAL_BYTES=4194304
           OBJECT_ALLOWED_MEDIA_TYPES=application/pdf,image/jpeg,image/png,text/plain
           ROUTE_PROVIDER=synthetic
+          GROUND_TRANSIT_API_SYNTHETIC_SCENARIO=NEXT_DEPARTURE_2
+          GROUND_TRANSIT_WORKER_SYNTHETIC_SCENARIO=FAIL_FIRST
           APP_ENV=test
           FLIGHT_PROVIDER=synthetic
           SYNTHETIC_CI_ONLY=true

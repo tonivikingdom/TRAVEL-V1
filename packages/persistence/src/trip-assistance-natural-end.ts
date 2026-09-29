@@ -60,6 +60,32 @@ export async function stopTripAssistanceIfNaturallyComplete(
     },
   });
   if (stopped.count === 0) return false;
+  const routes = await transaction.adoptedRoute.findMany({
+    where: { tripId },
+    select: { id: true },
+  });
+  const routeIds = routes.map((route) => route.id);
+  await transaction.job.updateMany({
+    where: {
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: { in: routeIds },
+      status: 'QUEUED',
+    },
+    data: {
+      status: 'CANCELLED',
+      cancelRequested: true,
+      cancelledAt: now,
+      completedAt: now,
+    },
+  });
+  await transaction.job.updateMany({
+    where: {
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: { in: routeIds },
+      status: 'RUNNING',
+    },
+    data: { cancelRequested: true },
+  });
   await transaction.executionLocationState.deleteMany({ where: { tripId } });
   return true;
 }

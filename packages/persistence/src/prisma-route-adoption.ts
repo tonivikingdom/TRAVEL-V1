@@ -338,6 +338,27 @@ async function executeAdoption(
     if (replacement.count !== 1) {
       throw new AdoptionAbort('PREVIEW_STALE');
     }
+    await transaction.job.updateMany({
+      where: {
+        type: 'GROUND_TRANSIT_MONITOR',
+        payloadRef: plan.currentAdoptedRouteId,
+        status: 'QUEUED',
+      },
+      data: {
+        status: 'CANCELLED',
+        cancelRequested: true,
+        cancelledAt: input.now,
+        completedAt: input.now,
+      },
+    });
+    await transaction.job.updateMany({
+      where: {
+        type: 'GROUND_TRANSIT_MONITOR',
+        payloadRef: plan.currentAdoptedRouteId,
+        status: 'RUNNING',
+      },
+      data: { cancelRequested: true },
+    });
   }
 
   const adoptedRoute = await transaction.adoptedRoute.create({
@@ -517,6 +538,51 @@ async function executeAdoption(
       },
     });
     delta.createdTransportEdgeIds.push(edge.id);
+    if (segment.mode === 'RAIL' || segment.mode === 'BUS') {
+      const metadata = segment.groundTransit ?? null;
+      await transaction.groundTransitLegExecution.create({
+        data: {
+          tripId: input.tripId,
+          adoptedRouteId: adoptedRoute.id,
+          transportEdgeId: edge.id,
+          legIndex: segment.legIndex ?? segmentIndex,
+          provider: preview.candidateSnapshot.provider,
+          mode: segment.mode,
+          serviceClass: metadata?.serviceClass ?? null,
+          serviceIdentityKey: metadata?.serviceIdentityKey ?? null,
+          baseline: {
+            schemaVersion: 'ground-transit-baseline-v1',
+            provider: preview.candidateSnapshot.provider,
+            mode: segment.mode,
+            serviceClass: metadata?.serviceClass ?? null,
+            serviceIdentityKey: metadata?.serviceIdentityKey ?? null,
+            lineRef: metadata?.lineRef ?? null,
+            lineName: metadata?.lineName ?? null,
+            directionRef: metadata?.directionRef ?? null,
+            directionLabel: metadata?.directionLabel ?? null,
+            boardingHubRef: metadata?.boardingHubRef ?? null,
+            alightingHubRef: metadata?.alightingHubRef ?? null,
+            headwayMinSeconds: metadata?.headwayMinSeconds ?? null,
+            headwayMaxSeconds: metadata?.headwayMaxSeconds ?? null,
+            minimumTransferSeconds: metadata?.minimumTransferSeconds ?? null,
+            boardingAccessMinimumSeconds:
+              metadata?.boardingAccessMinimumSeconds ?? null,
+            hasOnwardConnection: segmentIndex < plan.segments.length - 1,
+            plannedDeparture: segment.departure?.instant ?? null,
+            plannedArrival: segment.arrival?.instant ?? null,
+          },
+          createdAt: input.now,
+          stateTransitions: {
+            create: {
+              toState: 'PENDING',
+              source: 'ROUTE_ADOPT',
+              evidenceRef: `adopted-route:${adoptedRoute.id}`,
+              occurredAt: input.now,
+            },
+          },
+        },
+      });
+    }
     const sourceRef = `snapshot:${preview.candidateSnapshotId}/candidate:${payload.candidate.candidateId}/leg:${segment.legIndex ?? segmentIndex}`;
     const temporalValues = [
       segment.departure === null

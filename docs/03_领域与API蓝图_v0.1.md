@@ -306,6 +306,7 @@ Trip永久删除与不可逆合并不享有普通Undo；须用其已确认强提
 | 节点     | POST /trips/{id}/commands                                                  | 类型化业务command，不接收随意数据库patch             |
 | 时间事实 | POST /trips/{id}/temporal-values                                           | 调用 application validation，不允许强制覆盖 ACTUAL   |
 | 交通历史 | GET /trips/{id}/transport-history                                          | owner-only，返回强类型失效历史                       |
+| 地面交通执行 | GET /trips/{id}/execution/ground-transit；POST /trips/{id}/execution/ground-transit/{edgeId}/refresh | 仅 Adopted RAIL/BUS，Provider-neutral observation；后台监控需独立 opt-in |
 | 计算     | POST /trips/{id}/schedule/evaluate                                         | 可解释、无正式写入                                   |
 | 执行风险 | POST /trips/{id}/execution/evaluate；GET /trips/{id}/execution/risks       | 显式只读评估；风险 bookkeeping 不增加 Trip version   |
 | 风险操作 | POST /trips/{id}/execution/risks/{rid}/acknowledge 或 /snooze              | owner-only；确认不消除事实，snooze 固定 15 分钟      |

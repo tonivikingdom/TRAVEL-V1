@@ -372,6 +372,9 @@ function buildChangeSummary(
       fixedService: leg.fixedService,
       serviceLabel: leg.serviceLabel,
       providerRef: leg.providerRef,
+      ...(leg.groundTransit === undefined
+        ? {}
+        : { groundTransit: leg.groundTransit }),
       departure: toNullableTimePoint(leg.departure),
       arrival: toNullableTimePoint(leg.arrival),
       durationSeconds: leg.durationSeconds,

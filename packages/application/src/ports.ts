@@ -67,7 +67,8 @@ export interface AuthRepository {
   }): Promise<{ readonly created: boolean; readonly userId: string }>;
 }
 
-export type JobType = 'MAGIC_LINK_EMAIL' | 'FLIGHT_MONITOR';
+export type JobType =
+  'MAGIC_LINK_EMAIL' | 'FLIGHT_MONITOR' | 'GROUND_TRANSIT_MONITOR';
 export type JobStatus =
   'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 

@@ -93,6 +93,9 @@ function restoreLeg(value: RouteCandidateLegView): RouteCandidateLeg {
     fixedService: value.fixedService,
     serviceLabel: value.serviceLabel,
     providerRef: value.providerRef,
+    ...(value.groundTransit === undefined
+      ? {}
+      : { groundTransit: value.groundTransit }),
   };
 }
 

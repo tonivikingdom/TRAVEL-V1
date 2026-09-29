@@ -2,7 +2,8 @@ export type AssistanceState = 'NOT_ENABLED' | 'ENABLED' | 'PAUSED' | 'STOPPED';
 
 export type AssistanceStopReason = 'USER' | 'NATURAL_END';
 export type AssistanceAction = 'ENABLE' | 'PAUSE' | 'RESUME' | 'STOP';
-export type TripAssistanceKind = 'LOCATION_ASSISTANCE' | 'AUTO_RECORD';
+export type TripAssistanceKind =
+  'LOCATION_ASSISTANCE' | 'AUTO_RECORD' | 'GROUND_TRANSIT_MONITORING';
 
 export interface AssistanceCapabilityView {
   readonly kind: TripAssistanceKind | 'FLIGHT_MONITORING';

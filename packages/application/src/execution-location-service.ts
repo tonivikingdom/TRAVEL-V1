@@ -29,6 +29,7 @@ import type {
 } from './execution-location-ports.js';
 import type { ExecutionRiskService } from './execution-risk-service.js';
 import type { FlightMonitoringService } from './flight-monitoring-service.js';
+import type { GroundTransitService } from './ground-transit-service.js';
 import { parseAbsoluteInstantInput } from './time-input.js';
 
 export interface ExecutionLocationServiceOptions {
@@ -49,6 +50,7 @@ export class ExecutionLocationService {
     private readonly executionRiskService: ExecutionRiskService,
     private readonly flightMonitoringService: FlightMonitoringService,
     options: ExecutionLocationServiceOptions = {},
+    private readonly groundTransitService?: GroundTransitService,
   ) {
     this.now = options.now ?? (() => new Date());
     this.policy = options.policy ?? DEFAULT_EXECUTION_LOCATION_POLICY;
@@ -163,6 +165,22 @@ export class ExecutionLocationService {
         continue;
       }
       const success = requireSuccess(result);
+      if (
+        this.groundTransitService !== undefined &&
+        (decision.status === 'CONFIRMED_ARRIVAL' ||
+          decision.status === 'CONFIRMED_DEPARTURE')
+      ) {
+        await this.groundTransitService.recordDerivedLocationTransition({
+          ownerUserId: actor.userId,
+          tripId,
+          nodeId: decision.nodeId,
+          transition:
+            decision.status === 'CONFIRMED_ARRIVAL' ? 'ARRIVAL' : 'DEPARTURE',
+          observedAt: sample.observedAt,
+          expectedLocationCapabilityRevision:
+            context.locationAssistance.revision,
+        });
+      }
       const autoRecordEnabled = context.autoRecord.state === 'ENABLED';
       const airportTriggerAttempted = autoRecordEnabled
         ? await this.afterMutation(actor, context, success.event)

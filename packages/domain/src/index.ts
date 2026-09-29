@@ -5,6 +5,21 @@ export {
   type PersistedAssistanceState,
 } from './assistance-capability.js';
 export {
+  GROUND_TRANSIT_POLICY,
+  assessGroundTransitSafety,
+  decideGroundTransitObservationOrdering,
+  matchGroundTransitIdentity,
+  isSustainedGroundTransitDeviation,
+  validGroundTransitObservation,
+  resolveGroundTransitLegState,
+  type GroundTransitBaseline,
+  type GroundTransitIdentityResult,
+  type GroundTransitLegState,
+  type GroundTransitObservation,
+  type GroundTransitSafetyAssessment,
+  type GroundTransitServiceClass,
+} from './ground-transit-execution.js';
+export {
   AbsoluteInstantError,
   parseAbsoluteIsoInstant,
   type AbsoluteInstantErrorReason,

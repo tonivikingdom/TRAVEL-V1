@@ -364,3 +364,15 @@ Undo 是受约束的新操作：它不倒退外部世界，不覆盖 Adopt 后�
   Provider 单点故障只影响路线查询区域。
 - Debug Web 通过 Vite Development proxy 使用相对 `/api`，不要求 API 开放通配 CORS，也不进入
   Production Compose。该技术选择不约束未来正式 Desktop/Mobile 客户端。
+
+### P5E2 Batch 1 Ground Transit Execution
+
+- P4 Route Query 只接受可选的 provider-neutral RAIL/BUS metadata；Adopt 在原事务中固定 leg baseline。
+  Provider observation 永不改写所选 baseline，也不证明用户乘坐了具体班次。
+- Domain 负责 exact fixed-service identity、高频 line/direction/hub/window identity、freshness、headway /
+  transfer minimum 与 leg 状态判断。Provider 只返回归一化观测，不直接写 TemporalValue。
+- Persistence 在 owner/Trip lock 下接受观测，保留 append-only observation 与 state transition；只对可靠
+  同一 fixed service 写 PROVIDER_OBSERVATION，ACTUAL 不被旧 ESTIMATED 覆盖。旧路由缺 metadata 明示 UNKNOWN。
+- Application 将后果交给现有 ExecutionRisk reconciliation；Ground Transit 不引入第二套风险或通知表。
+  `GROUND_TRANSIT_MONITORING` 属于 Trip-scoped 显式 opt-in，Worker job 绑定 capability revision 和 AdoptedRoute。
+  手动刷新不需要后台监控授权，定位事实仍由原 Execution Location 路径管理。

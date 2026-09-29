@@ -60,6 +60,11 @@ export interface ExecutionBufferEvidence {
   readonly sourceTransportEdgeId?: string | null;
   readonly protectedNodeId?: string | null;
   readonly protectedTransportEdgeId?: string | null;
+  readonly riskKind?:
+    | 'FIXED_SERVICE_MISSED'
+    | 'PROTECTED_TIME_INFEASIBLE'
+    | 'UNKNOWN_EXECUTION_MARGIN';
+  readonly requiresRouteReevaluation?: boolean;
 }
 
 export interface ExecutionRiskEvaluationInput {
@@ -449,22 +454,53 @@ function pointOperatorRank(operator: ExecutionRiskIntent['operator']): number {
 function evaluateBufferEvidence(
   buffer: ExecutionBufferEvidence,
 ): EvaluatedExecutionRisk | null {
-  if (buffer.requiredSeconds === null) return null;
+  if (buffer.requiredSeconds === null) {
+    return buffer.riskKind === 'UNKNOWN_EXECUTION_MARGIN'
+      ? {
+          fingerprintParts: ['buffer', buffer.kind, buffer.id],
+          kind: 'UNKNOWN_EXECUTION_MARGIN',
+          severity: 'UNKNOWN',
+          sourceNodeId: buffer.sourceNodeId ?? null,
+          sourceTransportEdgeId: buffer.sourceTransportEdgeId ?? null,
+          protectedNodeId: buffer.protectedNodeId ?? null,
+          protectedTransportEdgeId: buffer.protectedTransportEdgeId ?? null,
+          evidenceRefs: [`buffer:${buffer.id}`],
+          explanation:
+            '可靠的地面交通等待或换乘时间不足，当前无法判断受保护安排是否安全。',
+          requiresRouteReevaluation: false,
+        }
+      : null;
+  }
   if (buffer.availableSeconds >= buffer.requiredSeconds) return null;
   const minimum = buffer.kind === 'SYSTEM_MINIMUM_CONNECTION';
   return {
     fingerprintParts: ['buffer', buffer.kind, buffer.id],
-    kind: minimum ? 'BUFFER_BELOW_SYSTEM_MINIMUM' : 'PROTECTED_TIME_AT_RISK',
-    severity: 'EXECUTABLE_RISK',
+    kind:
+      buffer.riskKind === 'FIXED_SERVICE_MISSED' ||
+      buffer.riskKind === 'PROTECTED_TIME_INFEASIBLE'
+        ? buffer.riskKind
+        : minimum
+          ? 'BUFFER_BELOW_SYSTEM_MINIMUM'
+          : 'PROTECTED_TIME_AT_RISK',
+    severity:
+      buffer.riskKind === 'FIXED_SERVICE_MISSED' ||
+      buffer.riskKind === 'PROTECTED_TIME_INFEASIBLE'
+        ? 'INFEASIBLE'
+        : 'EXECUTABLE_RISK',
     sourceNodeId: buffer.sourceNodeId ?? null,
     sourceTransportEdgeId: buffer.sourceTransportEdgeId ?? null,
     protectedNodeId: buffer.protectedNodeId ?? null,
     protectedTransportEdgeId: buffer.protectedTransportEdgeId ?? null,
     evidenceRefs: [`buffer:${buffer.id}`],
-    explanation: minimum
-      ? '当前连接余量低于可靠的系统最低换乘要求；确认风险不会改变该最低要求。'
-      : '当前余量低于建议或用户偏好值，可由用户确认后保持安静。',
-    requiresRouteReevaluation: false,
+    explanation:
+      buffer.riskKind === 'PROTECTED_TIME_INFEASIBLE'
+        ? '已确认固定班次取消，原 Adopt 交通不再可执行，需要重新评估路线。'
+        : buffer.riskKind === 'FIXED_SERVICE_MISSED'
+          ? '可靠的到站事实晚于已采用固定班次的实际出发时间，原路线需要重新评估。'
+          : minimum
+            ? '当前连接余量低于可靠的系统最低换乘要求；确认风险不会改变该最低要求。'
+            : '当前余量低于建议或用户偏好值，可由用户确认后保持安静。',
+    requiresRouteReevaluation: buffer.requiresRouteReevaluation ?? false,
   };
 }
 

@@ -26,6 +26,7 @@ enum InvitationStatus {
 enum JobType {
   MAGIC_LINK_EMAIL
   FLIGHT_MONITOR
+  GROUND_TRANSIT_MONITOR
 }
 
 enum FlightMonitorMode {
@@ -50,6 +51,21 @@ enum AssistanceStopReason {
 enum TripAssistanceKind {
   LOCATION_ASSISTANCE
   AUTO_RECORD
+  GROUND_TRANSIT_MONITORING
+}
+
+enum GroundTransitServiceClass {
+  FIXED_SERVICE
+  HIGH_FREQUENCY
+}
+
+enum GroundTransitLegState {
+  PENDING
+  IN_PROGRESS
+  ARRIVED_PENDING_HANDOFF
+  COMPLETED
+  NO_LONGER_FEASIBLE
+  UNKNOWN
 }
 
 enum AssistanceAction {
@@ -445,6 +461,7 @@ model Trip {
   executionObservationWatermark ExecutionObservationWatermark?
   executionArrivalSuppressions  ExecutionArrivalSuppression[]
   assistanceCapabilities TripAssistanceCapability[]
+  groundTransitLegs       GroundTransitLegExecution[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -864,9 +881,69 @@ model AdoptedRoute {
   generatedNodes      ItineraryNode[]        @relation("GeneratedRouteNodes")
   transportEdges      TransportEdge[]
   operationReceipts   OperationReceipt[]
+  groundTransitLegs   GroundTransitLegExecution[]
 
   @@unique([id, tripId])
   @@index([tripId, status, anchorFromNodeId, anchorToNodeId])
+}
+
+// transportEdgeId is intentionally not an FK: route replacement/Undo may
+// delete and later restore an edge while its execution evidence remains auditable.
+model GroundTransitLegExecution {
+  id                     String                    @id @default(uuid()) @db.Uuid
+  tripId                 String                    @db.Uuid
+  adoptedRouteId         String                    @db.Uuid
+  transportEdgeId        String                    @unique @db.Uuid
+  legIndex               Int
+  provider               String                    @db.VarChar(100)
+  mode                   TransportMode
+  serviceClass           GroundTransitServiceClass?
+  serviceIdentityKey     String?                   @db.VarChar(300)
+  baseline               Json                      @db.JsonB
+  state                  GroundTransitLegState     @default(PENDING)
+  latestFetchedAt        DateTime?                 @db.Timestamptz(3)
+  latestObservationId    String?                   @db.VarChar(300)
+  latestObservationHash  String?                   @db.VarChar(64)
+  latestObservation      Json?
+  deviationStartedAt     DateTime?                 @db.Timestamptz(3)
+  deviationCount         Int                       @default(0)
+  nextCheckAt            DateTime?                 @db.Timestamptz(3)
+  createdAt              DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime                  @updatedAt @db.Timestamptz(3)
+  trip                   Trip                      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  adoptedRoute           AdoptedRoute              @relation(fields: [adoptedRouteId, tripId], references: [id, tripId], onDelete: Cascade)
+  observations           GroundTransitObservation[]
+  stateTransitions       GroundTransitStateTransition[]
+
+  @@index([tripId, state])
+  @@index([tripId, nextCheckAt])
+}
+
+model GroundTransitObservation {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  legExecutionId      String                    @db.Uuid
+  observationIdentity String                    @db.VarChar(300)
+  fetchedAt           DateTime                  @db.Timestamptz(3)
+  factsHash           String                    @db.VarChar(64)
+  facts               Json                      @db.JsonB
+  createdAt           DateTime                  @default(now()) @db.Timestamptz(3)
+  legExecution        GroundTransitLegExecution @relation(fields: [legExecutionId], references: [id], onDelete: Cascade)
+
+  @@unique([legExecutionId, observationIdentity])
+  @@index([legExecutionId, fetchedAt(sort: Desc)])
+}
+
+model GroundTransitStateTransition {
+  id             String                 @id @default(uuid()) @db.Uuid
+  legExecutionId String                 @db.Uuid
+  fromState      GroundTransitLegState?
+  toState        GroundTransitLegState
+  source         String                 @db.VarChar(40)
+  evidenceRef    String                 @db.VarChar(300)
+  occurredAt     DateTime               @db.Timestamptz(3)
+  legExecution   GroundTransitLegExecution @relation(fields: [legExecutionId], references: [id], onDelete: Cascade)
+
+  @@index([legExecutionId, occurredAt])
 }
 
 model TransportDayProjection {

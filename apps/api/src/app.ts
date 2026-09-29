@@ -5,6 +5,7 @@ import {
   ExecutionLocationService,
   ExecutionRiskService,
   FlightMonitoringService,
+  GroundTransitService,
   FlightService,
   NotificationService,
   RouteAdoptionService,
@@ -51,6 +52,7 @@ export interface ApiDependencies {
   readonly executionRiskService?: ExecutionRiskService;
   readonly flightService?: FlightService;
   readonly flightMonitoringService?: FlightMonitoringService;
+  readonly groundTransitService?: GroundTransitService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
   readonly routeAdoptionService?: RouteAdoptionService;
@@ -540,6 +542,37 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/execution/ground-transit',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireGroundTransitService(dependencies).getTrip(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+
+  app.post<{ Params: { tripId: string; transportEdgeId: string } }>(
+    '/trips/:tripId/execution/ground-transit/:transportEdgeId/refresh',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireGroundTransitService(dependencies).refresh(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.transportEdgeId,
+      );
+    },
+  );
+
   app.post<{ Params: { tripId: string } }>(
     '/trips/:tripId/execution/events',
     async (request) => {
@@ -834,6 +867,20 @@ function requireExecutionLocationService(
   return dependencies.executionLocationService;
 }
 
+function requireGroundTransitService(
+  dependencies: ApiDependencies,
+): GroundTransitService {
+  if (dependencies.groundTransitService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '地面交通执行服务暂时不可用。',
+      503,
+      true,
+    );
+  }
+  return dependencies.groundTransitService;
+}
+
 function requireAssistanceCapabilityService(
   dependencies: ApiDependencies,
 ): AssistanceCapabilityService {
@@ -849,7 +896,12 @@ function requireAssistanceCapabilityService(
 }
 
 function parseTripAssistanceKind(value: string): TripAssistanceKind {
-  if (value === 'LOCATION_ASSISTANCE' || value === 'AUTO_RECORD') return value;
+  if (
+    value === 'LOCATION_ASSISTANCE' ||
+    value === 'AUTO_RECORD' ||
+    value === 'GROUND_TRANSIT_MONITORING'
+  )
+    return value;
   throw new ApplicationError('VALIDATION_ERROR', '辅助能力类型无效。', 400);
 }
 

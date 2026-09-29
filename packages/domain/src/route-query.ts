@@ -31,6 +31,20 @@ export interface RouteCandidateLeg {
   readonly fixedService: boolean;
   readonly serviceLabel: string | null;
   readonly providerRef: string | null;
+  readonly groundTransit?: {
+    readonly serviceClass: 'FIXED_SERVICE' | 'HIGH_FREQUENCY';
+    readonly serviceIdentityKey: string | null;
+    readonly lineRef: string | null;
+    readonly lineName: string | null;
+    readonly directionRef: string | null;
+    readonly directionLabel: string | null;
+    readonly boardingHubRef: string | null;
+    readonly alightingHubRef: string | null;
+    readonly headwayMinSeconds: number | null;
+    readonly headwayMaxSeconds: number | null;
+    readonly minimumTransferSeconds: number | null;
+    readonly boardingAccessMinimumSeconds?: number | null;
+  } | null;
 }
 
 export interface RouteFare {
@@ -141,7 +155,8 @@ function validLeg(leg: RouteCandidateLeg): boolean {
     !validLocation(leg.to) ||
     (leg.departure !== null && !validTimePoint(leg.departure)) ||
     (leg.arrival !== null && !validTimePoint(leg.arrival)) ||
-    (leg.durationSeconds !== null && !validDuration(leg.durationSeconds))
+    (leg.durationSeconds !== null && !validDuration(leg.durationSeconds)) ||
+    !validGroundTransitMetadata(leg)
   ) {
     return false;
   }
@@ -162,6 +177,43 @@ function validLeg(leg: RouteCandidateLeg): boolean {
     return false;
   }
   return true;
+}
+
+function validGroundTransitMetadata(leg: RouteCandidateLeg): boolean {
+  const metadata = leg.groundTransit;
+  if (metadata === undefined || metadata === null) return true;
+  if (leg.mode !== 'RAIL' && leg.mode !== 'BUS') return false;
+  const strings = [
+    metadata.serviceIdentityKey,
+    metadata.lineRef,
+    metadata.lineName,
+    metadata.directionRef,
+    metadata.directionLabel,
+    metadata.boardingHubRef,
+    metadata.alightingHubRef,
+  ];
+  const durations = [
+    metadata.headwayMinSeconds,
+    metadata.headwayMaxSeconds,
+    metadata.minimumTransferSeconds,
+    metadata.boardingAccessMinimumSeconds ?? null,
+  ];
+  return (
+    (metadata.serviceClass === 'FIXED_SERVICE' ||
+      metadata.serviceClass === 'HIGH_FREQUENCY') &&
+    (metadata.serviceClass === 'FIXED_SERVICE') === leg.fixedService &&
+    strings.every(
+      (value) =>
+        value === null ||
+        (typeof value === 'string' && value.trim().length > 0),
+    ) &&
+    durations.every(
+      (value) => value === null || (Number.isSafeInteger(value) && value >= 0),
+    ) &&
+    (metadata.headwayMinSeconds === null ||
+      metadata.headwayMaxSeconds === null ||
+      metadata.headwayMinSeconds <= metadata.headwayMaxSeconds)
+  );
 }
 
 function validLocation(location: RouteLocation): boolean {

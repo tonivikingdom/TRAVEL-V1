@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import {
   AuthService,
   digestOpaqueToken,
+  ExecutionRiskService,
+  GroundTransitService,
+  type GroundTransitProvider,
   hashRoutePreviewPayload,
   RouteAdoptionService,
   RoutePreviewService,
@@ -16,6 +19,7 @@ import {
   type StoredRoutePreviewPayload,
 } from '@travel/application';
 import type {
+  GroundTransitExecutionResponse,
   RoutePreviewView,
   RouteQueryResponse,
   TripView,
@@ -23,6 +27,8 @@ import type {
 import {
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaExecutionRiskRepository,
+  PrismaGroundTransitRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
   type ManagedPrismaClient,
@@ -30,6 +36,9 @@ import {
 import {
   GoogleConsumerExperimentalRouteProvider,
   SyntheticRouteProvider,
+  SyntheticGroundTransitProvider,
+  createDevelopmentSyntheticGroundTransitRouteProvider,
+  UnconfiguredGroundTransitProvider,
 } from '@travel/providers';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -92,9 +101,23 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     app = buildTestApi(provider);
   });
 
-  function buildTestApi(provider: RouteProvider): FastifyInstance {
+  function buildTestApi(
+    provider: RouteProvider,
+    groundProvider: GroundTransitProvider = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    ),
+  ): FastifyInstance {
     const routePlanningRepository = new PrismaRoutePlanningRepository(
       managed.client,
+    );
+    const groundTransitRepository = new PrismaGroundTransitRepository(
+      managed.client,
+    );
+    const executionRiskService = new ExecutionRiskService(
+      tripRepository,
+      new PrismaExecutionRiskRepository(managed.client),
+      { now: () => currentNow, groundTransitRepository },
     );
     return buildApi({
       readinessProbe: {
@@ -134,6 +157,13 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         new TripService(tripRepository),
         { now: () => currentNow },
       ),
+      groundTransitService: new GroundTransitService(
+        groundTransitRepository,
+        groundProvider,
+        () => currentNow,
+        executionRiskService,
+      ),
+      executionRiskService,
     });
   }
 
@@ -182,6 +212,726 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(1);
     expect(await databaseFacts(trip.id)).toEqual(before);
+  });
+
+  it('does not notify for a missing onward transfer when no protected connection exists', async () => {
+    currentNow = new Date('2030-10-01T09:50:00Z');
+    const trip = await tripWithVisits(userA, ['Bus origin', 'Bus destination']);
+    const [from, to] = trip.days[0]!.nodes;
+    const base = candidate(
+      '2030-10-01T10:00:00Z',
+      '2030-10-01T10:30:00Z',
+      'UTC',
+      'UTC',
+    );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...base,
+          observedAt: currentNow,
+          legs: [
+            {
+              ...base.legs[0]!,
+              mode: 'BUS',
+              fixedService: false,
+              groundTransit: {
+                serviceClass: 'HIGH_FREQUENCY',
+                serviceIdentityKey: null,
+                lineRef: 'bus-1',
+                lineName: 'Bus 1',
+                directionRef: 'east',
+                directionLabel: 'East',
+                boardingHubRef: 'origin',
+                alightingHubRef: 'destination',
+                headwayMinSeconds: 180,
+                headwayMaxSeconds: 300,
+                minimumTransferSeconds: null,
+                boardingAccessMinimumSeconds: 0,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `no-onward-${randomUUID()}`,
+    );
+    const ground = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(ground.statusCode).toBe(200);
+    const noOnwardSafety =
+      ground.json<GroundTransitExecutionResponse>().legs[0]!.safety;
+    expect(noOnwardSafety.boarding).toMatchObject({
+      headwayWaitReserveSeconds: 300,
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(noOnwardSafety.transferToNext).toBeNull();
+    expect(noOnwardSafety).not.toHaveProperty('totalSystemMinimumSeconds');
+    expect(noOnwardSafety).not.toHaveProperty('transferMinimumSeconds');
+    const recorded = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: adopted.trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: currentNow.toISOString(),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(recorded.statusCode).toBe(200);
+    const evaluated = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/evaluate`,
+      headers: bearer(userA),
+    });
+    expect(evaluated.statusCode).toBe(200);
+    expect(evaluated.json<{ risks: unknown[] }>().risks).toEqual([]);
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
+  });
+
+  it('reopens a baseline headway risk after fresh realtime expires and Provider becomes unavailable', async () => {
+    currentNow = new Date('2030-10-01T09:56:00Z');
+    await app.close();
+    const routeProvider = createDevelopmentSyntheticGroundTransitRouteProvider(
+      () => currentNow,
+    );
+    app = buildTestApi(
+      routeProvider,
+      new SyntheticGroundTransitProvider('NEXT_DEPARTURE_2', () => currentNow),
+    );
+    const trip = await tripWithVisits(userA, [
+      'Ground origin',
+      'Ground destination',
+    ]);
+    const [from, to] = trip.days[0]!.nodes;
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `ground-fallback-${randomUUID()}`,
+    );
+    const legs = await managed.client.groundTransitLegExecution.findMany({
+      where: { tripId: trip.id },
+      orderBy: { legIndex: 'asc' },
+    });
+    const high = legs.find((leg) => leg.serviceClass === 'HIGH_FREQUENCY')!;
+    const initialGround = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(initialGround.statusCode).toBe(200);
+    const initialSafety = initialGround
+      .json<GroundTransitExecutionResponse>()
+      .legs.find((leg) => leg.id === high.id)!.safety;
+    expect(initialSafety.boarding).toMatchObject({
+      headwayWaitReserveSeconds: 300,
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(initialSafety.transferToNext).toMatchObject({
+      transferMinimumSeconds: 300,
+      transferBasis: 'ADOPTED',
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(initialSafety).not.toHaveProperty('totalSystemMinimumSeconds');
+    const recorded = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: adopted.trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: currentNow.toISOString(),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(recorded.statusCode).toBe(200);
+    const evaluate = () =>
+      app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/evaluate`,
+        headers: bearer(userA),
+      });
+    expect(
+      (await evaluate()).json<{ risks: { kind: string }[] }>().risks,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'BUFFER_BELOW_SYSTEM_MINIMUM' }),
+      ]),
+    );
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json()).toMatchObject({
+      leg: {
+        safety: {
+          boarding: {
+            headwayWaitReserveSeconds: 120,
+            totalSystemMinimumSeconds: 120,
+          },
+          transferToNext: { totalSystemMinimumSeconds: 300 },
+        },
+      },
+    });
+    expect(
+      (await evaluate())
+        .json<{ risks: { sourceTransportEdgeId: string }[] }>()
+        .risks.filter(
+          (risk) => risk.sourceTransportEdgeId === high.transportEdgeId,
+        ),
+    ).toEqual([]);
+    const observationCount =
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: high.id },
+      });
+    await app.close();
+    app = buildTestApi(routeProvider, new UnconfiguredGroundTransitProvider());
+    currentNow = new Date('2030-10-01T09:59:00Z');
+    const unavailable = () =>
+      app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
+        headers: bearer(userA),
+      });
+    expect((await unavailable()).statusCode).toBe(503);
+    expect(
+      (await evaluate())
+        .json<{ risks: { sourceTransportEdgeId: string }[] }>()
+        .risks.filter(
+          (risk) => risk.sourceTransportEdgeId === high.transportEdgeId,
+        ),
+    ).toEqual([]);
+    currentNow = new Date('2030-10-01T10:05:00Z');
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: trip.id,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: currentNow,
+      },
+    });
+    const repository = new PrismaGroundTransitRepository(managed.client);
+    const riskService = new ExecutionRiskService(
+      tripRepository,
+      new PrismaExecutionRiskRepository(managed.client),
+      { now: () => currentNow, groundTransitRepository: repository },
+    );
+    const monitor = new GroundTransitService(
+      repository,
+      new UnconfiguredGroundTransitProvider(),
+      () => currentNow,
+      riskService,
+    );
+    await expect(
+      monitor.executeJob(high.adoptedRouteId, 1),
+    ).rejects.toMatchObject({
+      code: 'GROUND_TRANSIT_PROVIDER_UNAVAILABLE',
+    });
+    const reopened = await managed.client.executionRisk.findMany({
+      where: {
+        tripId: trip.id,
+        sourceTransportEdgeId: high.transportEdgeId,
+        status: 'OPEN',
+      },
+    });
+    expect(reopened).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'BUFFER_BELOW_SYSTEM_MINIMUM' }),
+      ]),
+    );
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: high.id },
+      }),
+    ).toBe(observationCount);
+    expect(
+      (
+        await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+          where: { id: high.id },
+        })
+      ).nextCheckAt,
+    ).toEqual(new Date('2030-10-01T10:01:00Z'));
+    await managed.client.groundTransitLegExecution.update({
+      where: { id: high.id },
+      data: {
+        baseline: {
+          ...(high.baseline as Record<string, unknown>),
+          minimumTransferSeconds: null,
+        } as never,
+      },
+    });
+    const missingTransfer = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(missingTransfer.statusCode).toBe(200);
+    const missingSafety = missingTransfer
+      .json<GroundTransitExecutionResponse>()
+      .legs.find((leg) => leg.id === high.id)!.safety;
+    expect(missingSafety.boarding.totalSystemMinimumSeconds).toBe(300);
+    expect(missingSafety.transferToNext).toMatchObject({
+      transferMinimumSeconds: null,
+      transferBasis: 'UNKNOWN',
+      totalSystemMinimumSeconds: null,
+      feasibility: 'UNKNOWN',
+      reasonCodes: expect.arrayContaining(['TRANSFER_MINIMUM_UNKNOWN']),
+    });
+    expect(missingSafety).not.toHaveProperty('reasonCodes');
+    currentNow = new Date('2030-10-01T10:06:00Z');
+    const staleFailure = await unavailable();
+    expect(staleFailure.statusCode).toBe(503);
+    expect(staleFailure.json()).toMatchObject({
+      error: { code: 'GROUND_TRANSIT_PROVIDER_UNAVAILABLE' },
+    });
+    const unknown = await managed.client.executionRisk.findFirst({
+      where: {
+        tripId: trip.id,
+        sourceTransportEdgeId: high.transportEdgeId,
+        kind: 'UNKNOWN_EXECUTION_MARGIN',
+        status: 'OPEN',
+      },
+    });
+    expect(unknown).toMatchObject({ severity: 'UNKNOWN' });
+    await managed.client.groundTransitLegExecution.update({
+      where: { id: high.id },
+      data: {
+        baseline: {
+          ...(high.baseline as Record<string, unknown>),
+          minimumTransferSeconds: 480,
+        } as never,
+      },
+    });
+    const knownTransfer = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(knownTransfer.statusCode).toBe(200);
+    expect(
+      knownTransfer
+        .json<GroundTransitExecutionResponse>()
+        .legs.find((leg) => leg.id === high.id)!.safety.transferToNext,
+    ).toMatchObject({
+      transferMinimumSeconds: 480,
+      totalSystemMinimumSeconds: 480,
+      transferBasis: 'ADOPTED',
+    });
+    const riskCountBeforePause = await managed.client.executionRisk.count({
+      where: { tripId: trip.id },
+    });
+    const notificationCountBeforePause =
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      });
+    await managed.client.tripAssistanceCapability.update({
+      where: {
+        tripId_kind: { tripId: trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      },
+      data: { state: 'PAUSED', revision: 2, pausedAt: currentNow },
+    });
+    await expect(
+      riskService.evaluateTripRisks(userA.actor, trip.id, {
+        groupKey: 'stale-ground-monitor',
+        sourceTransportEdgeId: high.transportEdgeId,
+        expectedGroundTransitCapabilityRevision: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+    expect(
+      await managed.client.executionRisk.count({ where: { tripId: trip.id } }),
+    ).toBe(riskCountBeforePause);
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(notificationCountBeforePause);
+  });
+
+  it('persists adopted fixed-service ground identity, refreshes owner-only, and retains archived evidence', async () => {
+    const trip = await tripWithVisits(userA, ['Ground A', 'Ground B']);
+    const [from, to] = trip.days[0]!.nodes;
+    const original = candidate(
+      '2030-10-01T10:00:00Z',
+      '2030-10-01T11:00:00Z',
+      'UTC',
+      'UTC',
+    );
+    const firstLeg = original.legs[0]!;
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...original,
+          candidateId: 'ground-fixed-candidate',
+          legs: [
+            {
+              ...firstLeg,
+              mode: 'RAIL',
+              groundTransit: {
+                serviceClass: 'FIXED_SERVICE',
+                serviceIdentityKey: 'synthetic:rail:2030-10-01:1',
+                lineRef: 'rail-1',
+                lineName: 'Rail 1',
+                directionRef: 'east',
+                directionLabel: 'East',
+                boardingHubRef: 'hub-a',
+                alightingHubRef: 'hub-b',
+                headwayMinSeconds: null,
+                headwayMaxSeconds: null,
+                minimumTransferSeconds: 300,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `ground-adopt-${randomUUID()}`,
+    );
+    const edge = await managed.client.transportEdge.findFirstOrThrow({
+      where: { tripId: trip.id, source: 'ADOPTED_ROUTE' },
+    });
+    const leg =
+      await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+        where: { transportEdgeId: edge.id },
+      });
+    expect(leg).toMatchObject({
+      serviceClass: 'FIXED_SERVICE',
+      serviceIdentityKey: 'synthetic:rail:2030-10-01:1',
+    });
+    expect((leg.baseline as Record<string, unknown>).schemaVersion).toBe(
+      'ground-transit-baseline-v1',
+    );
+    const otherRead = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userB),
+    });
+    expect(otherRead.statusCode).toBe(404);
+    const otherRefresh = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userB),
+    });
+    expect(otherRefresh.statusCode).toBe(404);
+    const syntheticGround = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    );
+    let cachedResult:
+      | Awaited<ReturnType<GroundTransitProvider['fetchObservation']>>
+      | undefined;
+    await app.close();
+    app = buildTestApi(new SyntheticRouteProvider(() => providerResult), {
+      name: 'SYNTHETIC',
+      async fetchObservation(input) {
+        cachedResult ??= await syntheticGround.fetchObservation(input);
+        return cachedResult;
+      },
+    });
+    const refresh = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refresh.statusCode).toBe(200);
+    expect(refresh.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: { serviceClass: 'FIXED_SERVICE', observationCount: 1 },
+    });
+    const estimated = await managed.client.temporalValue.findFirstOrThrow({
+      where: {
+        transportEdgeId: edge.id,
+        layer: 'ESTIMATED',
+        pointKind: 'DEPARTURE',
+      },
+    });
+    expect(estimated).toMatchObject({
+      sourceKind: 'PROVIDER_OBSERVATION',
+      instant: new Date('2030-10-01T10:10:00Z'),
+    });
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({ version: adopted.trip.version + 1 });
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(1);
+    const savedObservation =
+      await managed.client.groundTransitObservation.findFirstOrThrow({
+        where: { legExecutionId: leg.id },
+      });
+    expect(estimated.sourceRef).toBe(
+      `ground-transit-observation:${savedObservation.id}`,
+    );
+    const replay = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({ status: 'IDEMPOTENT' });
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({ version: adopted.trip.version + 1 });
+    expect(
+      await managed.client.groundTransitStateTransition.findMany({
+        where: { legExecutionId: leg.id },
+        orderBy: { occurredAt: 'asc' },
+      }),
+    ).toMatchObject([
+      { fromState: null, toState: 'PENDING', source: 'ROUTE_ADOPT' },
+    ]);
+
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      new SyntheticGroundTransitProvider('STALE', () => currentNow),
+    );
+    const stale = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(stale.statusCode).toBe(200);
+    expect(stale.json()).toMatchObject({
+      status: 'STALE_IGNORED',
+      leg: { observationCount: 1 },
+    });
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(1);
+
+    currentNow = new Date('2030-10-01T09:30:00Z');
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: trip.id,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: currentNow,
+      },
+    });
+    const monitorProvider = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    );
+    const monitor = new GroundTransitService(
+      new PrismaGroundTransitRepository(managed.client),
+      {
+        name: 'SYNTHETIC',
+        async fetchObservation(input) {
+          const result = await monitorProvider.fetchObservation(input);
+          return result.status === 'SUCCESS'
+            ? {
+                status: 'SUCCESS',
+                observation: {
+                  ...result.observation,
+                  observationIdentity: `background:${result.observation.observationIdentity}`,
+                },
+              }
+            : result;
+        },
+      },
+      () => currentNow,
+    );
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(2);
+    await managed.client.tripAssistanceCapability.update({
+      where: {
+        tripId_kind: { tripId: trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      },
+      data: { state: 'PAUSED', revision: 2, pausedAt: currentNow },
+    });
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    await managed.client.tripAssistanceCapability.update({
+      where: {
+        tripId_kind: { tripId: trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      },
+      data: { state: 'ENABLED', revision: 3, resumedAt: currentNow },
+    });
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(2);
+    currentNow = new Date('2030-10-01T09:36:00Z');
+    await monitor.executeJob(leg.adoptedRouteId, 3);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(3);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({ version: adopted.trip.version + 1 });
+
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      new SyntheticGroundTransitProvider('IDENTITY_MISMATCH', () => currentNow),
+    );
+    const mismatch = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(mismatch.statusCode).toBe(200);
+    expect(mismatch.json()).toMatchObject({ status: 'DIFFERENT_SERVICE' });
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(3);
+
+    currentNow = new Date('2030-10-01T10:05:00Z');
+    await app.close();
+    const actualProvider = new SyntheticGroundTransitProvider(
+      'ACTUAL_DEPARTURE',
+      () => currentNow,
+    );
+    app = buildTestApi(new SyntheticRouteProvider(() => providerResult), {
+      name: 'SYNTHETIC',
+      async fetchObservation(input) {
+        const result = await actualProvider.fetchObservation(input);
+        return result.status === 'SUCCESS'
+          ? {
+              status: 'SUCCESS',
+              observation: {
+                ...result.observation,
+                observationIdentity: `actual-test:${result.observation.observationIdentity}`,
+              },
+            }
+          : result;
+      },
+    });
+    const actualRefresh = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(actualRefresh.statusCode).toBe(200);
+    expect(actualRefresh.json()).toMatchObject({ status: 'APPLIED' });
+    const actual = await managed.client.temporalValue.findUniqueOrThrow({
+      where: {
+        transportEdgeId_pointKind_layer: {
+          transportEdgeId: edge.id,
+          pointKind: 'DEPARTURE',
+          layer: 'ACTUAL',
+        },
+      },
+    });
+    expect(actual).toMatchObject({
+      instant: new Date('2030-10-01T10:00:00Z'),
+      sourceKind: 'PROVIDER_OBSERVATION',
+    });
+    currentNow = new Date('2030-10-01T10:10:00Z');
+    await app.close();
+    const lateEstimateProvider = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    );
+    app = buildTestApi(new SyntheticRouteProvider(() => providerResult), {
+      name: 'SYNTHETIC',
+      async fetchObservation(input) {
+        const result = await lateEstimateProvider.fetchObservation(input);
+        return result.status === 'SUCCESS'
+          ? {
+              status: 'SUCCESS',
+              observation: {
+                ...result.observation,
+                observationIdentity: `late-estimate:${result.observation.observationIdentity}`,
+              },
+            }
+          : result;
+      },
+    });
+    const lateEstimate = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(lateEstimate.statusCode).toBe(200);
+    expect(lateEstimate.json()).toMatchObject({ status: 'APPLIED' });
+    expect(
+      await managed.client.temporalValue.findUniqueOrThrow({
+        where: {
+          transportEdgeId_pointKind_layer: {
+            transportEdgeId: edge.id,
+            pointKind: 'DEPARTURE',
+            layer: 'ACTUAL',
+          },
+        },
+      }),
+    ).toMatchObject({ instant: actual.instant, sourceRef: actual.sourceRef });
+
+    await managed.client.groundTransitLegExecution.delete({
+      where: { id: leg.id },
+    });
+    const legacy = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.json()).toMatchObject({
+      legs: [
+        {
+          transportEdgeId: edge.id,
+          state: 'UNKNOWN',
+          serviceClass: null,
+          baseline: null,
+          current: true,
+        },
+      ],
+    });
   });
 
   it('runs the Google Consumer adapter through snapshot, preview, adopt, and undo', async () => {

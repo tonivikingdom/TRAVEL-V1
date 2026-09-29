@@ -5,6 +5,7 @@ export {
 } from './config.js';
 export {
   createDevelopmentSyntheticRouteProvider,
+  createDevelopmentSyntheticGroundTransitRouteProvider,
   SyntheticRouteProvider,
 } from './synthetic-route-provider.js';
 export { UnconfiguredRouteProvider } from './unconfigured-route-provider.js';
@@ -22,3 +23,9 @@ export {
 } from './flight-config.js';
 export { UnconfiguredFlightProvider } from './unconfigured-flight-provider.js';
 export { SyntheticFlightProvider } from './synthetic-flight-provider.js';
+export {
+  SyntheticGroundTransitProvider,
+  UnconfiguredGroundTransitProvider,
+  createGroundTransitProvider,
+  type SyntheticGroundTransitScenario,
+} from './synthetic-ground-transit-provider.js';

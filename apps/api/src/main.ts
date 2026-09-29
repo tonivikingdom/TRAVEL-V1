@@ -4,6 +4,7 @@ import {
   ExecutionLocationService,
   ExecutionRiskService,
   FlightMonitoringService,
+  GroundTransitService,
   FlightService,
   NotificationService,
   RouteAdoptionService,
@@ -21,6 +22,7 @@ import {
   PrismaExecutionRiskRepository,
   PrismaFlightRepository,
   PrismaFlightMonitoringRepository,
+  PrismaGroundTransitRepository,
   PrismaNotificationRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
@@ -28,12 +30,14 @@ import {
 } from '@travel/persistence';
 import {
   createDevelopmentSyntheticRouteProvider,
+  createDevelopmentSyntheticGroundTransitRouteProvider,
   AeroDataBoxFlightProvider,
   GoogleConsumerExperimentalRouteProvider,
   readFlightProviderConfig,
   readRouteProviderConfig,
   UnconfiguredFlightProvider,
   SyntheticFlightProvider,
+  createGroundTransitProvider,
   UnconfiguredRouteProvider,
 } from '@travel/providers';
 
@@ -53,6 +57,7 @@ let executionLocationService: ExecutionLocationService | undefined;
 let executionRiskService: ExecutionRiskService | undefined;
 let flightService: FlightService | undefined;
 let flightMonitoringService: FlightMonitoringService | undefined;
+let groundTransitService: GroundTransitService | undefined;
 let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
@@ -73,9 +78,13 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     new PrismaNotificationRepository(managedPrisma.client),
   );
   const tripRepository = new PrismaTripRepository(managedPrisma.client);
+  const groundTransitRepository = new PrismaGroundTransitRepository(
+    managedPrisma.client,
+  );
   executionRiskService = new ExecutionRiskService(
     tripRepository,
     new PrismaExecutionRiskRepository(managedPrisma.client),
+    { groundTransitRepository },
   );
   const flightProviderConfig = readFlightProviderConfig(process.env);
   const flightProvider =
@@ -104,10 +113,18 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     flightService,
     new PrismaFlightMonitoringRepository(managedPrisma.client),
   );
+  groundTransitService = new GroundTransitService(
+    groundTransitRepository,
+    createGroundTransitProvider(process.env),
+    () => new Date(),
+    executionRiskService,
+  );
   executionLocationService = new ExecutionLocationService(
     new PrismaExecutionLocationRepository(managedPrisma.client),
     executionRiskService,
     flightMonitoringService,
+    {},
+    groundTransitService,
   );
   const planningRepository = new PrismaRoutePlanningRepository(
     managedPrisma.client,
@@ -116,7 +133,16 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   const routeProviderConfig = readRouteProviderConfig(process.env);
   const routeProvider =
     routeProviderConfig.provider === 'synthetic'
-      ? createDevelopmentSyntheticRouteProvider()
+      ? process.env.SYNTHETIC_GROUND_TRANSIT_ROUTE === 'true'
+        ? ['development', 'test'].includes(process.env.APP_ENV ?? '') &&
+          process.env.SYNTHETIC_CI_ONLY === 'true'
+          ? createDevelopmentSyntheticGroundTransitRouteProvider()
+          : (() => {
+              throw new Error(
+                'Synthetic ground transit route requires Dev/Test and SYNTHETIC_CI_ONLY=true',
+              );
+            })()
+        : createDevelopmentSyntheticRouteProvider()
       : routeProviderConfig.provider === 'google_consumer_experimental'
         ? new GoogleConsumerExperimentalRouteProvider({
             baseUrl: routeProviderConfig.baseUrl,
@@ -160,6 +186,7 @@ const app = buildApi({
   ...(executionRiskService === undefined ? {} : { executionRiskService }),
   ...(flightService === undefined ? {} : { flightService }),
   ...(flightMonitoringService === undefined ? {} : { flightMonitoringService }),
+  ...(groundTransitService === undefined ? {} : { groundTransitService }),
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(routePreviewService === undefined ? {} : { routePreviewService }),
   ...(routeAdoptionService === undefined ? {} : { routeAdoptionService }),

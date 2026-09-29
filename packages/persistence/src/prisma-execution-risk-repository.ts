@@ -40,6 +40,7 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
     readonly desiredRisks: readonly DesiredExecutionRisk[];
     readonly correlationGroupKey?: string | undefined;
     readonly correlationSourceTransportEdgeId?: string | undefined;
+    readonly expectedGroundTransitCapabilityRevision?: number | undefined;
   }): Promise<ReconcileExecutionRisksResult> {
     return this.client.$transaction(async (transaction) => {
       await lockOwner(transaction, input.ownerUserId);
@@ -47,6 +48,24 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
       if (trip === null) return { status: 'NOT_FOUND' };
       if (trip.version !== input.basisTripVersion) {
         return { status: 'VERSION_CONFLICT' };
+      }
+      if (input.expectedGroundTransitCapabilityRevision !== undefined) {
+        const capability =
+          await transaction.tripAssistanceCapability.findUnique({
+            where: {
+              tripId_kind: {
+                tripId: input.tripId,
+                kind: 'GROUND_TRANSIT_MONITORING',
+              },
+            },
+            select: { state: true, revision: true },
+          });
+        if (
+          capability?.state !== 'ENABLED' ||
+          capability.revision !== input.expectedGroundTransitCapabilityRevision
+        ) {
+          return { status: 'CAPABILITY_CHANGED' };
+        }
       }
 
       const existingActive = await transaction.executionRisk.findMany({

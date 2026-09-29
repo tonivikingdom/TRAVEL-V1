@@ -366,6 +366,76 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(1);
 
+    currentNow = new Date('2030-10-01T09:30:00Z');
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: trip.id,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: currentNow,
+      },
+    });
+    const monitorProvider = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    );
+    const monitor = new GroundTransitService(
+      new PrismaGroundTransitRepository(managed.client),
+      {
+        name: 'SYNTHETIC',
+        async fetchObservation(input) {
+          const result = await monitorProvider.fetchObservation(input);
+          return result.status === 'SUCCESS'
+            ? {
+                status: 'SUCCESS',
+                observation: {
+                  ...result.observation,
+                  observationIdentity: `background:${result.observation.observationIdentity}`,
+                },
+              }
+            : result;
+        },
+      },
+      () => currentNow,
+    );
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(2);
+    await managed.client.tripAssistanceCapability.update({
+      where: {
+        tripId_kind: { tripId: trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      },
+      data: { state: 'PAUSED', revision: 2, pausedAt: currentNow },
+    });
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    await managed.client.tripAssistanceCapability.update({
+      where: {
+        tripId_kind: { tripId: trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      },
+      data: { state: 'ENABLED', revision: 3, resumedAt: currentNow },
+    });
+    await monitor.executeJob(leg.adoptedRouteId, 1);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(2);
+    currentNow = new Date('2030-10-01T09:36:00Z');
+    await monitor.executeJob(leg.adoptedRouteId, 3);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(3);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({ version: adopted.trip.version + 1 });
+
     await app.close();
     app = buildTestApi(
       new SyntheticRouteProvider(() => providerResult),
@@ -382,7 +452,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       await managed.client.groundTransitObservation.count({
         where: { legExecutionId: leg.id },
       }),
-    ).toBe(1);
+    ).toBe(3);
 
     await managed.client.groundTransitLegExecution.delete({
       where: { id: leg.id },

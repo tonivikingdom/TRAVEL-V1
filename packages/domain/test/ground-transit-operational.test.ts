@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assessGroundTransitOperational,
+  assessGroundTransitSafety,
+  resolveGroundTransitProviderState,
   type GroundTransitBaseline,
   type GroundTransitObservation,
 } from '../src/ground-transit-execution.js';
@@ -253,5 +255,122 @@ describe('ground transit operational facts', () => {
     expect(result.disposition).toBe('CONTINUE_CURRENT_PLAN');
     expect(result.requiredAction).toBe('NONE');
     expect(result.requiresUserAttention).toBe(false);
+  });
+
+  it('preserves confirmed destination arrival and terminal completion after cancellation', () => {
+    const cancelled = { ...normal, serviceStatus: 'CANCELLED' as const };
+    for (const state of ['ARRIVED_PENDING_HANDOFF', 'COMPLETED'] as const) {
+      expect(assess(cancelled, { state }).disposition).toBe(
+        'CONTINUE_CURRENT_PLAN',
+      );
+      expect(
+        resolveGroundTransitProviderState({
+          previous: state,
+          noLongerFeasible: true,
+          beforeFailureState: 'PENDING',
+        }),
+      ).toBe(state);
+    }
+  });
+
+  it('recovers the pre-failure execution state without inferring ridership from vehicle departure', () => {
+    expect(
+      resolveGroundTransitProviderState({
+        previous: 'NO_LONGER_FEASIBLE',
+        noLongerFeasible: false,
+        beforeFailureState: 'PENDING',
+      }),
+    ).toBe('PENDING');
+    expect(
+      resolveGroundTransitProviderState({
+        previous: 'NO_LONGER_FEASIBLE',
+        noLongerFeasible: false,
+        beforeFailureState: 'IN_PROGRESS',
+      }),
+    ).toBe('IN_PROGRESS');
+    expect(
+      resolveGroundTransitProviderState({
+        previous: 'NO_LONGER_FEASIBLE',
+        noLongerFeasible: true,
+        beforeFailureState: 'IN_PROGRESS',
+      }),
+    ).toBe('NO_LONGER_FEASIBLE');
+  });
+
+  it('alerts on first material delay but not a repeated fact or small ETA drift', () => {
+    const first = { ...normal, estimatedArrival: at(65) };
+    expect(assess(first).changeKinds).toContain('MATERIAL_DELAY');
+    expect(assess(first).requiresUserAttention).toBe(true);
+    const same = { ...first, observationIdentity: 'two', fetchedAt: at(11) };
+    expect(
+      assess(same, { previousObservation: first, now: at(12) }),
+    ).toMatchObject({ changeKinds: [], requiresUserAttention: false });
+    const drift = { ...same, estimatedArrival: at(66) };
+    expect(
+      assess(drift, { previousObservation: first, now: at(12) }),
+    ).toMatchObject({ changeKinds: [], requiresUserAttention: false });
+  });
+
+  it('allows material escalation or a newly threatened protected connection', () => {
+    const first = { ...normal, estimatedArrival: at(64) };
+    const escalated = assess(
+      { ...first, estimatedArrival: at(72) },
+      { previousObservation: first },
+    );
+    expect(escalated.changeKinds).toContain('MATERIAL_DELAY');
+    const downstream = assess(
+      { ...first, estimatedArrival: at(69) },
+      {
+        previousObservation: first,
+        downstreamProtectedDeparture: at(72),
+      },
+    );
+    expect(downstream.changeKinds).toContain(
+      'DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK',
+    );
+    expect(downstream.requiresUserAttention).toBe(true);
+  });
+
+  it('silently ends a material incident after a small non-material correction', () => {
+    const previousObservation = { ...normal, estimatedArrival: at(65) };
+    const recovered = assess(
+      { ...normal, estimatedArrival: at(56) },
+      { previousObservation },
+    );
+    expect(recovered.disposition).toBe('CONTINUE_CURRENT_PLAN');
+    expect(recovered.requiresUserAttention).toBe(false);
+    expect(recovered.changeKinds).not.toContain('SERVICE_RESTORED');
+  });
+
+  it('does not invalidate a high-frequency corridor for one generic cancelled vehicle', () => {
+    const corridor = {
+      ...baseline,
+      serviceClass: 'HIGH_FREQUENCY' as const,
+      serviceIdentityKey: null,
+      headwayMinSeconds: 180,
+      headwayMaxSeconds: 300,
+    };
+    const observation = {
+      ...normal,
+      serviceClass: 'HIGH_FREQUENCY' as const,
+      serviceIdentityKey: null,
+      headwayMinSeconds: 180,
+      headwayMaxSeconds: 300,
+      nextDepartureInSeconds: 120,
+      serviceStatus: 'CANCELLED' as const,
+    };
+    const operational = assess(observation, { baseline: corridor });
+    const safety = assessGroundTransitSafety({
+      baseline: corridor,
+      observation,
+      now: at(11),
+      availableAt: null,
+      downstreamLatestAt: null,
+      boundary: 'BOARDING',
+    });
+    expect(operational.disposition).toBe('CONTINUE_CURRENT_PLAN');
+    expect(operational.changeKinds).not.toContain('SERVICE_CANCELLED');
+    expect(safety.feasibility).not.toBe('INFEASIBLE');
+    expect(safety.reasonCodes).not.toContain('SERVICE_CANCELLED');
   });
 });

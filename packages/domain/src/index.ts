@@ -14,6 +14,7 @@ export {
   isSustainedGroundTransitDeviation,
   validGroundTransitObservation,
   resolveGroundTransitLegState,
+  resolveGroundTransitProviderState,
   type GroundTransitBaseline,
   type GroundTransitIdentityResult,
   type GroundTransitLegState,

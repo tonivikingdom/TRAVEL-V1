@@ -282,6 +282,9 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
         await transaction.groundTransitLegExecution.update({
           where: { transportEdgeId: expected.transportEdgeId },
           data: {
+            // latestObservation is a denormalized current snapshot plus an
+            // internal decision watermark. This marker is never included in
+            // GroundTransitObservation.facts, its provider hash, or API output.
             latestObservation: {
               ...decisionFacts,
               __groundTransitRiskDecision: `${expected.identity}:${expected.fetchedAt.toISOString()}`,

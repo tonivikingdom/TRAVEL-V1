@@ -9,6 +9,7 @@ import {
   decideGroundTransitObservationOrdering,
   GROUND_TRANSIT_POLICY,
   matchGroundTransitIdentity,
+  resolveGroundTransitProviderState,
   type GroundTransitBaseline,
   type GroundTransitObservation,
   type GroundTransitChangeKind,
@@ -288,6 +289,23 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         actualServiceDeparture: actualServiceDeparture?.instant ?? null,
         downstreamProtectedDeparture: fixedDeparture,
       });
+      const entryIntoFailure =
+        row.state === 'NO_LONGER_FEASIBLE'
+          ? await transaction.groundTransitStateTransition.findFirst({
+              where: {
+                legExecutionId: row.id,
+                toState: 'NO_LONGER_FEASIBLE',
+              },
+              orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+              select: { fromState: true },
+            })
+          : null;
+      const providerState = resolveGroundTransitProviderState({
+        previous: row.state,
+        noLongerFeasible:
+          operational.disposition === 'CURRENT_PLAN_NO_LONGER_FEASIBLE',
+        beforeFailureState: entryIntoFailure?.fromState ?? null,
+      });
       const updated = await transaction.groundTransitLegExecution.update({
         where: { id: row.id },
         data: {
@@ -295,18 +313,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
           latestObservationId: input.observation.observationIdentity,
           latestObservationHash: factsHash,
           latestObservation: facts as unknown as Prisma.InputJsonValue,
-          ...(row.state === 'COMPLETED'
-            ? {}
-            : {
-                state:
-                  operational.disposition === 'CURRENT_PLAN_NO_LONGER_FEASIBLE'
-                    ? ('NO_LONGER_FEASIBLE' as const)
-                    : row.state === 'NO_LONGER_FEASIBLE'
-                      ? actualServiceDeparture === null
-                        ? ('PENDING' as const)
-                        : ('IN_PROGRESS' as const)
-                      : row.state,
-              }),
+          state: providerState,
           deviationCount: consequentialDeviation ? row.deviationCount + 1 : 0,
           deviationStartedAt: consequentialDeviation
             ? (row.deviationStartedAt ?? input.observation.fetchedAt)
@@ -480,6 +487,10 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         input.assessment.requiredAction,
         input.hasDownstreamImpact,
       );
+      if (summary.length === 0)
+        throw new Error(
+          'Ground transit attention requires a non-empty summary',
+        );
       if (current !== null) {
         const priorKinds = Array.isArray(current.changeKinds)
           ? current.changeKinds.filter(
@@ -1145,6 +1156,7 @@ function operationalSummary(
     ALIGHTING_TARGET_NO_LONGER_SERVED: '原下车站不再停靠',
     SERVICE_SHORT_TURNED: '班次运行区间缩短',
     TERMINUS_CHANGED: '班次终点已变化',
+    DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK: '后续固定衔接出现风险',
     SERVICE_RESTORED: '原班次已恢复运行',
   };
   return [

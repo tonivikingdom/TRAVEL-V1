@@ -227,7 +227,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
   function groundSequence(
     changes: readonly (
-      'CANCELLED' | 'RECOVERY' | 'SHORT_TURN' | 'ACTUAL_MISS'
+      | 'CANCELLED'
+      | 'RECOVERY'
+      | 'RECOVERY_WITH_SERVICE_DEPARTURE'
+      | 'SHORT_TURN'
+      | 'ACTUAL_MISS'
+      | 'DELAY_16'
+      | 'DELAY_17'
+      | 'DELAY_31'
     )[],
   ): GroundTransitProvider {
     let index = 0;
@@ -243,6 +250,15 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         );
         const result = await source.fetchObservation({ leg });
         if (result.status !== 'SUCCESS') return result;
+        const plannedArrival = leg.baseline?.plannedArrival ?? null;
+        const delayMinutes =
+          kind === 'DELAY_16'
+            ? 16
+            : kind === 'DELAY_17'
+              ? 17
+              : kind === 'DELAY_31'
+                ? 31
+                : null;
         return {
           status: 'SUCCESS',
           observation: {
@@ -251,9 +267,18 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
             serviceStatus:
               kind === 'CANCELLED'
                 ? ('CANCELLED' as const)
-                : ('ON_TIME' as const),
+                : delayMinutes === null
+                  ? ('ON_TIME' as const)
+                  : ('DELAYED' as const),
+            estimatedArrival:
+              delayMinutes === null || plannedArrival === null
+                ? null
+                : new Date(plannedArrival.getTime() + delayMinutes * 60_000),
             actualDeparture:
-              kind === 'ACTUAL_MISS' ? new Date('2030-10-01T10:00:00Z') : null,
+              kind === 'ACTUAL_MISS' ||
+              kind === 'RECOVERY_WITH_SERVICE_DEPARTURE'
+                ? new Date('2030-10-01T10:00:00Z')
+                : null,
           },
         };
       },
@@ -824,6 +849,174 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       },
     });
     expect(oldDecision).toEqual({ status: 'OBSERVATION_OBSOLETE' });
+  });
+
+  it('does not rewind independently confirmed destination arrival on a later provider cancellation', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    await managed.client.groundTransitLegExecution.update({
+      where: { id: leg.id },
+      data: { state: 'ARRIVED_PENDING_HANDOFF' },
+    });
+    await managed.client.groundTransitStateTransition.create({
+      data: {
+        legExecutionId: leg.id,
+        fromState: 'PENDING',
+        toState: 'ARRIVED_PENDING_HANDOFF',
+        source: 'LOCATION_ASSISTANCE',
+        evidenceRef: 'node:destination-arrival',
+        occurredAt: currentNow,
+      },
+    });
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED']),
+    );
+    const result = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(result.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: {
+        state: 'ARRIVED_PENDING_HANDOFF',
+        operational: { disposition: 'CONTINUE_CURRENT_PLAN' },
+      },
+    });
+    expect(
+      await managed.client.groundTransitStateTransition.count({
+        where: { legExecutionId: leg.id, toState: 'NO_LONGER_FEASIBLE' },
+      }),
+    ).toBe(0);
+  });
+
+  it('does not infer user boarding from provider ACTUAL departure during recovery', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED', 'RECOVERY_WITH_SERVICE_DEPARTURE']),
+    );
+    const url = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    expect(
+      (
+        await app.inject({ method: 'POST', url, headers: bearer(userA) })
+      ).json(),
+    ).toMatchObject({
+      leg: { state: 'NO_LONGER_FEASIBLE' },
+    });
+    currentNow = new Date('2030-10-01T10:11:00Z');
+    const recovered = await app.inject({
+      method: 'POST',
+      url,
+      headers: bearer(userA),
+    });
+    expect(recovered.json()).toMatchObject({
+      status: 'APPLIED',
+      leg: { state: 'PENDING' },
+    });
+    expect(
+      await managed.client.temporalValue.findFirst({
+        where: {
+          transportEdgeId: leg.transportEdgeId,
+          pointKind: 'DEPARTURE',
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toMatchObject({ sourceKind: 'PROVIDER_OBSERVATION' });
+  });
+
+  it('restores the independent in-progress execution state after a temporary service failure', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    await managed.client.groundTransitLegExecution.update({
+      where: { id: leg.id },
+      data: { state: 'IN_PROGRESS' },
+    });
+    await managed.client.groundTransitStateTransition.create({
+      data: {
+        legExecutionId: leg.id,
+        fromState: 'PENDING',
+        toState: 'IN_PROGRESS',
+        source: 'LOCATION_ASSISTANCE',
+        evidenceRef: 'node:boarding-departure',
+        occurredAt: currentNow,
+      },
+    });
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['SHORT_TURN', 'RECOVERY']),
+    );
+    const url = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    expect(
+      (
+        await app.inject({ method: 'POST', url, headers: bearer(userA) })
+      ).json(),
+    ).toMatchObject({
+      leg: { state: 'NO_LONGER_FEASIBLE' },
+    });
+    currentNow = new Date('2030-10-01T09:51:00Z');
+    expect(
+      (
+        await app.inject({ method: 'POST', url, headers: bearer(userA) })
+      ).json(),
+    ).toMatchObject({
+      status: 'APPLIED',
+      leg: { state: 'IN_PROGRESS' },
+    });
+    expect(
+      (
+        await managed.client.groundTransitStateTransition.findFirstOrThrow({
+          where: { legExecutionId: leg.id, toState: 'NO_LONGER_FEASIBLE' },
+          orderBy: { occurredAt: 'desc' },
+        })
+      ).fromState,
+    ).toBe('IN_PROGRESS');
+  });
+
+  it('does not repeat a persistent material-delay presentation or create blank text', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence([
+        'DELAY_16',
+        'DELAY_16',
+        'DELAY_17',
+        'DELAY_31',
+        'RECOVERY',
+      ]),
+    );
+    const url = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    for (const [index, expectedCount] of [1, 1, 1, 2, 2].entries()) {
+      currentNow = new Date(Date.UTC(2030, 9, 1, 9, 50 + index));
+      const response = await app.inject({
+        method: 'POST',
+        url,
+        headers: bearer(userA),
+      });
+      expect(response.json()).toMatchObject({ status: 'APPLIED' });
+      const presentations = await managed.client.notificationEvent.findMany({
+        where: {
+          tripId: trip.id,
+          presentationGroupKey: {
+            startsWith: `ground-transit-observation:${leg.id}:`,
+          },
+        },
+      });
+      expect(presentations).toHaveLength(expectedCount);
+      expect(
+        presentations.filter((item) => item.presentationActive),
+      ).toHaveLength(index < 4 ? 1 : 0);
+      expect(
+        presentations.every(
+          (item) =>
+            item.body.trim().length > 0 &&
+            (item.summary?.trim().length ?? 0) > 0,
+        ),
+      ).toBe(true);
+    }
   });
 
   it('marks a skipped adopted stop infeasible and refuses to revive an actual missed service', async () => {

@@ -330,7 +330,7 @@ async function verifyCompose(compose, composeQuiet, env) {
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(
-        `Synthetic P4B2 API ${method} ${pathname} failed with ${response.status}: ${payload?.error?.code ?? 'UNKNOWN'}`,
+        `Synthetic P4B2 API ${method} ${pathname} failed with ${response.status}: ${payload?.error?.code ?? 'UNKNOWN'} (${payload?.error?.message ?? 'no explanation'})`,
       );
     }
     return payload;

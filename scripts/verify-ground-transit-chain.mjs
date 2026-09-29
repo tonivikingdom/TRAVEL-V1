@@ -25,7 +25,15 @@ export async function verifyGroundTransitChain({
       )
     ).trim();
   const departure = new Date(Date.now() + 4 * 60_000);
-  const date = departure.toISOString().slice(0, 10);
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(departure);
+  const datePart = (type) =>
+    dateParts.find((part) => part.type === type)?.value;
+  const date = `${datePart('year')}-${datePart('month')}-${datePart('day')}`;
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 ground execution',
     planningAnchorDate: date,

@@ -43,6 +43,7 @@ export interface RouteCandidateLeg {
     readonly headwayMinSeconds: number | null;
     readonly headwayMaxSeconds: number | null;
     readonly minimumTransferSeconds: number | null;
+    readonly boardingAccessMinimumSeconds?: number | null;
   } | null;
 }
 
@@ -195,6 +196,7 @@ function validGroundTransitMetadata(leg: RouteCandidateLeg): boolean {
     metadata.headwayMinSeconds,
     metadata.headwayMaxSeconds,
     metadata.minimumTransferSeconds,
+    metadata.boardingAccessMinimumSeconds ?? null,
   ];
   return (
     (metadata.serviceClass === 'FIXED_SERVICE' ||

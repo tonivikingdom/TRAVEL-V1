@@ -24,7 +24,7 @@ export async function verifyGroundTransitChain({
         query,
       )
     ).trim();
-  const departure = new Date(Date.now() + 8 * 60_000);
+  const departure = new Date(Date.now() + 4 * 60_000);
   const date = departure.toISOString().slice(0, 10);
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 ground execution',
@@ -132,7 +132,7 @@ export async function verifyGroundTransitChain({
   );
   if (Number(riskCount) < 1)
     throw new Error(
-      'P5E2 headway/transfer minimum did not enter existing ExecutionRisk',
+      'P5E2 headway minimum did not enter existing ExecutionRisk',
     );
   const reminderCount = await sql(
     `SELECT count(*) FROM "NotificationEvent" n JOIN "ExecutionRisk" r ON n."dedupeKey" LIKE 'execution-risk:' || r."id"::text || ':%' WHERE r."tripId"='${trip.id}' AND r."sourceTransportEdgeId"='${highFrequencyEdge(initial)}' AND n."presentationActive"=TRUE;`,
@@ -166,10 +166,10 @@ export async function verifyGroundTransitChain({
   if (
     high.safety.headwayWaitReserveSeconds !== 300 ||
     high.safety.transferMinimumSeconds !== 300 ||
-    high.safety.totalSystemMinimumSeconds !== 600
+    high.safety.totalSystemMinimumSeconds !== 300
   )
     throw new Error(
-      'P5E2 3–5 minute headway + transfer safety was not applied',
+      'P5E2 headway and onward transfer boundaries were not separated',
     );
   const refreshed = await apiJson(
     `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
@@ -179,7 +179,7 @@ export async function verifyGroundTransitChain({
   if (
     refreshed.status !== 'APPLIED' ||
     refreshed.leg.safety.headwayWaitReserveSeconds !== 120 ||
-    refreshed.leg.safety.totalSystemMinimumSeconds !== 420
+    refreshed.leg.safety.totalSystemMinimumSeconds !== 120
   )
     throw new Error(
       'P5E2 fresh next-departure did not replace the 5-minute reserve',

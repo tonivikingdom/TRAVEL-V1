@@ -24,6 +24,7 @@ const highFrequency: GroundTransitBaseline = {
   headwayMinSeconds: 180,
   headwayMaxSeconds: 300,
   minimumTransferSeconds: null,
+  boardingAccessMinimumSeconds: 0,
   plannedDeparture: at('10:20'),
   plannedArrival: at('10:45'),
 };
@@ -56,17 +57,18 @@ const observation: GroundTransitObservation = {
 };
 
 describe('ground transit execution policy', () => {
-  it('uses normal headway upper bound and explicit transfer fallback, without making it the ETA', () => {
+  it('uses headway without inventing or double-counting transfer, without making it the ETA', () => {
     const result = assessGroundTransitSafety({
       baseline: highFrequency,
       observation: null,
       now: at('10:00'),
       availableAt: at('10:00'),
       downstreamLatestAt: at('11:00'),
+      boundary: 'BOARDING',
     });
     expect(result.headwayWaitReserveSeconds).toBe(300);
-    expect(result.transferMinimumSeconds).toBe(300);
-    expect(result.totalSystemMinimumSeconds).toBe(600);
+    expect(result.transferMinimumSeconds).toBeNull();
+    expect(result.totalSystemMinimumSeconds).toBe(300);
     expect(result.etaRangeSeconds).toEqual([180, 300]);
   });
 
@@ -77,10 +79,93 @@ describe('ground transit execution policy', () => {
       now: at('10:01'),
       availableAt: at('10:00'),
       downstreamLatestAt: at('11:00'),
+      boundary: 'BOARDING',
     });
     expect(result.headwayWaitReserveSeconds).toBe(120);
-    expect(result.totalSystemMinimumSeconds).toBe(420);
+    expect(result.totalSystemMinimumSeconds).toBe(120);
     expect(result.etaRangeSeconds).toEqual([120, 120]);
+  });
+
+  it('marks missing transfer-to-next unknown without a five-minute guess', () => {
+    const result = assessGroundTransitSafety({
+      baseline: highFrequency,
+      observation: null,
+      now: at('10:00'),
+      availableAt: at('10:45'),
+      downstreamLatestAt: at('10:50'),
+      boundary: 'TRANSFER_TO_NEXT',
+    });
+    expect(result).toMatchObject({
+      headwayWaitReserveSeconds: null,
+      transferMinimumSeconds: null,
+      transferBasis: 'UNKNOWN',
+      totalSystemMinimumSeconds: null,
+      feasibility: 'UNKNOWN',
+    });
+    expect(result.reasonCodes).toContain('TRANSFER_MINIMUM_UNKNOWN');
+  });
+
+  it('uses known adopted or fresh provider transfer only at the onward boundary', () => {
+    const basis = { ...highFrequency, minimumTransferSeconds: 240 };
+    const input = {
+      baseline: basis,
+      now: at('10:01'),
+      availableAt: at('10:45'),
+      downstreamLatestAt: at('10:50'),
+      boundary: 'TRANSFER_TO_NEXT' as const,
+    };
+    expect(
+      assessGroundTransitSafety({ ...input, observation: null }),
+    ).toMatchObject({
+      transferMinimumSeconds: 240,
+      transferBasis: 'ADOPTED',
+      totalSystemMinimumSeconds: 240,
+    });
+    expect(
+      assessGroundTransitSafety({
+        ...input,
+        observation: { ...observation, minimumTransferSeconds: 180 },
+      }),
+    ).toMatchObject({
+      transferMinimumSeconds: 180,
+      transferBasis: 'PROVIDER',
+      totalSystemMinimumSeconds: 180,
+    });
+    expect(
+      assessGroundTransitSafety({
+        ...input,
+        observation: null,
+        boundary: 'BOARDING',
+      }),
+    ).toMatchObject({
+      headwayWaitReserveSeconds: 300,
+      transferMinimumSeconds: null,
+      transferBasis: 'NOT_APPLICABLE',
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(
+      assessGroundTransitSafety({
+        ...input,
+        observation: null,
+        downstreamLatestAt: at('10:48'),
+      }).feasibility,
+    ).toBe('INFEASIBLE');
+  });
+
+  it('keeps boarding access unknown distinct from headway when a protected connection needs it', () => {
+    const result = assessGroundTransitSafety({
+      baseline: { ...highFrequency, boardingAccessMinimumSeconds: null },
+      observation: { ...observation, nextDepartureInSeconds: 120 },
+      now: at('10:01'),
+      availableAt: at('10:00'),
+      downstreamLatestAt: null,
+      boundary: 'BOARDING',
+      boardingAccessRequired: true,
+    });
+    expect(result.headwayWaitReserveSeconds).toBe(120);
+    expect(result.totalSystemMinimumSeconds).toBeNull();
+    expect(result.feasibility).toBe('UNKNOWN');
+    expect(result.reasonCodes).toContain('BOARDING_ACCESS_UNKNOWN');
   });
 
   it('stale realtime falls back to adopted metadata without erasing evidence', () => {
@@ -90,6 +175,7 @@ describe('ground transit execution policy', () => {
       now: at('10:06'),
       availableAt: at('10:00'),
       downstreamLatestAt: at('11:00'),
+      boundary: 'BOARDING',
     });
     expect(result.realtimeFreshness).toBe('STALE');
     expect(result.headwayWaitReserveSeconds).toBe(300);
@@ -245,6 +331,7 @@ describe('ground transit execution policy', () => {
         now: at('10:00'),
         availableAt: at('10:30'),
         downstreamLatestAt: null,
+        boundary: 'BOARDING',
       }).feasibility,
     ).toBe('INFEASIBLE');
     expect(
@@ -254,6 +341,7 @@ describe('ground transit execution policy', () => {
         now: at('10:00'),
         availableAt: at('10:05'),
         downstreamLatestAt: null,
+        boundary: 'BOARDING',
       }).feasibility,
     ).toBe('FEASIBLE');
   });

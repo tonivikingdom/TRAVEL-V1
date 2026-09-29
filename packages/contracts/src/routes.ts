@@ -44,7 +44,10 @@ export interface GroundTransitLegMetadataView {
   readonly alightingHubRef: string | null;
   readonly headwayMinSeconds: number | null;
   readonly headwayMaxSeconds: number | null;
+  /** Complete onward transfer after alighting this leg, not pre-boarding access. */
   readonly minimumTransferSeconds: number | null;
+  /** Access before this leg's boarding boundary, never transfer to the next leg. */
+  readonly boardingAccessMinimumSeconds?: number | null;
 }
 
 export interface RouteCandidateLegView {

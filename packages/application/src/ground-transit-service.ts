@@ -128,6 +128,30 @@ export class GroundTransitService {
       ...(signal ? { signal } : {}),
     });
     if (result.status === 'UNAVAILABLE') {
+      const now = this.now();
+      const failure = await this.repository.recordProviderFailure({
+        ownerUserId,
+        tripId,
+        transportEdgeId: leg.transportEdgeId,
+        now,
+        ...(expectedCapabilityRevision === undefined
+          ? {}
+          : { expectedCapabilityRevision }),
+      });
+      if (failure === 'NOT_FOUND') throw notFound();
+      if (failure === 'CAPABILITY_CHANGED') {
+        return { status: 'STALE_IGNORED', leg: toView(leg, now) };
+      }
+      if (failure === 'CURRENT' && this.executionRiskService !== undefined) {
+        await this.executionRiskService.evaluateTripRisks(
+          { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
+          tripId,
+          {
+            groupKey: `ground-transit-provider-unavailable:${leg.id}:${Math.floor(now.getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
+            sourceTransportEdgeId: leg.transportEdgeId,
+          },
+        );
+      }
       throw new ApplicationError(
         'GROUND_TRANSIT_PROVIDER_UNAVAILABLE',
         '地面交通执行信息暂时不可用；已采用路线保持不变。',
@@ -162,15 +186,15 @@ export class GroundTransitService {
         leg: toView(committed.leg, this.now()),
       };
     }
-    if (
-      this.executionRiskService !== undefined &&
-      (committed.status === 'APPLIED' || committed.status === 'IDEMPOTENT')
-    ) {
+    if (this.executionRiskService !== undefined) {
       await this.executionRiskService.evaluateTripRisks(
         { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
         tripId,
         {
-          groupKey: `ground-transit-observation:${committed.leg.id}:${result.observation.fetchedAt.toISOString()}`,
+          groupKey:
+            committed.status === 'APPLIED' || committed.status === 'IDEMPOTENT'
+              ? `ground-transit-observation:${committed.leg.id}:${result.observation.fetchedAt.toISOString()}`
+              : `ground-transit-recheck:${committed.leg.id}:${Math.floor(this.now().getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
           sourceTransportEdgeId: leg.transportEdgeId,
         },
       );
@@ -187,8 +211,10 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
           realtimeFreshness: 'UNAVAILABLE' as const,
           headwayWaitReserveSeconds: null,
           transferMinimumSeconds: null,
+          boardingAccessMinimumSeconds: null,
           headwayBasis: 'UNKNOWN',
-          transferBasis: 'FALLBACK',
+          transferBasis: 'UNKNOWN',
+          boardingAccessBasis: 'UNKNOWN',
           executionWindow: { plannedDeparture: null, plannedArrival: null },
           totalSystemMinimumSeconds: null,
           etaRangeSeconds: null,
@@ -202,6 +228,18 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
           now,
           availableAt: null,
           downstreamLatestAt: null,
+          boundary: 'BOARDING',
+        });
+  const transfer =
+    leg.baseline === null || leg.baseline.hasOnwardConnection !== true
+      ? null
+      : assessGroundTransitSafety({
+          baseline: leg.baseline,
+          observation: leg.latestObservation,
+          now,
+          availableAt: null,
+          downstreamLatestAt: null,
+          boundary: 'TRANSFER_TO_NEXT',
         });
   return {
     id: leg.id,
@@ -236,6 +274,11 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
     deviationStartedAt: leg.deviationStartedAt?.toISOString() ?? null,
     safety: {
       ...safety,
+      transferMinimumSeconds: transfer?.transferMinimumSeconds ?? null,
+      transferBasis:
+        transfer?.transferBasis ??
+        (leg.baseline === null ? 'UNKNOWN' : 'NOT_APPLICABLE'),
+      reasonCodes: [...safety.reasonCodes, ...(transfer?.reasonCodes ?? [])],
       executionWindow: {
         plannedDeparture:
           safety.executionWindow.plannedDeparture?.toISOString() ?? null,

@@ -2,7 +2,6 @@
 export const GROUND_TRANSIT_POLICY = {
   version: 'ground-transit-execution-v1',
   realtimeFreshnessMs: 5 * 60_000,
-  fallbackTransferMinimumSeconds: 5 * 60,
   sustainedDeviationMinimumObservations: 2,
   sustainedDeviationMinimumMs: 2 * 60_000,
   minimumDeviationSeconds: 60,
@@ -32,7 +31,11 @@ export interface GroundTransitBaseline {
   readonly alightingHubRef: string | null;
   readonly headwayMinSeconds: number | null;
   readonly headwayMaxSeconds: number | null;
+  /** Complete transfer after alighting this leg to the next leg; never boarding access. */
   readonly minimumTransferSeconds: number | null;
+  /** Access before boarding this leg; independent of transfer after alighting. */
+  readonly boardingAccessMinimumSeconds?: number | null;
+  readonly hasOnwardConnection?: boolean;
   readonly plannedDeparture: Date | null;
   readonly plannedArrival: Date | null;
 }
@@ -62,6 +65,7 @@ export interface GroundTransitObservation {
   readonly headwayMinSeconds: number | null;
   readonly headwayMaxSeconds: number | null;
   readonly nextDepartureInSeconds: number | null;
+  /** Complete transfer after alighting this leg to the next leg; never boarding access. */
   readonly minimumTransferSeconds: number | null;
 }
 
@@ -210,14 +214,16 @@ export interface GroundTransitSafetyAssessment {
   readonly policyVersion: typeof GROUND_TRANSIT_POLICY.version;
   readonly realtimeFreshness: 'FRESH' | 'STALE' | 'UNAVAILABLE';
   readonly headwayWaitReserveSeconds: number | null;
-  readonly transferMinimumSeconds: number;
+  readonly transferMinimumSeconds: number | null;
+  readonly boardingAccessMinimumSeconds: number | null;
   readonly headwayBasis:
     | 'NEXT_DEPARTURE_REALTIME'
     | 'REALTIME_HEADWAY_UPPER'
     | 'ADOPTED_HEADWAY_UPPER'
     | 'UNKNOWN'
     | 'NOT_APPLICABLE';
-  readonly transferBasis: 'PROVIDER' | 'ADOPTED' | 'FALLBACK';
+  readonly transferBasis: 'PROVIDER' | 'ADOPTED' | 'UNKNOWN' | 'NOT_APPLICABLE';
+  readonly boardingAccessBasis: 'ADOPTED' | 'UNKNOWN' | 'NOT_APPLICABLE';
   readonly executionWindow: {
     readonly plannedDeparture: Date | null;
     readonly plannedArrival: Date | null;
@@ -235,7 +241,9 @@ export function assessGroundTransitSafety(input: {
   readonly now: Date;
   readonly availableAt: Date | null;
   readonly downstreamLatestAt: Date | null;
-  readonly providerTransferMinimumSeconds?: number | null;
+  readonly boundary: 'BOARDING' | 'TRANSFER_TO_NEXT';
+  /** Whether missing boarding access would affect a protected connection. */
+  readonly boardingAccessRequired?: boolean;
 }): GroundTransitSafetyAssessment {
   const { baseline, now } = input;
   const freshness =
@@ -253,22 +261,31 @@ export function assessGroundTransitSafety(input: {
   const realtime =
     freshness === 'FRESH' && identity === 'MATCHED' ? input.observation : null;
   const transferMinimumSeconds =
-    realtime?.minimumTransferSeconds ??
-    input.providerTransferMinimumSeconds ??
-    baseline.minimumTransferSeconds ??
-    GROUND_TRANSIT_POLICY.fallbackTransferMinimumSeconds;
+    input.boundary === 'TRANSFER_TO_NEXT'
+      ? (realtime?.minimumTransferSeconds ?? baseline.minimumTransferSeconds)
+      : null;
+  const boardingAccessMinimumSeconds =
+    input.boundary === 'BOARDING'
+      ? (baseline.boardingAccessMinimumSeconds ?? null)
+      : null;
   const headwayWaitReserveSeconds =
-    baseline.serviceClass === 'HIGH_FREQUENCY'
+    input.boundary === 'BOARDING' && baseline.serviceClass === 'HIGH_FREQUENCY'
       ? (realtime?.nextDepartureInSeconds ??
         realtime?.headwayMaxSeconds ??
         baseline.headwayMaxSeconds)
-      : 0;
+      : input.boundary === 'BOARDING'
+        ? 0
+        : null;
   const totalSystemMinimumSeconds =
-    headwayWaitReserveSeconds === null
-      ? null
-      : transferMinimumSeconds + headwayWaitReserveSeconds;
+    input.boundary === 'TRANSFER_TO_NEXT'
+      ? transferMinimumSeconds
+      : headwayWaitReserveSeconds === null ||
+          (input.boardingAccessRequired &&
+            boardingAccessMinimumSeconds === null)
+        ? null
+        : headwayWaitReserveSeconds + (boardingAccessMinimumSeconds ?? 0);
   const etaRangeSeconds: readonly [number, number] | null =
-    baseline.serviceClass !== 'HIGH_FREQUENCY'
+    input.boundary !== 'BOARDING' || baseline.serviceClass !== 'HIGH_FREQUENCY'
       ? null
       : realtime?.nextDepartureInSeconds != null
         ? [realtime.nextDepartureInSeconds, realtime.nextDepartureInSeconds]
@@ -288,16 +305,26 @@ export function assessGroundTransitSafety(input: {
     realtime?.actualArrival ??
     realtime?.estimatedArrival ??
     baseline.plannedArrival;
-  const earliestUsableDeparture =
-    input.availableAt !== null && totalSystemMinimumSeconds !== null
-      ? input.availableAt.getTime() + totalSystemMinimumSeconds * 1_000
+  const availableAt =
+    input.boundary === 'TRANSFER_TO_NEXT'
+      ? (input.availableAt ?? arrival)
+      : input.availableAt;
+  const earliestReady =
+    availableAt !== null && totalSystemMinimumSeconds !== null
+      ? availableAt.getTime() + totalSystemMinimumSeconds * 1_000
       : null;
   const departureFeasible =
-    departure === null || earliestUsableDeparture === null
-      ? null
-      : earliestUsableDeparture <= departure.getTime();
+    input.boundary === 'BOARDING'
+      ? departure === null || earliestReady === null
+        ? null
+        : earliestReady <= departure.getTime()
+      : input.downstreamLatestAt === null || earliestReady === null
+        ? null
+        : earliestReady <= input.downstreamLatestAt.getTime();
   const arrivalFeasible =
-    arrival === null || input.downstreamLatestAt === null
+    input.boundary === 'BOARDING' ||
+    arrival === null ||
+    input.downstreamLatestAt === null
       ? null
       : arrival.getTime() <= input.downstreamLatestAt.getTime();
   const feasibility =
@@ -305,7 +332,8 @@ export function assessGroundTransitSafety(input: {
     departureFeasible === false ||
     arrivalFeasible === false
       ? 'INFEASIBLE'
-      : departureFeasible === null && arrivalFeasible === null
+      : totalSystemMinimumSeconds === null ||
+          (departureFeasible === null && arrivalFeasible === null)
         ? 'UNKNOWN'
         : 'FEASIBLE';
   const reasonCodes = [
@@ -315,14 +343,18 @@ export function assessGroundTransitSafety(input: {
       : null,
     identity === 'DIFFERENT_SERVICE' ? 'DIFFERENT_SERVICE' : null,
     realtime?.serviceStatus === 'CANCELLED' ? 'SERVICE_CANCELLED' : null,
+    input.boundary === 'BOARDING' &&
     baseline.serviceClass === 'HIGH_FREQUENCY' &&
     headwayWaitReserveSeconds === null
       ? 'HEADWAY_UNKNOWN'
       : null,
-    baseline.minimumTransferSeconds === null &&
-    (realtime?.minimumTransferSeconds ??
-      input.providerTransferMinimumSeconds) == null
-      ? 'FALLBACK_TRANSFER_MINIMUM'
+    input.boundary === 'TRANSFER_TO_NEXT' && transferMinimumSeconds === null
+      ? 'TRANSFER_MINIMUM_UNKNOWN'
+      : null,
+    input.boundary === 'BOARDING' &&
+    input.boardingAccessRequired &&
+    boardingAccessMinimumSeconds === null
+      ? 'BOARDING_ACCESS_UNKNOWN'
       : null,
   ].filter((value): value is string => value !== null);
   return {
@@ -330,7 +362,9 @@ export function assessGroundTransitSafety(input: {
     realtimeFreshness: freshness,
     headwayWaitReserveSeconds,
     transferMinimumSeconds,
+    boardingAccessMinimumSeconds,
     headwayBasis:
+      input.boundary !== 'BOARDING' ||
       baseline.serviceClass !== 'HIGH_FREQUENCY'
         ? 'NOT_APPLICABLE'
         : realtime?.nextDepartureInSeconds !== null &&
@@ -343,13 +377,19 @@ export function assessGroundTransitSafety(input: {
               ? 'ADOPTED_HEADWAY_UPPER'
               : 'UNKNOWN',
     transferBasis:
-      (realtime?.minimumTransferSeconds !== null &&
-        realtime?.minimumTransferSeconds !== undefined) ||
-      input.providerTransferMinimumSeconds != null
-        ? 'PROVIDER'
-        : baseline.minimumTransferSeconds !== null
-          ? 'ADOPTED'
-          : 'FALLBACK',
+      input.boundary !== 'TRANSFER_TO_NEXT'
+        ? 'NOT_APPLICABLE'
+        : realtime?.minimumTransferSeconds != null
+          ? 'PROVIDER'
+          : baseline.minimumTransferSeconds !== null
+            ? 'ADOPTED'
+            : 'UNKNOWN',
+    boardingAccessBasis:
+      input.boundary !== 'BOARDING'
+        ? 'NOT_APPLICABLE'
+        : boardingAccessMinimumSeconds === null
+          ? 'UNKNOWN'
+          : 'ADOPTED',
     executionWindow: {
       plannedDeparture: baseline.plannedDeparture,
       plannedArrival: baseline.plannedArrival,

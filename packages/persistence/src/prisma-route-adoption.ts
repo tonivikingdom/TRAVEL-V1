@@ -565,6 +565,9 @@ async function executeAdoption(
             headwayMinSeconds: metadata?.headwayMinSeconds ?? null,
             headwayMaxSeconds: metadata?.headwayMaxSeconds ?? null,
             minimumTransferSeconds: metadata?.minimumTransferSeconds ?? null,
+            boardingAccessMinimumSeconds:
+              metadata?.boardingAccessMinimumSeconds ?? null,
+            hasOnwardConnection: segmentIndex < plan.segments.length - 1,
             plannedDeparture: segment.departure?.instant ?? null,
             plannedArrival: segment.arrival?.instant ?? null,
           },

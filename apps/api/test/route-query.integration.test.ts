@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AuthService,
   digestOpaqueToken,
+  ExecutionRiskService,
   GroundTransitService,
   type GroundTransitProvider,
   hashRoutePreviewPayload,
@@ -25,6 +26,7 @@ import type {
 import {
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaExecutionRiskRepository,
   PrismaGroundTransitRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
@@ -34,6 +36,8 @@ import {
   GoogleConsumerExperimentalRouteProvider,
   SyntheticRouteProvider,
   SyntheticGroundTransitProvider,
+  createDevelopmentSyntheticGroundTransitRouteProvider,
+  UnconfiguredGroundTransitProvider,
 } from '@travel/providers';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -106,6 +110,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     const routePlanningRepository = new PrismaRoutePlanningRepository(
       managed.client,
     );
+    const groundTransitRepository = new PrismaGroundTransitRepository(
+      managed.client,
+    );
+    const executionRiskService = new ExecutionRiskService(
+      tripRepository,
+      new PrismaExecutionRiskRepository(managed.client),
+      { now: () => currentNow, groundTransitRepository },
+    );
     return buildApi({
       readinessProbe: {
         async check() {
@@ -145,10 +157,12 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         { now: () => currentNow },
       ),
       groundTransitService: new GroundTransitService(
-        new PrismaGroundTransitRepository(managed.client),
+        groundTransitRepository,
         groundProvider,
         () => currentNow,
+        executionRiskService,
       ),
+      executionRiskService,
     });
   }
 
@@ -197,6 +211,261 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(1);
     expect(await databaseFacts(trip.id)).toEqual(before);
+  });
+
+  it('does not notify for a missing onward transfer when no protected connection exists', async () => {
+    currentNow = new Date('2030-10-01T09:50:00Z');
+    const trip = await tripWithVisits(userA, ['Bus origin', 'Bus destination']);
+    const [from, to] = trip.days[0]!.nodes;
+    const base = candidate(
+      '2030-10-01T10:00:00Z',
+      '2030-10-01T10:30:00Z',
+      'UTC',
+      'UTC',
+    );
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...base,
+          observedAt: currentNow,
+          legs: [
+            {
+              ...base.legs[0]!,
+              mode: 'BUS',
+              fixedService: false,
+              groundTransit: {
+                serviceClass: 'HIGH_FREQUENCY',
+                serviceIdentityKey: null,
+                lineRef: 'bus-1',
+                lineName: 'Bus 1',
+                directionRef: 'east',
+                directionLabel: 'East',
+                boardingHubRef: 'origin',
+                alightingHubRef: 'destination',
+                headwayMinSeconds: 180,
+                headwayMaxSeconds: 300,
+                minimumTransferSeconds: null,
+                boardingAccessMinimumSeconds: 0,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `no-onward-${randomUUID()}`,
+    );
+    const recorded = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: adopted.trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: currentNow.toISOString(),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(recorded.statusCode).toBe(200);
+    const evaluated = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/evaluate`,
+      headers: bearer(userA),
+    });
+    expect(evaluated.statusCode).toBe(200);
+    expect(evaluated.json<{ risks: unknown[] }>().risks).toEqual([]);
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
+  });
+
+  it('reopens a baseline headway risk after fresh realtime expires and Provider becomes unavailable', async () => {
+    currentNow = new Date('2030-10-01T09:56:00Z');
+    await app.close();
+    const routeProvider = createDevelopmentSyntheticGroundTransitRouteProvider(
+      () => currentNow,
+    );
+    app = buildTestApi(
+      routeProvider,
+      new SyntheticGroundTransitProvider('NEXT_DEPARTURE_2', () => currentNow),
+    );
+    const trip = await tripWithVisits(userA, [
+      'Ground origin',
+      'Ground destination',
+    ]);
+    const [from, to] = trip.days[0]!.nodes;
+    const preview = await createPreview(userA, trip, from!.id, to!.id);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      `ground-fallback-${randomUUID()}`,
+    );
+    const legs = await managed.client.groundTransitLegExecution.findMany({
+      where: { tripId: trip.id },
+      orderBy: { legIndex: 'asc' },
+    });
+    const high = legs.find((leg) => leg.serviceClass === 'HIGH_FREQUENCY')!;
+    const recorded = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: adopted.trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: currentNow.toISOString(),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(recorded.statusCode).toBe(200);
+    const evaluate = () =>
+      app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/evaluate`,
+        headers: bearer(userA),
+      });
+    expect(
+      (await evaluate()).json<{ risks: { kind: string }[] }>().risks,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'BUFFER_BELOW_SYSTEM_MINIMUM' }),
+      ]),
+    );
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json()).toMatchObject({
+      leg: {
+        safety: {
+          headwayWaitReserveSeconds: 120,
+          totalSystemMinimumSeconds: 120,
+        },
+      },
+    });
+    expect(
+      (await evaluate())
+        .json<{ risks: { sourceTransportEdgeId: string }[] }>()
+        .risks.filter(
+          (risk) => risk.sourceTransportEdgeId === high.transportEdgeId,
+        ),
+    ).toEqual([]);
+    const observationCount =
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: high.id },
+      });
+    await app.close();
+    app = buildTestApi(routeProvider, new UnconfiguredGroundTransitProvider());
+    currentNow = new Date('2030-10-01T09:59:00Z');
+    const unavailable = () =>
+      app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
+        headers: bearer(userA),
+      });
+    expect((await unavailable()).statusCode).toBe(503);
+    expect(
+      (await evaluate())
+        .json<{ risks: { sourceTransportEdgeId: string }[] }>()
+        .risks.filter(
+          (risk) => risk.sourceTransportEdgeId === high.transportEdgeId,
+        ),
+    ).toEqual([]);
+    currentNow = new Date('2030-10-01T10:05:00Z');
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: trip.id,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: currentNow,
+      },
+    });
+    const repository = new PrismaGroundTransitRepository(managed.client);
+    const riskService = new ExecutionRiskService(
+      tripRepository,
+      new PrismaExecutionRiskRepository(managed.client),
+      { now: () => currentNow, groundTransitRepository: repository },
+    );
+    const monitor = new GroundTransitService(
+      repository,
+      new UnconfiguredGroundTransitProvider(),
+      () => currentNow,
+      riskService,
+    );
+    await expect(
+      monitor.executeJob(high.adoptedRouteId, 1),
+    ).rejects.toMatchObject({
+      code: 'GROUND_TRANSIT_PROVIDER_UNAVAILABLE',
+    });
+    const reopened = await managed.client.executionRisk.findMany({
+      where: {
+        tripId: trip.id,
+        sourceTransportEdgeId: high.transportEdgeId,
+        status: 'OPEN',
+      },
+    });
+    expect(reopened).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'BUFFER_BELOW_SYSTEM_MINIMUM' }),
+      ]),
+    );
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: high.id },
+      }),
+    ).toBe(observationCount);
+    expect(
+      (
+        await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+          where: { id: high.id },
+        })
+      ).nextCheckAt,
+    ).toEqual(new Date('2030-10-01T10:10:00Z'));
+    await managed.client.groundTransitLegExecution.update({
+      where: { id: high.id },
+      data: {
+        baseline: {
+          ...(high.baseline as Record<string, unknown>),
+          minimumTransferSeconds: null,
+        } as never,
+      },
+    });
+    currentNow = new Date('2030-10-01T10:06:00Z');
+    const staleFailure = await unavailable();
+    expect(staleFailure.statusCode).toBe(503);
+    expect(staleFailure.json()).toMatchObject({
+      error: { code: 'GROUND_TRANSIT_PROVIDER_UNAVAILABLE' },
+    });
+    const unknown = await managed.client.executionRisk.findFirst({
+      where: {
+        tripId: trip.id,
+        sourceTransportEdgeId: high.transportEdgeId,
+        kind: 'UNKNOWN_EXECUTION_MARGIN',
+        status: 'OPEN',
+      },
+    });
+    expect(unknown).toMatchObject({ severity: 'UNKNOWN' });
   });
 
   it('persists adopted fixed-service ground identity, refreshes owner-only, and retains archived evidence', async () => {

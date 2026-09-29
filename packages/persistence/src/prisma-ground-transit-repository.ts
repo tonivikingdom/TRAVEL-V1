@@ -253,16 +253,16 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
       const estimatedArrival = input.observation.estimatedArrival;
       const minimumTransfer =
         input.observation.minimumTransferSeconds ??
-        baseline.minimumTransferSeconds ??
-        GROUND_TRANSIT_POLICY.fallbackTransferMinimumSeconds;
+        baseline.minimumTransferSeconds;
       const consequentialDeviation =
         fixedDeparture !== null &&
         plannedArrival !== null &&
         estimatedArrival !== null &&
         estimatedArrival.getTime() - plannedArrival.getTime() >=
           GROUND_TRANSIT_POLICY.minimumDeviationSeconds * 1_000 &&
-        estimatedArrival.getTime() + minimumTransfer * 1_000 >
-          fixedDeparture.getTime();
+        (minimumTransfer === null ||
+          estimatedArrival.getTime() + minimumTransfer * 1_000 >
+            fixedDeparture.getTime());
       const updated = await transaction.groundTransitLegExecution.update({
         where: { id: row.id },
         data: {
@@ -300,6 +300,60 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         });
       }
       return { status: 'APPLIED' as const, leg: toRecord(updated, true) };
+    });
+  }
+
+  async recordProviderFailure(
+    input: Parameters<GroundTransitRepository['recordProviderFailure']>[0],
+  ): Promise<'CURRENT' | 'CAPABILITY_CHANGED' | 'NOT_FOUND'> {
+    return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const trip = await transaction.$queryRaw<readonly { id: string }[]>`
+        SELECT "id" FROM "Trip" WHERE "id"=${input.tripId}::uuid
+          AND "ownerUserId"=${input.ownerUserId}::uuid FOR UPDATE`;
+      if (trip.length === 0) return 'NOT_FOUND';
+      const row = await transaction.groundTransitLegExecution.findUnique({
+        where: { transportEdgeId: input.transportEdgeId },
+        select: { id: true, tripId: true, adoptedRouteId: true },
+      });
+      if (row === null || row.tripId !== input.tripId) return 'NOT_FOUND';
+      const edge = await transaction.transportEdge.findFirst({
+        where: {
+          id: input.transportEdgeId,
+          tripId: input.tripId,
+          adoptedRouteId: row.adoptedRouteId,
+          source: 'ADOPTED_ROUTE',
+          adoptedRoute: { status: 'ACTIVE' },
+        },
+        select: { id: true },
+      });
+      if (edge === null) return 'NOT_FOUND';
+      if (input.expectedCapabilityRevision !== undefined) {
+        const capability =
+          await transaction.tripAssistanceCapability.findUnique({
+            where: {
+              tripId_kind: {
+                tripId: input.tripId,
+                kind: 'GROUND_TRANSIT_MONITORING',
+              },
+            },
+            select: { state: true, revision: true },
+          });
+        if (
+          capability?.state !== 'ENABLED' ||
+          capability.revision !== input.expectedCapabilityRevision
+        )
+          return 'CAPABILITY_CHANGED';
+      }
+      await transaction.groundTransitLegExecution.update({
+        where: { id: row.id },
+        data: {
+          nextCheckAt: new Date(
+            input.now.getTime() + GROUND_TRANSIT_POLICY.monitorIntervalMs,
+          ),
+        },
+      });
+      return 'CURRENT';
     });
   }
 
@@ -595,6 +649,10 @@ function parseBaseline(
     headwayMinSeconds: numberOrNull(value.headwayMinSeconds),
     headwayMaxSeconds: numberOrNull(value.headwayMaxSeconds),
     minimumTransferSeconds: numberOrNull(value.minimumTransferSeconds),
+    boardingAccessMinimumSeconds: numberOrNull(
+      value.boardingAccessMinimumSeconds,
+    ),
+    hasOnwardConnection: value.hasOnwardConnection === true,
     plannedDeparture: dateOrNull(value.plannedDeparture),
     plannedArrival: dateOrNull(value.plannedArrival),
   };

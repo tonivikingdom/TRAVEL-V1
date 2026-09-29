@@ -201,11 +201,15 @@ function toDomainInput(
           ground === undefined ||
           value.layer !== 'ESTIMATED' ||
           value.sourceKind !== 'PROVIDER_OBSERVATION' ||
-          isSustainedGroundTransitDeviation({
-            consecutiveObservations: ground.deviationCount,
-            startedAt: ground.deviationStartedAt,
-            now,
-          })
+          (ground.latestObservation !== null &&
+            ground.latestObservation.fetchedAt.getTime() <= now.getTime() &&
+            now.getTime() - ground.latestObservation.fetchedAt.getTime() <=
+              GROUND_TRANSIT_POLICY.realtimeFreshnessMs &&
+            isSustainedGroundTransitDeviation({
+              consecutiveObservations: ground.deviationCount,
+              startedAt: ground.deviationStartedAt,
+              now,
+            }))
         );
       }),
     })),
@@ -249,6 +253,7 @@ function groundTransitBuffers(
     if (
       leg.baseline.serviceClass === 'FIXED_SERVICE' &&
       matched &&
+      fresh &&
       observation.serviceStatus === 'CANCELLED'
     ) {
       buffers.push({
@@ -296,8 +301,13 @@ function groundTransitBuffers(
         now,
         availableAt: actualAtBoarding,
         downstreamLatestAt: null,
+        boundary: 'BOARDING',
+        boardingAccessRequired: downstream !== undefined,
       });
-      if (safety.totalSystemMinimumSeconds !== null) {
+      if (
+        safety.totalSystemMinimumSeconds !== null ||
+        downstream !== undefined
+      ) {
         buffers.push({
           id: `ground-boarding:${edge.id}`,
           kind: 'SYSTEM_MINIMUM_CONNECTION',
@@ -309,7 +319,10 @@ function groundTransitBuffers(
           requiredSeconds: safety.totalSystemMinimumSeconds,
           sourceNodeId: edge.fromNodeId,
           sourceTransportEdgeId: edge.id,
-          protectedTransportEdgeId: edge.id,
+          protectedTransportEdgeId: downstream?.id ?? edge.id,
+          ...(safety.totalSystemMinimumSeconds === null
+            ? { riskKind: 'UNKNOWN_EXECUTION_MARGIN' as const }
+            : {}),
           requiresRouteReevaluation: true,
         });
       }
@@ -321,21 +334,29 @@ function groundTransitBuffers(
         (fresh && sustained ? observation.estimatedArrival : null) ??
         leg.baseline.plannedArrival)
       : leg.baseline.plannedArrival;
-    if (protectedDeparture === null || currentArrival === null) continue;
+    if (protectedDeparture === null) continue;
     const safety = assessGroundTransitSafety({
       baseline: leg.baseline,
       observation: fresh && sustained ? observation : null,
       now,
-      availableAt: null,
+      availableAt: currentArrival,
       downstreamLatestAt: protectedDeparture,
+      boundary: 'TRANSFER_TO_NEXT',
     });
     buffers.push({
       id: `ground-transfer:${edge.id}:${downstream.id}`,
       kind: 'SYSTEM_MINIMUM_CONNECTION',
-      availableSeconds: Math.floor(
-        (protectedDeparture.getTime() - currentArrival.getTime()) / 1_000,
-      ),
-      requiredSeconds: safety.transferMinimumSeconds,
+      availableSeconds:
+        currentArrival === null
+          ? 0
+          : Math.floor(
+              (protectedDeparture.getTime() - currentArrival.getTime()) / 1_000,
+            ),
+      requiredSeconds:
+        currentArrival === null ? null : safety.transferMinimumSeconds,
+      ...(safety.transferMinimumSeconds === null || currentArrival === null
+        ? { riskKind: 'UNKNOWN_EXECUTION_MARGIN' as const }
+        : {}),
       sourceNodeId: edge.toNodeId,
       sourceTransportEdgeId: edge.id,
       protectedTransportEdgeId: downstream.id,

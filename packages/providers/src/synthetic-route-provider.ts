@@ -82,6 +82,7 @@ export function createDevelopmentSyntheticGroundTransitRouteProvider(
         headwayMinSeconds: 180,
         headwayMaxSeconds: 300,
         minimumTransferSeconds: 300,
+        boardingAccessMinimumSeconds: 0,
       },
     };
     const second = {
@@ -105,7 +106,8 @@ export function createDevelopmentSyntheticGroundTransitRouteProvider(
         alightingHubRef: `synthetic-destination:${input.destination.placeId}`,
         headwayMinSeconds: null,
         headwayMaxSeconds: null,
-        minimumTransferSeconds: 300,
+        minimumTransferSeconds: null,
+        boardingAccessMinimumSeconds: 0,
       },
     };
     return {

@@ -63,6 +63,13 @@ export interface GroundTransitRepository {
     readonly status: GroundTransitCommitStatus;
     readonly leg: GroundTransitLegRecord | null;
   }>;
+  recordProviderFailure(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly transportEdgeId: string;
+    readonly expectedCapabilityRevision?: number;
+    readonly now: Date;
+  }): Promise<'CURRENT' | 'CAPABILITY_CHANGED' | 'NOT_FOUND'>;
   ensureEligibleMonitoring(now: Date): Promise<number>;
   listJobLegs(input: {
     readonly adoptedRouteId: string;

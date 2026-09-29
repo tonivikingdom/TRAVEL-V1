@@ -28,8 +28,10 @@ export interface GroundTransitLegView {
     readonly realtimeFreshness: 'FRESH' | 'STALE' | 'UNAVAILABLE';
     readonly headwayWaitReserveSeconds: number | null;
     readonly transferMinimumSeconds: number | null;
+    readonly boardingAccessMinimumSeconds: number | null;
     readonly headwayBasis: string;
     readonly transferBasis: string;
+    readonly boardingAccessBasis: string;
     readonly executionWindow: {
       readonly plannedDeparture: string | null;
       readonly plannedArrival: string | null;

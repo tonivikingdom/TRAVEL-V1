@@ -135,16 +135,12 @@ export async function verifyGroundTransitChain({
       'P5E2 headway/transfer minimum did not enter existing ExecutionRisk',
     );
   const reminderCount = await sql(
-    `SELECT count(*) FROM "NotificationEvent" WHERE "tripId"='${trip.id}' AND "kind"='EXECUTION_RISK' AND "presentationActive"=TRUE;`,
+    `SELECT count(*) FROM "NotificationEvent" n JOIN "ExecutionRisk" r ON n."dedupeKey" LIKE 'execution-risk:' || r."id"::text || ':%' WHERE r."tripId"='${trip.id}' AND r."sourceTransportEdgeId"='${highFrequencyEdge(initial)}' AND n."presentationActive"=TRUE;`,
   );
-  if (Number(reminderCount) !== 1) {
-    const riskKinds = await sql(
-      `SELECT COALESCE(string_agg("kind" || ':' || CASE WHEN "sourceTransportEdgeId"='${highFrequencyEdge(initial)}' THEN 'ground' ELSE 'other' END, ',' ORDER BY "kind"), 'none') FROM "ExecutionRisk" WHERE "tripId"='${trip.id}' AND "status"='OPEN';`,
-    );
+  if (Number(reminderCount) !== 1)
     throw new Error(
-      `P5E2 risk did not produce one active presentation (count=${reminderCount}; risks=${riskKinds})`,
+      `P5E2 ground risk did not produce one active presentation (count=${reminderCount})`,
     );
-  }
   await waitFor(
     'P5E2 durable ground monitor retry and accepted observations',
     async () => {

@@ -1686,6 +1686,16 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
   });
 
   it('naturally stops trip assistance after the final target is complete without a final departure', async () => {
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: owner.userId,
+        tripId: fixture.tripId,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: new Date('2030-01-01T09:00:00Z'),
+      },
+    });
     const arrival = await observe(owner, {
       latitude: 35.02,
       longitude: 139.02,
@@ -1730,6 +1740,12 @@ describe('P5E1 execution-location API with PostgreSQL', () => {
       },
       {
         kind: 'AUTO_RECORD',
+        state: 'STOPPED',
+        revision: 2,
+        stopReason: 'NATURAL_END',
+      },
+      {
+        kind: 'GROUND_TRANSIT_MONITORING',
         state: 'STOPPED',
         revision: 2,
         stopReason: 'NATURAL_END',

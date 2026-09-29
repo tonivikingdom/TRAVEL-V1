@@ -454,6 +454,87 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(3);
 
+    currentNow = new Date('2030-10-01T10:05:00Z');
+    await app.close();
+    const actualProvider = new SyntheticGroundTransitProvider(
+      'ACTUAL_DEPARTURE',
+      () => currentNow,
+    );
+    app = buildTestApi(new SyntheticRouteProvider(() => providerResult), {
+      name: 'SYNTHETIC',
+      async fetchObservation(input) {
+        const result = await actualProvider.fetchObservation(input);
+        return result.status === 'SUCCESS'
+          ? {
+              status: 'SUCCESS',
+              observation: {
+                ...result.observation,
+                observationIdentity: `actual-test:${result.observation.observationIdentity}`,
+              },
+            }
+          : result;
+      },
+    });
+    const actualRefresh = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(actualRefresh.statusCode).toBe(200);
+    expect(actualRefresh.json()).toMatchObject({ status: 'APPLIED' });
+    const actual = await managed.client.temporalValue.findUniqueOrThrow({
+      where: {
+        transportEdgeId_pointKind_layer: {
+          transportEdgeId: edge.id,
+          pointKind: 'DEPARTURE',
+          layer: 'ACTUAL',
+        },
+      },
+    });
+    expect(actual).toMatchObject({
+      instant: new Date('2030-10-01T10:00:00Z'),
+      sourceKind: 'PROVIDER_OBSERVATION',
+    });
+    currentNow = new Date('2030-10-01T10:10:00Z');
+    await app.close();
+    const lateEstimateProvider = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    );
+    app = buildTestApi(new SyntheticRouteProvider(() => providerResult), {
+      name: 'SYNTHETIC',
+      async fetchObservation(input) {
+        const result = await lateEstimateProvider.fetchObservation(input);
+        return result.status === 'SUCCESS'
+          ? {
+              status: 'SUCCESS',
+              observation: {
+                ...result.observation,
+                observationIdentity: `late-estimate:${result.observation.observationIdentity}`,
+              },
+            }
+          : result;
+      },
+    });
+    const lateEstimate = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(lateEstimate.statusCode).toBe(200);
+    expect(lateEstimate.json()).toMatchObject({ status: 'APPLIED' });
+    expect(
+      await managed.client.temporalValue.findUniqueOrThrow({
+        where: {
+          transportEdgeId_pointKind_layer: {
+            transportEdgeId: edge.id,
+            pointKind: 'DEPARTURE',
+            layer: 'ACTUAL',
+          },
+        },
+      }),
+    ).toMatchObject({ instant: actual.instant, sourceRef: actual.sourceRef });
+
     await managed.client.groundTransitLegExecution.delete({
       where: { id: leg.id },
     });

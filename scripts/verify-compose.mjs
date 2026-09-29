@@ -398,14 +398,21 @@ async function verifyCompose(compose, composeQuiet, env) {
       },
     },
   );
-  const routePreview = await apiJson(
-    `/trips/${routeTrip.id}/previews`,
-    'POST',
-    {
+  let routePreview;
+  try {
+    routePreview = await apiJson(`/trips/${routeTrip.id}/previews`, 'POST', {
       basisVersion: routeTrip.version,
       candidateSnapshotId: queryResult.candidates[0].candidateSnapshotId,
-    },
-  );
+    });
+  } catch (error) {
+    const candidate = queryResult.candidates[0];
+    throw new Error(
+      `Synthetic route Preview failed for day ${routeTrip.days[0]?.localDate}: ` +
+        `${candidate.overall.departure.instant} (${candidate.overall.departure.timeZone}) -> ` +
+        `${candidate.overall.arrival.instant} (${candidate.overall.arrival.timeZone}); ` +
+        `query earliest=${queryResult.timeCondition.earliestDeparture}; ${String(error)}`,
+    );
+  }
   const adoption = await apiJson(
     `/trips/${routeTrip.id}/previews/${routePreview.previewId}/adopt`,
     'POST',

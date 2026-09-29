@@ -137,10 +137,14 @@ export async function verifyGroundTransitChain({
   const reminderCount = await sql(
     `SELECT count(*) FROM "NotificationEvent" WHERE "tripId"='${trip.id}' AND "kind"='EXECUTION_RISK' AND "presentationActive"=TRUE;`,
   );
-  if (Number(reminderCount) !== 1)
-    throw new Error(
-      `P5E2 risk did not produce one active presentation (count=${reminderCount})`,
+  if (Number(reminderCount) !== 1) {
+    const riskKinds = await sql(
+      `SELECT COALESCE(string_agg("kind" || ':' || CASE WHEN "sourceTransportEdgeId"='${highFrequencyEdge(initial)}' THEN 'ground' ELSE 'other' END, ',' ORDER BY "kind"), 'none') FROM "ExecutionRisk" WHERE "tripId"='${trip.id}' AND "status"='OPEN';`,
     );
+    throw new Error(
+      `P5E2 risk did not produce one active presentation (count=${reminderCount}; risks=${riskKinds})`,
+    );
+  }
   await waitFor(
     'P5E2 durable ground monitor retry and accepted observations',
     async () => {

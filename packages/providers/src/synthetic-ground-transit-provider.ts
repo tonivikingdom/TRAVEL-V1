@@ -2,6 +2,7 @@ import type {
   GroundTransitProvider,
   GroundTransitProviderResult,
 } from '@travel/application';
+import type { GroundTransitObservation } from '@travel/domain';
 
 export type SyntheticGroundTransitScenario =
   | 'ON_TIME'
@@ -10,6 +11,7 @@ export type SyntheticGroundTransitScenario =
   | 'IDENTITY_MISMATCH'
   | 'HIGH_FREQUENCY_3_TO_5'
   | 'NEXT_DEPARTURE_2'
+  | 'REPLAY_SAME'
   | 'STALE'
   | 'FAIL_FIRST';
 
@@ -17,6 +19,10 @@ export type SyntheticGroundTransitScenario =
 export class SyntheticGroundTransitProvider implements GroundTransitProvider {
   readonly name = 'SYNTHETIC';
   private calls = 0;
+  private readonly replayObservations = new Map<
+    string,
+    GroundTransitObservation
+  >();
 
   constructor(
     private readonly scenario: SyntheticGroundTransitScenario,
@@ -35,6 +41,9 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
     if (baseline === null || baseline.provider !== this.name) {
       return { status: 'UNAVAILABLE' };
     }
+    const replay = this.replayObservations.get(input.leg.id);
+    if (this.scenario === 'REPLAY_SAME' && replay !== undefined)
+      return { status: 'SUCCESS', observation: replay };
     const fetchedAt =
       this.scenario === 'STALE'
         ? new Date(this.now().getTime() - 10 * 60_000)
@@ -42,55 +51,52 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
     const delayMs = this.scenario === 'FIXED_DELAY' ? 10 * 60_000 : 0;
     const delayed = (value: Date | null) =>
       value === null ? null : new Date(value.getTime() + delayMs);
-    return {
-      status: 'SUCCESS',
-      observation: {
-        provider: this.name,
-        observationIdentity: `synthetic:${input.leg.id}:${this.calls}`,
-        fetchedAt,
-        serviceClass: baseline.serviceClass,
-        mode: baseline.mode,
-        lineRef: baseline.lineRef,
-        lineName: null,
-        directionRef: baseline.directionRef,
-        directionLabel: null,
-        boardingHubRef: baseline.boardingHubRef,
-        alightingHubRef: baseline.alightingHubRef,
-        serviceIdentityKey:
-          this.scenario === 'IDENTITY_MISMATCH'
-            ? 'synthetic:other-service'
-            : baseline.serviceIdentityKey,
-        scheduledDeparture: baseline.plannedDeparture,
-        scheduledArrival: baseline.plannedArrival,
-        estimatedDeparture:
-          this.scenario === 'FIXED_DELAY'
-            ? delayed(baseline.plannedDeparture)
-            : null,
-        estimatedArrival:
-          this.scenario === 'FIXED_DELAY'
-            ? delayed(baseline.plannedArrival)
-            : null,
-        actualDeparture:
-          this.scenario === 'ACTUAL_DEPARTURE'
-            ? baseline.plannedDeparture
-            : null,
-        actualArrival: null,
-        departurePlatform: null,
-        arrivalPlatform: null,
-        serviceStatus: this.scenario === 'FIXED_DELAY' ? 'DELAYED' : 'ON_TIME',
-        headwayMinSeconds:
-          this.scenario === 'HIGH_FREQUENCY_3_TO_5'
-            ? 180
-            : baseline.headwayMinSeconds,
-        headwayMaxSeconds:
-          this.scenario === 'HIGH_FREQUENCY_3_TO_5'
-            ? 300
-            : baseline.headwayMaxSeconds,
-        nextDepartureInSeconds:
-          this.scenario === 'NEXT_DEPARTURE_2' ? 120 : null,
-        minimumTransferSeconds: null,
-      },
+    const observation: GroundTransitObservation = {
+      provider: this.name,
+      observationIdentity: `synthetic:${input.leg.id}:${this.calls}`,
+      fetchedAt,
+      serviceClass: baseline.serviceClass,
+      mode: baseline.mode,
+      lineRef: baseline.lineRef,
+      lineName: null,
+      directionRef: baseline.directionRef,
+      directionLabel: null,
+      boardingHubRef: baseline.boardingHubRef,
+      alightingHubRef: baseline.alightingHubRef,
+      serviceIdentityKey:
+        this.scenario === 'IDENTITY_MISMATCH'
+          ? 'synthetic:other-service'
+          : baseline.serviceIdentityKey,
+      scheduledDeparture: baseline.plannedDeparture,
+      scheduledArrival: baseline.plannedArrival,
+      estimatedDeparture:
+        this.scenario === 'FIXED_DELAY'
+          ? delayed(baseline.plannedDeparture)
+          : null,
+      estimatedArrival:
+        this.scenario === 'FIXED_DELAY'
+          ? delayed(baseline.plannedArrival)
+          : null,
+      actualDeparture:
+        this.scenario === 'ACTUAL_DEPARTURE' ? baseline.plannedDeparture : null,
+      actualArrival: null,
+      departurePlatform: null,
+      arrivalPlatform: null,
+      serviceStatus: this.scenario === 'FIXED_DELAY' ? 'DELAYED' : 'ON_TIME',
+      headwayMinSeconds:
+        this.scenario === 'HIGH_FREQUENCY_3_TO_5'
+          ? 180
+          : baseline.headwayMinSeconds,
+      headwayMaxSeconds:
+        this.scenario === 'HIGH_FREQUENCY_3_TO_5'
+          ? 300
+          : baseline.headwayMaxSeconds,
+      nextDepartureInSeconds: this.scenario === 'NEXT_DEPARTURE_2' ? 120 : null,
+      minimumTransferSeconds: null,
     };
+    if (this.scenario === 'REPLAY_SAME')
+      this.replayObservations.set(input.leg.id, observation);
+    return { status: 'SUCCESS', observation };
   }
 }
 
@@ -123,6 +129,7 @@ export function createGroundTransitProvider(
     'IDENTITY_MISMATCH',
     'HIGH_FREQUENCY_3_TO_5',
     'NEXT_DEPARTURE_2',
+    'REPLAY_SAME',
     'STALE',
     'FAIL_FIRST',
   ];

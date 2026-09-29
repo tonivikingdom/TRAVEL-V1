@@ -92,6 +92,17 @@ describe('synthetic ground transit provider safety', () => {
     });
   });
 
+  it('returns the same normalized observation for deterministic replay', async () => {
+    const provider = new SyntheticGroundTransitProvider(
+      'REPLAY_SAME',
+      () => now,
+    );
+    const first = await provider.fetchObservation({ leg });
+    const replay = await provider.fetchObservation({ leg });
+    expect(first).toMatchObject({ status: 'SUCCESS' });
+    expect(replay).toEqual(first);
+  });
+
   it('does not expose a synthetic provider when unconfigured', async () => {
     const provider = createGroundTransitProvider({ APP_ENV: 'production' });
     expect(await provider.fetchObservation({ leg })).toEqual({

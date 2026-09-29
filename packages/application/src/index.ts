@@ -1,4 +1,11 @@
 export { AuthService, type AuthServiceConfig } from './auth-service.js';
+export { GroundTransitService } from './ground-transit-service.js';
+export type {
+  GroundTransitLegRecord,
+  GroundTransitProvider,
+  GroundTransitProviderResult,
+  GroundTransitRepository,
+} from './ground-transit-ports.js';
 export {
   AssistanceCapabilityService,
   type AssistanceCapabilityServiceOptions,

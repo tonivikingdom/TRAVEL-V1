@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import {
   ExecutionRiskService,
   FlightMonitoringService,
+  GroundTransitService,
   FlightService,
   MagicLinkEmailHandler,
   UnconfiguredMailSender,
@@ -13,6 +14,7 @@ import {
   PrismaJobRepository,
   PrismaExecutionRiskRepository,
   PrismaFlightMonitoringRepository,
+  PrismaGroundTransitRepository,
   PrismaFlightRepository,
   PrismaMagicLinkDeliveryRepository,
   PrismaTripRepository,
@@ -22,6 +24,7 @@ import {
   readFlightProviderConfig,
   UnconfiguredFlightProvider,
   SyntheticFlightProvider,
+  createGroundTransitProvider,
 } from '@travel/providers';
 
 import { readWorkerConfig } from './config.js';
@@ -35,9 +38,13 @@ const managedProbe = createPostgresReadiness(config.databaseUrl);
 const managedPrisma = createPrismaClient(config.databaseUrl);
 const jobRepository = new PrismaJobRepository(managedPrisma.client);
 const tripRepository = new PrismaTripRepository(managedPrisma.client);
+const groundTransitRepository = new PrismaGroundTransitRepository(
+  managedPrisma.client,
+);
 const executionRiskService = new ExecutionRiskService(
   tripRepository,
   new PrismaExecutionRiskRepository(managedPrisma.client),
+  { groundTransitRepository },
 );
 const flightProviderConfig = readFlightProviderConfig(process.env);
 const flightProvider =
@@ -68,6 +75,12 @@ const flightMonitoringService = new FlightMonitoringService(
   ),
   flightMonitoringRepository,
 );
+const groundTransitService = new GroundTransitService(
+  groundTransitRepository,
+  createGroundTransitProvider(process.env),
+  () => new Date(),
+  executionRiskService,
+);
 const mailSender =
   config.mailProvider === 'capture'
     ? new FileCapturedMailSender(config.mailCaptureFile)
@@ -96,6 +109,10 @@ const jobRunner = createJobRunner({
           signal,
         ),
     },
+    GROUND_TRANSIT_MONITOR: {
+      execute: (payloadRef, signal, capabilityRevision) =>
+        groundTransitService.executeJob(payloadRef, capabilityRevision, signal),
+    },
   },
   workerId: config.workerId,
   config: config.runner,
@@ -118,6 +135,7 @@ async function heartbeat(): Promise<void> {
 
   if (database.status === 'READY') {
     await flightMonitoringService.ensureEligibleMonitoring();
+    await groundTransitService.ensureEligibleMonitoring();
   }
 }
 

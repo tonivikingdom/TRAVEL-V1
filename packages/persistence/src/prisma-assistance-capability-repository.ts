@@ -32,7 +32,13 @@ export class PrismaAssistanceCapabilityRepository implements AssistanceCapabilit
       select: { id: true, assistanceCapabilities: true },
     });
     if (trip === null) return null;
-    return (['LOCATION_ASSISTANCE', 'AUTO_RECORD'] as const).map((kind) => {
+    return (
+      [
+        'LOCATION_ASSISTANCE',
+        'AUTO_RECORD',
+        'GROUND_TRANSIT_MONITORING',
+      ] as const
+    ).map((kind) => {
       const capability = trip.assistanceCapabilities.find(
         (candidate) => candidate.kind === kind,
       );
@@ -120,6 +126,13 @@ export class PrismaAssistanceCapabilityRepository implements AssistanceCapabilit
         await transaction.executionLocationState.deleteMany({
           where: { tripId: input.tripId },
         });
+      }
+      if (
+        input.kind === 'GROUND_TRANSIT_MONITORING' &&
+        decision.status === 'APPLY' &&
+        (decision.state === 'PAUSED' || decision.state === 'STOPPED')
+      ) {
+        await cancelGroundTransitJobs(transaction, input.tripId, input.now);
       }
       const record = toTripRecord(capability);
       await transaction.tripAssistanceReceipt.create({
@@ -462,6 +475,39 @@ async function cancelFlightJobs(
     where: {
       type: 'FLIGHT_MONITOR',
       payloadRef: flightBindingId,
+      status: 'RUNNING',
+    },
+    data: { cancelRequested: true },
+  });
+}
+
+async function cancelGroundTransitJobs(
+  transaction: Transaction,
+  tripId: string,
+  now: Date,
+) {
+  const routes = await transaction.adoptedRoute.findMany({
+    where: { tripId },
+    select: { id: true },
+  });
+  const routeIds = routes.map((route) => route.id);
+  await transaction.job.updateMany({
+    where: {
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: { in: routeIds },
+      status: 'QUEUED',
+    },
+    data: {
+      status: 'CANCELLED',
+      cancelRequested: true,
+      cancelledAt: now,
+      completedAt: now,
+    },
+  });
+  await transaction.job.updateMany({
+    where: {
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: { in: routeIds },
       status: 'RUNNING',
     },
     data: { cancelRequested: true },

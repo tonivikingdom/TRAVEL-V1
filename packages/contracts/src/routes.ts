@@ -32,6 +32,21 @@ export interface RouteTimePointView {
   readonly timeZone: string;
 }
 
+/** Provider-neutral facts fixed when a rail/bus leg is adopted. Optional for legacy snapshots. */
+export interface GroundTransitLegMetadataView {
+  readonly serviceClass: 'FIXED_SERVICE' | 'HIGH_FREQUENCY';
+  readonly serviceIdentityKey: string | null;
+  readonly lineRef: string | null;
+  readonly lineName: string | null;
+  readonly directionRef: string | null;
+  readonly directionLabel: string | null;
+  readonly boardingHubRef: string | null;
+  readonly alightingHubRef: string | null;
+  readonly headwayMinSeconds: number | null;
+  readonly headwayMaxSeconds: number | null;
+  readonly minimumTransferSeconds: number | null;
+}
+
 export interface RouteCandidateLegView {
   readonly mode: TransportMode;
   readonly from: RouteLocationView;
@@ -42,6 +57,7 @@ export interface RouteCandidateLegView {
   readonly fixedService: boolean;
   readonly serviceLabel: string | null;
   readonly providerRef: string | null;
+  readonly groundTransit?: GroundTransitLegMetadataView | null;
 }
 
 export interface RouteFareView {
@@ -132,6 +148,7 @@ export interface RoutePreviewSegmentView {
   readonly fixedService: boolean;
   readonly serviceLabel: string | null;
   readonly providerRef: string | null;
+  readonly groundTransit?: GroundTransitLegMetadataView | null;
   readonly departure: RouteTimePointView | null;
   readonly arrival: RouteTimePointView | null;
   readonly durationSeconds: number | null;

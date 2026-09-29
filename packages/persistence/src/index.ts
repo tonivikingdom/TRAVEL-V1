@@ -14,6 +14,7 @@ export { PrismaExecutionRiskRepository } from './prisma-execution-risk-repositor
 export { PrismaExecutionLocationRepository } from './prisma-execution-location-repository.js';
 export { PrismaFlightRepository } from './prisma-flight-repository.js';
 export { PrismaFlightMonitoringRepository } from './prisma-flight-monitoring-repository.js';
+export { PrismaGroundTransitRepository } from './prisma-ground-transit-repository.js';
 export { PrismaStoredObjectRepository } from './prisma-stored-object-repository.js';
 export { PrismaTripRepository } from './prisma-trip-repository.js';
 export { PrismaRoutePlanningRepository } from './prisma-route-planning-repository.js';

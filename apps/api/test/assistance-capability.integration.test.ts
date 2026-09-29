@@ -109,6 +109,11 @@ describe('Assistance capability API with PostgreSQL', () => {
         state: 'NOT_ENABLED',
         revision: 0,
       }),
+      expect.objectContaining({
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'NOT_ENABLED',
+        revision: 0,
+      }),
     ]);
     const flight = await app.inject({
       method: 'GET',

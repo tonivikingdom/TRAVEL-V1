@@ -252,6 +252,28 @@ async function executeUndo(
     if (restoredRoute.count !== 1) throw new UndoAbort('UNDO_CONFLICT');
   }
 
+  await transaction.job.updateMany({
+    where: {
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: target.adoptedRouteId,
+      status: 'QUEUED',
+    },
+    data: {
+      status: 'CANCELLED',
+      cancelRequested: true,
+      cancelledAt: input.now,
+      completedAt: input.now,
+    },
+  });
+  await transaction.job.updateMany({
+    where: {
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: target.adoptedRouteId,
+      status: 'RUNNING',
+    },
+    data: { cancelRequested: true },
+  });
+
   await restoreDateOwnership(transaction, input, delta);
   const restoredUserTimeIntentIds: string[] = [];
   if (delta.schemaVersion === 'route-adopt-delta-v3') {

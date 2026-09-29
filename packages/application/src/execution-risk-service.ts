@@ -5,7 +5,12 @@ import type {
   NotificationView,
 } from '@travel/contracts';
 import {
+  assessGroundTransitSafety,
   evaluateExecutionRisks,
+  matchGroundTransitIdentity,
+  isSustainedGroundTransitDeviation,
+  GROUND_TRANSIT_POLICY,
+  type ExecutionBufferEvidence,
   type EvaluatedExecutionRisk,
 } from '@travel/domain';
 import { createHash } from 'node:crypto';
@@ -19,15 +24,21 @@ import type {
 } from './execution-risk-ports.js';
 import type { NotificationRecord } from './ports.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
+import type {
+  GroundTransitLegRecord,
+  GroundTransitRepository,
+} from './ground-transit-ports.js';
 
 const SNOOZE_MILLISECONDS = 15 * 60 * 1_000;
 
 export interface ExecutionRiskServiceOptions {
   readonly now?: () => Date;
+  readonly groundTransitRepository?: GroundTransitRepository;
 }
 
 export class ExecutionRiskService {
   private readonly now: () => Date;
+  private readonly groundTransitRepository: GroundTransitRepository | undefined;
 
   constructor(
     private readonly tripRepository: TripRepository,
@@ -35,6 +46,7 @@ export class ExecutionRiskService {
     options: ExecutionRiskServiceOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
+    this.groundTransitRepository = options.groundTransitRepository;
   }
 
   async evaluateTripRisks(
@@ -57,9 +69,13 @@ export class ExecutionRiskService {
         tripId,
       });
       if (trip === null) throw notFound();
-      const desiredRisks = evaluateExecutionRisks(toDomainInput(trip)).map(
-        toDesiredRisk,
-      );
+      const groundTransitLegs = await this.groundTransitRepository?.listOwned({
+        ownerUserId: actor.userId,
+        tripId,
+      });
+      const desiredRisks = evaluateExecutionRisks(
+        toDomainInput(trip, groundTransitLegs?.legs ?? [], this.now()),
+      ).map(toDesiredRisk);
       const result = await this.riskRepository.reconcile({
         ownerUserId: actor.userId,
         tripId,
@@ -155,7 +171,11 @@ export class ExecutionRiskService {
   }
 }
 
-function toDomainInput(trip: TripAggregateRecord) {
+function toDomainInput(
+  trip: TripAggregateRecord,
+  groundTransitLegs: readonly GroundTransitLegRecord[] = [],
+  now: Date = new Date(),
+) {
   return {
     nodes: trip.dayOccurrences.flatMap((occurrence) =>
       occurrence.nodes.map((node) => ({
@@ -173,9 +193,173 @@ function toDomainInput(trip: TripAggregateRecord) {
       fromNodeId: edge.fromNodeId,
       toNodeId: edge.toNodeId,
       fixedService: edge.fixedService,
-      timeValues: edge.timeValues,
+      timeValues: edge.timeValues.filter((value) => {
+        const ground = groundTransitLegs.find(
+          (leg) => leg.current && leg.transportEdgeId === edge.id,
+        );
+        return (
+          ground === undefined ||
+          value.layer !== 'ESTIMATED' ||
+          value.sourceKind !== 'PROVIDER_OBSERVATION' ||
+          isSustainedGroundTransitDeviation({
+            consecutiveObservations: ground.deviationCount,
+            startedAt: ground.deviationStartedAt,
+            now,
+          })
+        );
+      }),
     })),
+    buffers: groundTransitBuffers(trip, groundTransitLegs, now),
   };
+}
+
+function groundTransitBuffers(
+  trip: TripAggregateRecord,
+  legs: readonly GroundTransitLegRecord[],
+  now: Date,
+): readonly ExecutionBufferEvidence[] {
+  const buffers: ExecutionBufferEvidence[] = [];
+  for (const leg of legs) {
+    if (!leg.current || leg.baseline === null) continue;
+    const edge = trip.transportEdges.find(
+      (item) => item.id === leg.transportEdgeId,
+    );
+    if (edge === undefined) continue;
+    const observation = leg.latestObservation;
+    const matched =
+      observation !== null &&
+      matchGroundTransitIdentity(leg.baseline, observation) === 'MATCHED';
+    const fresh =
+      matched &&
+      observation.fetchedAt.getTime() <= now.getTime() &&
+      now.getTime() - observation.fetchedAt.getTime() <=
+        GROUND_TRANSIT_POLICY.realtimeFreshnessMs;
+    const sustained = isSustainedGroundTransitDeviation({
+      consecutiveObservations: leg.deviationCount,
+      startedAt: leg.deviationStartedAt,
+      now,
+    });
+    const sourceNode = trip.dayOccurrences
+      .flatMap((item) => item.nodes)
+      .find((item) => item.id === edge.fromNodeId);
+    const actualAtBoarding =
+      sourceNode?.timeValues.find(
+        (value) => value.pointKind === 'ARRIVAL' && value.layer === 'ACTUAL',
+      )?.instant ?? null;
+    if (
+      leg.baseline.serviceClass === 'FIXED_SERVICE' &&
+      matched &&
+      observation.serviceStatus === 'CANCELLED'
+    ) {
+      buffers.push({
+        id: `ground-cancelled:${edge.id}`,
+        kind: 'SYSTEM_MINIMUM_CONNECTION',
+        availableSeconds: -1,
+        requiredSeconds: 0,
+        sourceNodeId: edge.fromNodeId,
+        sourceTransportEdgeId: edge.id,
+        protectedTransportEdgeId: edge.id,
+        riskKind: 'PROTECTED_TIME_INFEASIBLE',
+        requiresRouteReevaluation: true,
+      });
+    }
+    if (
+      leg.baseline.serviceClass === 'FIXED_SERVICE' &&
+      matched &&
+      observation.actualDeparture !== null &&
+      actualAtBoarding !== null &&
+      actualAtBoarding.getTime() > observation.actualDeparture.getTime()
+    ) {
+      buffers.push({
+        id: `ground-missed:${leg.transportEdgeId}`,
+        kind: 'SYSTEM_MINIMUM_CONNECTION',
+        availableSeconds: -1,
+        requiredSeconds: 0,
+        sourceNodeId: edge.fromNodeId,
+        sourceTransportEdgeId: edge.id,
+        protectedTransportEdgeId: edge.id,
+        riskKind: 'FIXED_SERVICE_MISSED',
+        requiresRouteReevaluation: true,
+      });
+    }
+    const downstream = trip.transportEdges.find(
+      (item) => item.fromNodeId === edge.toNodeId && item.fixedService,
+    );
+    if (
+      leg.baseline.serviceClass === 'HIGH_FREQUENCY' &&
+      actualAtBoarding !== null &&
+      leg.baseline.plannedDeparture !== null
+    ) {
+      const safety = assessGroundTransitSafety({
+        baseline: leg.baseline,
+        observation: fresh && sustained ? observation : null,
+        now,
+        availableAt: actualAtBoarding,
+        downstreamLatestAt: null,
+      });
+      if (safety.totalSystemMinimumSeconds !== null) {
+        buffers.push({
+          id: `ground-boarding:${edge.id}`,
+          kind: 'SYSTEM_MINIMUM_CONNECTION',
+          availableSeconds: Math.floor(
+            (leg.baseline.plannedDeparture.getTime() -
+              actualAtBoarding.getTime()) /
+              1_000,
+          ),
+          requiredSeconds: safety.totalSystemMinimumSeconds,
+          sourceNodeId: edge.fromNodeId,
+          sourceTransportEdgeId: edge.id,
+          protectedTransportEdgeId: edge.id,
+          requiresRouteReevaluation: true,
+        });
+      }
+    }
+    if (downstream === undefined) continue;
+    const protectedDeparture = selectTime(downstream.timeValues, 'DEPARTURE');
+    const currentArrival = matched
+      ? (observation.actualArrival ??
+        (fresh && sustained ? observation.estimatedArrival : null) ??
+        leg.baseline.plannedArrival)
+      : leg.baseline.plannedArrival;
+    if (protectedDeparture === null || currentArrival === null) continue;
+    const safety = assessGroundTransitSafety({
+      baseline: leg.baseline,
+      observation: fresh && sustained ? observation : null,
+      now,
+      availableAt: null,
+      downstreamLatestAt: protectedDeparture,
+    });
+    buffers.push({
+      id: `ground-transfer:${edge.id}:${downstream.id}`,
+      kind: 'SYSTEM_MINIMUM_CONNECTION',
+      availableSeconds: Math.floor(
+        (protectedDeparture.getTime() - currentArrival.getTime()) / 1_000,
+      ),
+      requiredSeconds: safety.transferMinimumSeconds,
+      sourceNodeId: edge.toNodeId,
+      sourceTransportEdgeId: edge.id,
+      protectedTransportEdgeId: downstream.id,
+      protectedNodeId: downstream.fromNodeId,
+      requiresRouteReevaluation: true,
+    });
+  }
+  return buffers;
+}
+
+function selectTime(
+  values: TripAggregateRecord['transportEdges'][number]['timeValues'],
+  pointKind: 'ARRIVAL' | 'DEPARTURE',
+): Date | null {
+  return (
+    (['ACTUAL', 'ESTIMATED', 'PLANNED'] as const)
+      .map(
+        (layer) =>
+          values.find(
+            (value) => value.pointKind === pointKind && value.layer === layer,
+          )?.instant ?? null,
+      )
+      .find((value) => value !== null) ?? null
+  );
 }
 
 function toDesiredRisk(risk: EvaluatedExecutionRisk): DesiredExecutionRisk {

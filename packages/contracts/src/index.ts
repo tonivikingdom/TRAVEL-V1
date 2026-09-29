@@ -6,6 +6,12 @@ export type {
   ServiceStatus,
 } from './health.js';
 export type {
+  GroundTransitExecutionResponse,
+  GroundTransitLegStateView,
+  GroundTransitLegView,
+  GroundTransitRefreshResponse,
+} from './ground-transit.js';
+export type {
   AssistanceAction,
   AssistanceCapabilityView,
   AssistanceMutationRequest,
@@ -69,6 +75,7 @@ export type {
   RouteAdoptGeneratedNodeSnapshot,
   RouteAdoptDayProjectionSnapshot,
   RouteCandidateLegView,
+  GroundTransitLegMetadataView,
   RouteCandidateView,
   RouteCandidatePlanningAssessmentView,
   RouteUserDwellAdjustmentView,

@@ -105,6 +105,33 @@ describe('job runner lifecycle', () => {
     expect(fake.succeeded).toEqual([flightJob.id]);
   });
 
+  it('dispatches ground-transit monitor jobs with the captured capability generation', async () => {
+    const job: ClaimedJob = {
+      ...JOB,
+      type: 'GROUND_TRANSIT_MONITOR',
+      payloadRef: '33333333-3333-4333-8333-333333333333',
+      capabilityRevision: 4,
+    };
+    const fake = new FakeJobRepository([job]);
+    const handled: Array<{ payloadRef: string; revision: number | null }> = [];
+    const runner = createJobRunner({
+      repository: fake,
+      handlers: {
+        GROUND_TRANSIT_MONITOR: {
+          async execute(payloadRef, _signal, revision) {
+            handled.push({ payloadRef, revision });
+          },
+        },
+      },
+      workerId: 'worker-test',
+      config: config(),
+    });
+    await runner.start();
+    await runner.stop();
+    expect(handled).toEqual([{ payloadRef: job.payloadRef, revision: 4 }]);
+    expect(fake.succeeded).toEqual([job.id]);
+  });
+
   it('records a safe error code and retry time after handler failure', async () => {
     const fake = new FakeJobRepository([JOB]);
     const runner = createJobRunner({

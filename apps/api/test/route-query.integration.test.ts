@@ -959,10 +959,22 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         })),
       })),
     };
-    const preview = await createPreview(userA, trip, from.id, previousTo.id);
+    const currentTripResponse = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(currentTripResponse.statusCode).toBe(200);
+    const currentTrip = currentTripResponse.json() as TripView;
+    const preview = await createPreview(
+      userA,
+      currentTrip,
+      from.id,
+      previousTo.id,
+    );
     await adoptSuccessfully(
       userA,
-      trip,
+      currentTrip,
       preview.previewId,
       `replacement-${randomUUID()}`,
     );

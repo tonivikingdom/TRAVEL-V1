@@ -254,7 +254,7 @@ export async function verifyGroundTransitChain({
     refreshed.leg.safety.transferToNext?.totalSystemMinimumSeconds !== 300
   )
     throw new Error(
-      'P5E2 fresh next-departure did not replace the 5-minute reserve',
+      `P5E2 fresh next-departure did not replace the 5-minute reserve: ${JSON.stringify({ status: refreshed.status, freshness: refreshed.leg.safety.boarding.realtimeFreshness, boarding: refreshed.leg.safety.boarding.totalSystemMinimumSeconds, transfer: refreshed.leg.safety.transferToNext?.totalSystemMinimumSeconds })}`,
     );
   const remainingRiskCount = await sql(
     `SELECT count(*) FROM "ExecutionRisk" WHERE "tripId"='${trip.id}' AND "sourceTransportEdgeId"='${high.transportEdgeId}' AND "status"='OPEN';`,

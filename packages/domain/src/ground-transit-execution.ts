@@ -268,15 +268,18 @@ export function assessGroundTransitSafety(input: {
       ? null
       : transferMinimumSeconds + headwayWaitReserveSeconds;
   const etaRangeSeconds: readonly [number, number] | null =
-    baseline.serviceClass === 'HIGH_FREQUENCY' &&
-    realtime?.nextDepartureInSeconds == null &&
-    (realtime?.headwayMinSeconds ?? baseline.headwayMinSeconds) !== null &&
-    (realtime?.headwayMaxSeconds ?? baseline.headwayMaxSeconds) !== null
-      ? [
-          realtime?.headwayMinSeconds ?? baseline.headwayMinSeconds!,
-          realtime?.headwayMaxSeconds ?? baseline.headwayMaxSeconds!,
-        ]
-      : null;
+    baseline.serviceClass !== 'HIGH_FREQUENCY'
+      ? null
+      : realtime?.nextDepartureInSeconds != null
+        ? [realtime.nextDepartureInSeconds, realtime.nextDepartureInSeconds]
+        : (realtime?.headwayMinSeconds ?? baseline.headwayMinSeconds) !==
+              null &&
+            (realtime?.headwayMaxSeconds ?? baseline.headwayMaxSeconds) !== null
+          ? [
+              realtime?.headwayMinSeconds ?? baseline.headwayMinSeconds!,
+              realtime?.headwayMaxSeconds ?? baseline.headwayMaxSeconds!,
+            ]
+          : null;
   const departure =
     realtime?.actualDeparture ??
     realtime?.estimatedDeparture ??

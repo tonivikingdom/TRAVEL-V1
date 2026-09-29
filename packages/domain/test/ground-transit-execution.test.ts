@@ -80,6 +80,7 @@ describe('ground transit execution policy', () => {
     });
     expect(result.headwayWaitReserveSeconds).toBe(120);
     expect(result.totalSystemMinimumSeconds).toBe(420);
+    expect(result.etaRangeSeconds).toEqual([120, 120]);
   });
 
   it('stale realtime falls back to adopted metadata without erasing evidence', () => {
@@ -186,6 +187,75 @@ describe('ground transit execution policy', () => {
         fixedServiceNoLongerFeasible: false,
       }),
     ).toBe('ARRIVED_PENDING_HANDOFF');
+  });
+
+  it('requires matching execution context for progress and preserves completed history', () => {
+    const base = {
+      previous: 'PENDING' as const,
+      destinationArrived: false,
+      executionHandoffComplete: false,
+      reliableMovementOnCorridor: false,
+      fixedServiceNoLongerFeasible: false,
+    };
+    expect(resolveGroundTransitLegState(base)).toBe('PENDING');
+    expect(
+      resolveGroundTransitLegState({
+        ...base,
+        reliableMovementOnCorridor: true,
+      }),
+    ).toBe('IN_PROGRESS');
+    expect(
+      resolveGroundTransitLegState({ ...base, destinationArrived: true }),
+    ).toBe('ARRIVED_PENDING_HANDOFF');
+    expect(
+      resolveGroundTransitLegState({
+        ...base,
+        destinationArrived: true,
+        executionHandoffComplete: true,
+      }),
+    ).toBe('COMPLETED');
+    expect(
+      resolveGroundTransitLegState({
+        ...base,
+        previous: 'COMPLETED',
+        fixedServiceNoLongerFeasible: true,
+      }),
+    ).toBe('COMPLETED');
+  });
+
+  it('treats a missed fixed service as infeasible without marking a high-frequency missed vehicle', () => {
+    const fixed = {
+      ...highFrequency,
+      serviceClass: 'FIXED_SERVICE' as const,
+      serviceIdentityKey: 'service-1',
+    };
+    expect(
+      resolveGroundTransitLegState({
+        previous: 'PENDING',
+        destinationArrived: false,
+        executionHandoffComplete: false,
+        reliableMovementOnCorridor: false,
+        fixedServiceNoLongerFeasible: true,
+      }),
+    ).toBe('NO_LONGER_FEASIBLE');
+    expect(
+      assessGroundTransitSafety({
+        baseline: fixed,
+        observation: null,
+        now: at('10:00'),
+        availableAt: at('10:30'),
+        downstreamLatestAt: null,
+      }).feasibility,
+    ).toBe('INFEASIBLE');
+    expect(
+      assessGroundTransitSafety({
+        baseline: highFrequency,
+        observation: null,
+        now: at('10:00'),
+        availableAt: at('10:05'),
+        downstreamLatestAt: null,
+      }).feasibility,
+    ).toBe('FEASIBLE');
   });
 
   it('requires repeated consequential deviation over the versioned time window', () => {

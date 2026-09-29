@@ -394,7 +394,7 @@ async function verifyCompose(compose, composeQuiet, env) {
       hint: {
         type: 'DEPART_AT',
         instant: '2030-10-01T10:00:00Z',
-        timeZone: 'UTC',
+        timeZone: 'Etc/UTC',
       },
     },
   );

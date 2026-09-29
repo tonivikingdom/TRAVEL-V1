@@ -134,6 +134,11 @@ export async function verifyGroundTransitChain({
     throw new Error(
       'P5E2 headway/transfer minimum did not enter existing ExecutionRisk',
     );
+  const reminderCount = await sql(
+    `SELECT count(*) FROM "NotificationEvent" WHERE "tripId"='${trip.id}' AND "kind"='EXECUTION_RISK' AND "presentationActive"=TRUE;`,
+  );
+  if (Number(reminderCount) !== 1)
+    throw new Error('P5E2 risk did not produce one active presentation');
   await waitFor(
     'P5E2 durable ground monitor retry and accepted observations',
     async () => {
@@ -177,6 +182,11 @@ export async function verifyGroundTransitChain({
     throw new Error(
       'P5E2 fresh next-departure did not replace the 5-minute reserve',
     );
+  const remainingRiskCount = await sql(
+    `SELECT count(*) FROM "ExecutionRisk" WHERE "tripId"='${trip.id}' AND "sourceTransportEdgeId"='${high.transportEdgeId}' AND "status"='OPEN';`,
+  );
+  if (remainingRiskCount !== '0')
+    throw new Error('P5E2 fresh realtime reserve did not resolve the old risk');
   const sourceFacts = await sql(
     `SELECT count(*) FROM "TemporalValue" WHERE "transportEdgeId"='${high.transportEdgeId}' AND "sourceKind"='PROVIDER_OBSERVATION';`,
   );

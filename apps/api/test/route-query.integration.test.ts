@@ -270,6 +270,21 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       headers: bearer(userB),
     });
     expect(otherRefresh.statusCode).toBe(404);
+    const syntheticGround = new SyntheticGroundTransitProvider(
+      'FIXED_DELAY',
+      () => currentNow,
+    );
+    let cachedResult:
+      | Awaited<ReturnType<GroundTransitProvider['fetchObservation']>>
+      | undefined;
+    await app.close();
+    app = buildTestApi(new SyntheticRouteProvider(() => providerResult), {
+      name: 'SYNTHETIC',
+      async fetchObservation(input) {
+        cachedResult ??= await syntheticGround.fetchObservation(input);
+        return cachedResult;
+      },
+    });
     const refresh = await app.inject({
       method: 'POST',
       url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
@@ -306,6 +321,21 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(estimated.sourceRef).toBe(
       `ground-transit-observation:${savedObservation.id}`,
     );
+    const replay = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${edge.id}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({ status: 'IDEMPOTENT' });
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toMatchObject({ version: adopted.trip.version + 1 });
     expect(
       await managed.client.groundTransitStateTransition.findMany({
         where: { legExecutionId: leg.id },

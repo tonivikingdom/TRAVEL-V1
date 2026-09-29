@@ -292,7 +292,7 @@ function groundTransitBuffers(
     ) {
       const safety = assessGroundTransitSafety({
         baseline: leg.baseline,
-        observation: fresh && sustained ? observation : null,
+        observation: fresh ? observation : null,
         now,
         availableAt: actualAtBoarding,
         downstreamLatestAt: null,

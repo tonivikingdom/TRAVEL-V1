@@ -103,6 +103,20 @@ describe('synthetic ground transit provider safety', () => {
     expect(replay).toEqual(first);
   });
 
+  it('replays the same two-minute next-departure fact without advancing its identity', async () => {
+    const provider = new SyntheticGroundTransitProvider(
+      'NEXT_DEPARTURE_2',
+      () => now,
+    );
+    const first = await provider.fetchObservation({ leg });
+    const replay = await provider.fetchObservation({ leg });
+    expect(first).toMatchObject({
+      status: 'SUCCESS',
+      observation: { nextDepartureInSeconds: 120 },
+    });
+    expect(replay).toEqual(first);
+  });
+
   it('does not expose a synthetic provider when unconfigured', async () => {
     const provider = createGroundTransitProvider({ APP_ENV: 'production' });
     expect(await provider.fetchObservation({ leg })).toEqual({

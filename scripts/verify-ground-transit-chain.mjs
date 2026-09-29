@@ -189,6 +189,53 @@ export async function verifyGroundTransitChain({
   );
   if (remainingRiskCount !== '0')
     throw new Error('P5E2 fresh realtime reserve did not resolve the old risk');
+  const refreshReplay = await apiJson(
+    `/trips/${trip.id}/execution/ground-transit/${high.transportEdgeId}/refresh`,
+    'POST',
+    {},
+  );
+  if (refreshReplay.status !== 'IDEMPOTENT')
+    throw new Error('P5E2 same provider observation was not idempotent');
+  const persistedObservationCount = await sql(
+    `SELECT count(*) FROM "GroundTransitObservation" WHERE "legExecutionId"='${high.id}';`,
+  );
+  if (Number(persistedObservationCount) !== high.observationCount + 1)
+    throw new Error('P5E2 provider replay duplicated an observation');
+  const activeGroundReminders = await sql(
+    `SELECT count(*) FROM "NotificationEvent" n JOIN "ExecutionRisk" r ON n."dedupeKey" LIKE 'execution-risk:' || r."id"::text || ':%' WHERE r."tripId"='${trip.id}' AND r."sourceTransportEdgeId"='${high.transportEdgeId}' AND n."presentationActive"=TRUE;`,
+  );
+  if (activeGroundReminders !== reminderCount)
+    throw new Error('P5E2 provider replay duplicated the ground reminder');
+
+  await apiJson(`/trips/${trip.id}/execution/location`, 'POST', {
+    latitude: 35.68,
+    longitude: 139.661,
+    accuracyMeters: 10,
+    observedAt: new Date(Date.now() + 1_000).toISOString(),
+  });
+  const departureDecision = await apiJson(
+    `/trips/${trip.id}/execution/location`,
+    'POST',
+    {
+      latitude: 35.6815,
+      longitude: 139.668,
+      accuracyMeters: 10,
+      observedAt: new Date(Date.now() + 2_000).toISOString(),
+    },
+  );
+  if (
+    departureDecision.status !== 'CONFIRMED_DEPARTURE' ||
+    !departureDecision.recorded
+  )
+    throw new Error('P5E2 reliable movement did not confirm origin departure');
+  const inProgress = await apiJson(
+    `/trips/${trip.id}/execution/ground-transit`,
+    'GET',
+  );
+  if (
+    inProgress.legs.find((leg) => leg.id === high.id)?.state !== 'IN_PROGRESS'
+  )
+    throw new Error('P5E2 departure context did not advance the ground leg');
   const sourceFacts = await sql(
     `SELECT count(*) FROM "TemporalValue" WHERE "transportEdgeId"='${high.transportEdgeId}' AND "sourceKind"='PROVIDER_OBSERVATION';`,
   );
@@ -205,6 +252,8 @@ export async function verifyGroundTransitChain({
     tripId: trip.id,
     legCount: initial.legs.length,
     durableRetry: true,
+    providerReplay: true,
+    derivedInProgress: true,
     riskCount: Number(riskCount),
     headwayReserveSeconds: high.safety.headwayWaitReserveSeconds,
     realtimeReserveSeconds: refreshed.leg.safety.headwayWaitReserveSeconds,

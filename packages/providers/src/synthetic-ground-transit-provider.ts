@@ -42,7 +42,11 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
       return { status: 'UNAVAILABLE' };
     }
     const replay = this.replayObservations.get(input.leg.id);
-    if (this.scenario === 'REPLAY_SAME' && replay !== undefined)
+    if (
+      (this.scenario === 'REPLAY_SAME' ||
+        this.scenario === 'NEXT_DEPARTURE_2') &&
+      replay !== undefined
+    )
       return { status: 'SUCCESS', observation: replay };
     const fetchedAt =
       this.scenario === 'STALE'
@@ -94,7 +98,7 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
       nextDepartureInSeconds: this.scenario === 'NEXT_DEPARTURE_2' ? 120 : null,
       minimumTransferSeconds: null,
     };
-    if (this.scenario === 'REPLAY_SAME')
+    if (this.scenario === 'REPLAY_SAME' || this.scenario === 'NEXT_DEPARTURE_2')
       this.replayObservations.set(input.leg.id, observation);
     return { status: 'SUCCESS', observation };
   }

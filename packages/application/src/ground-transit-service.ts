@@ -143,14 +143,30 @@ export class GroundTransitService {
         return { status: 'STALE_IGNORED', leg: toView(leg, now) };
       }
       if (failure === 'CURRENT' && this.executionRiskService !== undefined) {
-        await this.executionRiskService.evaluateTripRisks(
-          { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
-          tripId,
-          {
-            groupKey: `ground-transit-provider-unavailable:${leg.id}:${Math.floor(now.getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
-            sourceTransportEdgeId: leg.transportEdgeId,
-          },
-        );
+        try {
+          await this.executionRiskService.evaluateTripRisks(
+            { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
+            tripId,
+            {
+              groupKey: `ground-transit-provider-unavailable:${leg.id}:${Math.floor(now.getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
+              sourceTransportEdgeId: leg.transportEdgeId,
+              ...(expectedCapabilityRevision === undefined
+                ? {}
+                : {
+                    expectedGroundTransitCapabilityRevision:
+                      expectedCapabilityRevision,
+                  }),
+            },
+          );
+        } catch (error) {
+          if (
+            error instanceof ApplicationError &&
+            error.code === 'CAPABILITY_CHANGED'
+          ) {
+            return { status: 'STALE_IGNORED', leg: toView(leg, now) };
+          }
+          throw error;
+        }
       }
       throw new ApplicationError(
         'GROUND_TRANSIT_PROVIDER_UNAVAILABLE',
@@ -187,17 +203,34 @@ export class GroundTransitService {
       };
     }
     if (this.executionRiskService !== undefined) {
-      await this.executionRiskService.evaluateTripRisks(
-        { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
-        tripId,
-        {
-          groupKey:
-            committed.status === 'APPLIED' || committed.status === 'IDEMPOTENT'
-              ? `ground-transit-observation:${committed.leg.id}:${result.observation.fetchedAt.toISOString()}`
-              : `ground-transit-recheck:${committed.leg.id}:${Math.floor(this.now().getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
-          sourceTransportEdgeId: leg.transportEdgeId,
-        },
-      );
+      try {
+        await this.executionRiskService.evaluateTripRisks(
+          { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
+          tripId,
+          {
+            groupKey:
+              committed.status === 'APPLIED' ||
+              committed.status === 'IDEMPOTENT'
+                ? `ground-transit-observation:${committed.leg.id}:${result.observation.fetchedAt.toISOString()}`
+                : `ground-transit-recheck:${committed.leg.id}:${Math.floor(this.now().getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
+            sourceTransportEdgeId: leg.transportEdgeId,
+            ...(expectedCapabilityRevision === undefined
+              ? {}
+              : {
+                  expectedGroundTransitCapabilityRevision:
+                    expectedCapabilityRevision,
+                }),
+          },
+        );
+      } catch (error) {
+        if (!(
+          error instanceof ApplicationError &&
+          error.code === 'CAPABILITY_CHANGED'
+        )) {
+          throw error;
+        }
+        // The observation committed before pause; no later risk/notification may cross it.
+      }
     }
     return { status: committed.status, leg: toView(committed.leg, this.now()) };
   }

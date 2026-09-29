@@ -55,6 +55,7 @@ export class ExecutionRiskService {
     correlation?: {
       readonly groupKey: string;
       readonly sourceTransportEdgeId: string;
+      readonly expectedGroundTransitCapabilityRevision?: number;
     },
   ): Promise<ExecutionRiskEvaluationResponse> {
     requireUuid(tripId, 'tripId');
@@ -88,10 +89,24 @@ export class ExecutionRiskService {
               correlationGroupKey: correlation.groupKey,
               correlationSourceTransportEdgeId:
                 correlation.sourceTransportEdgeId,
+              ...(correlation.expectedGroundTransitCapabilityRevision ===
+              undefined
+                ? {}
+                : {
+                    expectedGroundTransitCapabilityRevision:
+                      correlation.expectedGroundTransitCapabilityRevision,
+                  }),
             }),
       });
       if (result.status === 'NOT_FOUND') throw notFound();
       if (result.status === 'VERSION_CONFLICT') continue;
+      if (result.status === 'CAPABILITY_CHANGED') {
+        throw new ApplicationError(
+          'CAPABILITY_CHANGED',
+          '地面交通监控授权已变更；旧请求不再生效。',
+          409,
+        );
+      }
       return {
         tripId,
         evaluationBasisTripVersion: trip.version,

@@ -56,7 +56,8 @@ export type ReconcileExecutionRisksResult =
       readonly notificationsCreated: readonly NotificationRecord[];
     }
   | { readonly status: 'NOT_FOUND' }
-  | { readonly status: 'VERSION_CONFLICT' };
+  | { readonly status: 'VERSION_CONFLICT' }
+  | { readonly status: 'CAPABILITY_CHANGED' };
 
 export interface ExecutionRiskRepository {
   reconcile(input: {
@@ -67,6 +68,7 @@ export interface ExecutionRiskRepository {
     readonly desiredRisks: readonly DesiredExecutionRisk[];
     readonly correlationGroupKey?: string;
     readonly correlationSourceTransportEdgeId?: string;
+    readonly expectedGroundTransitCapabilityRevision?: number;
   }): Promise<ReconcileExecutionRisksResult>;
   listActiveOwned(input: {
     readonly ownerUserId: string;

@@ -466,6 +466,34 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       },
     });
     expect(unknown).toMatchObject({ severity: 'UNKNOWN' });
+    const riskCountBeforePause = await managed.client.executionRisk.count({
+      where: { tripId: trip.id },
+    });
+    const notificationCountBeforePause =
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      });
+    await managed.client.tripAssistanceCapability.update({
+      where: {
+        tripId_kind: { tripId: trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      },
+      data: { state: 'PAUSED', revision: 2, pausedAt: currentNow },
+    });
+    await expect(
+      riskService.evaluateTripRisks(userA.actor, trip.id, {
+        groupKey: 'stale-ground-monitor',
+        sourceTransportEdgeId: high.transportEdgeId,
+        expectedGroundTransitCapabilityRevision: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'CAPABILITY_CHANGED' });
+    expect(
+      await managed.client.executionRisk.count({ where: { tripId: trip.id } }),
+    ).toBe(riskCountBeforePause);
+    expect(
+      await managed.client.notificationEvent.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(notificationCountBeforePause);
   });
 
   it('persists adopted fixed-service ground identity, refreshes owner-only, and retains archived evidence', async () => {

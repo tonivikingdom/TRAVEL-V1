@@ -164,9 +164,10 @@ export async function verifyGroundTransitChain({
     (leg) => leg.serviceClass === 'HIGH_FREQUENCY',
   );
   if (
-    high.safety.headwayWaitReserveSeconds !== 300 ||
-    high.safety.transferMinimumSeconds !== 300 ||
-    high.safety.totalSystemMinimumSeconds !== 300
+    high.safety.boarding.headwayWaitReserveSeconds !== 300 ||
+    high.safety.boarding.totalSystemMinimumSeconds !== 300 ||
+    high.safety.transferToNext?.transferMinimumSeconds !== 300 ||
+    high.safety.transferToNext?.totalSystemMinimumSeconds !== 300
   )
     throw new Error(
       'P5E2 headway and onward transfer boundaries were not separated',
@@ -178,8 +179,9 @@ export async function verifyGroundTransitChain({
   );
   if (
     refreshed.status !== 'APPLIED' ||
-    refreshed.leg.safety.headwayWaitReserveSeconds !== 120 ||
-    refreshed.leg.safety.totalSystemMinimumSeconds !== 120
+    refreshed.leg.safety.boarding.headwayWaitReserveSeconds !== 120 ||
+    refreshed.leg.safety.boarding.totalSystemMinimumSeconds !== 120 ||
+    refreshed.leg.safety.transferToNext?.totalSystemMinimumSeconds !== 300
   )
     throw new Error(
       'P5E2 fresh next-departure did not replace the 5-minute reserve',
@@ -255,8 +257,9 @@ export async function verifyGroundTransitChain({
     providerReplay: true,
     derivedInProgress: true,
     riskCount: Number(riskCount),
-    headwayReserveSeconds: high.safety.headwayWaitReserveSeconds,
-    realtimeReserveSeconds: refreshed.leg.safety.headwayWaitReserveSeconds,
+    headwayReserveSeconds: high.safety.boarding.headwayWaitReserveSeconds,
+    realtimeReserveSeconds:
+      refreshed.leg.safety.boarding.headwayWaitReserveSeconds,
   };
 }
 

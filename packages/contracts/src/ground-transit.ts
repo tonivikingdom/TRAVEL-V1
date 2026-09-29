@@ -6,6 +6,35 @@ export type GroundTransitLegStateView =
   | 'NO_LONGER_FEASIBLE'
   | 'UNKNOWN';
 
+export interface GroundTransitBoardingSafetyView {
+  readonly policyVersion: string;
+  readonly realtimeFreshness: 'FRESH' | 'STALE' | 'UNAVAILABLE';
+  readonly headwayWaitReserveSeconds: number | null;
+  readonly boardingAccessMinimumSeconds: number | null;
+  readonly headwayBasis: string;
+  readonly boardingAccessBasis: string;
+  readonly executionWindow: {
+    readonly plannedDeparture: string | null;
+    readonly plannedArrival: string | null;
+  };
+  readonly totalSystemMinimumSeconds: number | null;
+  readonly etaRangeSeconds: readonly [number, number] | null;
+  readonly feasibility: 'FEASIBLE' | 'INFEASIBLE' | 'UNKNOWN';
+  readonly reasonCodes: readonly string[];
+  readonly requiresRouteReevaluation: boolean;
+}
+
+export interface GroundTransitTransferSafetyView {
+  readonly policyVersion: string;
+  readonly realtimeFreshness: 'FRESH' | 'STALE' | 'UNAVAILABLE';
+  readonly transferMinimumSeconds: number | null;
+  readonly transferBasis: string;
+  readonly totalSystemMinimumSeconds: number | null;
+  readonly feasibility: 'FEASIBLE' | 'INFEASIBLE' | 'UNKNOWN';
+  readonly reasonCodes: readonly string[];
+  readonly requiresRouteReevaluation: boolean;
+}
+
 export interface GroundTransitLegView {
   readonly id: string;
   readonly transportEdgeId: string;
@@ -24,23 +53,8 @@ export interface GroundTransitLegView {
   readonly deviationStartedAt: string | null;
   readonly current: boolean;
   readonly safety: {
-    readonly policyVersion: string;
-    readonly realtimeFreshness: 'FRESH' | 'STALE' | 'UNAVAILABLE';
-    readonly headwayWaitReserveSeconds: number | null;
-    readonly transferMinimumSeconds: number | null;
-    readonly boardingAccessMinimumSeconds: number | null;
-    readonly headwayBasis: string;
-    readonly transferBasis: string;
-    readonly boardingAccessBasis: string;
-    readonly executionWindow: {
-      readonly plannedDeparture: string | null;
-      readonly plannedArrival: string | null;
-    };
-    readonly totalSystemMinimumSeconds: number | null;
-    readonly etaRangeSeconds: readonly [number, number] | null;
-    readonly feasibility: 'FEASIBLE' | 'INFEASIBLE' | 'UNKNOWN';
-    readonly reasonCodes: readonly string[];
-    readonly requiresRouteReevaluation: boolean;
+    readonly boarding: GroundTransitBoardingSafetyView;
+    readonly transferToNext: GroundTransitTransferSafetyView | null;
   };
 }
 

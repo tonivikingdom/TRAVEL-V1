@@ -306,18 +306,38 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
     deviationConsecutiveObservations: leg.deviationCount,
     deviationStartedAt: leg.deviationStartedAt?.toISOString() ?? null,
     safety: {
-      ...safety,
-      transferMinimumSeconds: transfer?.transferMinimumSeconds ?? null,
-      transferBasis:
-        transfer?.transferBasis ??
-        (leg.baseline === null ? 'UNKNOWN' : 'NOT_APPLICABLE'),
-      reasonCodes: [...safety.reasonCodes, ...(transfer?.reasonCodes ?? [])],
-      executionWindow: {
-        plannedDeparture:
-          safety.executionWindow.plannedDeparture?.toISOString() ?? null,
-        plannedArrival:
-          safety.executionWindow.plannedArrival?.toISOString() ?? null,
+      boarding: {
+        policyVersion: safety.policyVersion,
+        realtimeFreshness: safety.realtimeFreshness,
+        headwayWaitReserveSeconds: safety.headwayWaitReserveSeconds,
+        boardingAccessMinimumSeconds: safety.boardingAccessMinimumSeconds,
+        headwayBasis: safety.headwayBasis,
+        boardingAccessBasis: safety.boardingAccessBasis,
+        executionWindow: {
+          plannedDeparture:
+            safety.executionWindow.plannedDeparture?.toISOString() ?? null,
+          plannedArrival:
+            safety.executionWindow.plannedArrival?.toISOString() ?? null,
+        },
+        totalSystemMinimumSeconds: safety.totalSystemMinimumSeconds,
+        etaRangeSeconds: safety.etaRangeSeconds,
+        feasibility: safety.feasibility,
+        reasonCodes: safety.reasonCodes,
+        requiresRouteReevaluation: safety.requiresRouteReevaluation,
       },
+      transferToNext:
+        transfer === null
+          ? null
+          : {
+              policyVersion: transfer.policyVersion,
+              realtimeFreshness: transfer.realtimeFreshness,
+              transferMinimumSeconds: transfer.transferMinimumSeconds,
+              transferBasis: transfer.transferBasis,
+              totalSystemMinimumSeconds: transfer.totalSystemMinimumSeconds,
+              feasibility: transfer.feasibility,
+              reasonCodes: transfer.reasonCodes,
+              requiresRouteReevaluation: transfer.requiresRouteReevaluation,
+            },
     },
   };
 }

@@ -19,6 +19,7 @@ import {
   type StoredRoutePreviewPayload,
 } from '@travel/application';
 import type {
+  GroundTransitExecutionResponse,
   RoutePreviewView,
   RouteQueryResponse,
   TripView,
@@ -260,6 +261,21 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       preview.previewId,
       `no-onward-${randomUUID()}`,
     );
+    const ground = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(ground.statusCode).toBe(200);
+    const noOnwardSafety =
+      ground.json<GroundTransitExecutionResponse>().legs[0]!.safety;
+    expect(noOnwardSafety.boarding).toMatchObject({
+      headwayWaitReserveSeconds: 300,
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(noOnwardSafety.transferToNext).toBeNull();
+    expect(noOnwardSafety).not.toHaveProperty('totalSystemMinimumSeconds');
+    expect(noOnwardSafety).not.toHaveProperty('transferMinimumSeconds');
     const recorded = await app.inject({
       method: 'POST',
       url: `/trips/${trip.id}/temporal-values`,
@@ -318,6 +334,25 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       orderBy: { legIndex: 'asc' },
     });
     const high = legs.find((leg) => leg.serviceClass === 'HIGH_FREQUENCY')!;
+    const initialGround = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(initialGround.statusCode).toBe(200);
+    const initialSafety = initialGround
+      .json<GroundTransitExecutionResponse>()
+      .legs.find((leg) => leg.id === high.id)!.safety;
+    expect(initialSafety.boarding).toMatchObject({
+      headwayWaitReserveSeconds: 300,
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(initialSafety.transferToNext).toMatchObject({
+      transferMinimumSeconds: 300,
+      transferBasis: 'ADOPTED',
+      totalSystemMinimumSeconds: 300,
+    });
+    expect(initialSafety).not.toHaveProperty('totalSystemMinimumSeconds');
     const recorded = await app.inject({
       method: 'POST',
       url: `/trips/${trip.id}/temporal-values`,
@@ -357,8 +392,11 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(refreshed.json()).toMatchObject({
       leg: {
         safety: {
-          headwayWaitReserveSeconds: 120,
-          totalSystemMinimumSeconds: 120,
+          boarding: {
+            headwayWaitReserveSeconds: 120,
+            totalSystemMinimumSeconds: 120,
+          },
+          transferToNext: { totalSystemMinimumSeconds: 300 },
         },
       },
     });
@@ -451,6 +489,24 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         } as never,
       },
     });
+    const missingTransfer = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(missingTransfer.statusCode).toBe(200);
+    const missingSafety = missingTransfer
+      .json<GroundTransitExecutionResponse>()
+      .legs.find((leg) => leg.id === high.id)!.safety;
+    expect(missingSafety.boarding.totalSystemMinimumSeconds).toBe(300);
+    expect(missingSafety.transferToNext).toMatchObject({
+      transferMinimumSeconds: null,
+      transferBasis: 'UNKNOWN',
+      totalSystemMinimumSeconds: null,
+      feasibility: 'UNKNOWN',
+      reasonCodes: expect.arrayContaining(['TRANSFER_MINIMUM_UNKNOWN']),
+    });
+    expect(missingSafety).not.toHaveProperty('reasonCodes');
     currentNow = new Date('2030-10-01T10:06:00Z');
     const staleFailure = await unavailable();
     expect(staleFailure.statusCode).toBe(503);
@@ -466,6 +522,30 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       },
     });
     expect(unknown).toMatchObject({ severity: 'UNKNOWN' });
+    await managed.client.groundTransitLegExecution.update({
+      where: { id: high.id },
+      data: {
+        baseline: {
+          ...(high.baseline as Record<string, unknown>),
+          minimumTransferSeconds: 480,
+        } as never,
+      },
+    });
+    const knownTransfer = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/execution/ground-transit`,
+      headers: bearer(userA),
+    });
+    expect(knownTransfer.statusCode).toBe(200);
+    expect(
+      knownTransfer
+        .json<GroundTransitExecutionResponse>()
+        .legs.find((leg) => leg.id === high.id)!.safety.transferToNext,
+    ).toMatchObject({
+      transferMinimumSeconds: 480,
+      totalSystemMinimumSeconds: 480,
+      transferBasis: 'ADOPTED',
+    });
     const riskCountBeforePause = await managed.client.executionRisk.count({
       where: { tripId: trip.id },
     });

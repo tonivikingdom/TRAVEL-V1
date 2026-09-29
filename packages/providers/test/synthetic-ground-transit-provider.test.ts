@@ -117,6 +117,26 @@ describe('synthetic ground transit provider safety', () => {
     expect(replay).toEqual(first);
   });
 
+  it('keeps API and Worker synthetic scenario identities distinct for the same leg', async () => {
+    const api = await new SyntheticGroundTransitProvider(
+      'NEXT_DEPARTURE_2',
+      () => now,
+    ).fetchObservation({ leg });
+    const workerProvider = new SyntheticGroundTransitProvider(
+      'FAIL_FIRST_THEN_CANCEL_FIXED',
+      () => now,
+    );
+    expect(await workerProvider.fetchObservation({ leg })).toEqual({
+      status: 'UNAVAILABLE',
+    });
+    const cancelled = await workerProvider.fetchObservation({ leg });
+    if (api.status !== 'SUCCESS' || cancelled.status !== 'SUCCESS')
+      throw new Error('synthetic fixture unavailable');
+    expect(api.observation.observationIdentity).not.toBe(
+      cancelled.observation.observationIdentity,
+    );
+  });
+
   it('does not expose a synthetic provider when unconfigured', async () => {
     const provider = createGroundTransitProvider({ APP_ENV: 'production' });
     expect(await provider.fetchObservation({ leg })).toEqual({

@@ -75,7 +75,10 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
       value === null ? null : new Date(value.getTime() + delayMs);
     const observation: GroundTransitObservation = {
       provider: this.name,
-      observationIdentity: `synthetic:${input.leg.id}:${this.calls}`,
+      // API and Worker may run distinct synthetic scenarios against the same
+      // leg. Keep their observation identities disjoint instead of treating
+      // different scenario facts as a conflicting replay.
+      observationIdentity: `synthetic:${this.scenario}:${input.leg.id}:${this.calls}`,
       fetchedAt,
       serviceClass: baseline.serviceClass,
       mode: baseline.mode,

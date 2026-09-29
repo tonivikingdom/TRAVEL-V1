@@ -345,14 +345,6 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         )
           return 'CAPABILITY_CHANGED';
       }
-      await transaction.groundTransitLegExecution.update({
-        where: { id: row.id },
-        data: {
-          nextCheckAt: new Date(
-            input.now.getTime() + GROUND_TRANSIT_POLICY.monitorIntervalMs,
-          ),
-        },
-      });
       return 'CURRENT';
     });
   }

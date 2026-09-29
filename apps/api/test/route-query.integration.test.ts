@@ -441,7 +441,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           where: { id: high.id },
         })
       ).nextCheckAt,
-    ).toEqual(new Date('2030-10-01T10:10:00Z'));
+    ).toEqual(new Date('2030-10-01T10:01:00Z'));
     await managed.client.groundTransitLegExecution.update({
       where: { id: high.id },
       data: {

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 /** Synthetic-only P5E2 cross-layer check inside verify-compose's isolated project. */
 export async function verifyGroundTransitChain({
   apiJson,
+  apiPort,
   composeQuiet,
   waitFor,
   databaseUser,
@@ -320,6 +321,16 @@ export async function verifyGroundTransitChain({
   );
   if (Number(historyCount) < 2)
     throw new Error('P5E2 initial state history was not retained');
+  const handoffChain = expectOperationalDisruption
+    ? await verifyHandoffReplacement({
+        apiJson,
+        apiPort,
+        composeQuiet,
+        sql,
+        waitFor,
+        date,
+      })
+    : null;
   return {
     tripId: trip.id,
     legCount: initial.legs.length,
@@ -330,6 +341,247 @@ export async function verifyGroundTransitChain({
     headwayReserveSeconds: high.safety.boarding.headwayWaitReserveSeconds,
     realtimeReserveSeconds:
       refreshed.leg.safety.boarding.headwayWaitReserveSeconds,
+    ...(handoffChain === null ? {} : { handoffChain }),
+  };
+}
+
+async function verifyHandoffReplacement({
+  apiJson: adminApiJson,
+  apiPort,
+  composeQuiet,
+  sql,
+  waitFor,
+  date,
+}) {
+  const email = 'synthetic-compose-handoff@synthetic.example.test';
+  await adminApiJson('/admin/invitations', 'POST', { email });
+  const baseUrl = `http://127.0.0.1:${apiPort}`;
+  const requested = await fetch(`${baseUrl}/auth/magic-link/request`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (requested.status !== 202)
+    throw new Error('P5E2 handoff synthetic login request failed');
+  let token;
+  await waitFor(
+    'P5E2 handoff synthetic Magic Link',
+    async () => {
+      const captured = await composeQuiet(
+        'exec',
+        '--no-TTY',
+        'worker',
+        'cat',
+        '/tmp/travel-mail-capture/messages.ndjson',
+      );
+      const message = captured
+        .trim()
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .reverse()
+        .find((entry) => entry.recipient === email);
+      token =
+        message === undefined
+          ? undefined
+          : new URL(message.magicLink).hash.match(
+              /^#token=([A-Za-z0-9_-]{40,100})$/u,
+            )?.[1];
+      return token !== undefined;
+    },
+    30_000,
+  );
+  const consumed = await fetch(`${baseUrl}/auth/magic-link/consume`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  token = undefined;
+  if (!consumed.ok)
+    throw new Error('P5E2 handoff synthetic Magic Link consume failed');
+  const credential = (await consumed.json()).credential;
+  if (typeof credential !== 'string')
+    throw new Error('P5E2 handoff synthetic session missing');
+  const apiJson = async (pathname, method, body) => {
+    const response = await fetch(`${baseUrl}${pathname}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${credential}`,
+        'content-type': 'application/json',
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const payload = await response.json();
+    if (!response.ok)
+      throw new Error(
+        `P5E2 handoff ${method} ${pathname} failed: ${response.status} ${payload?.error?.code ?? 'UNKNOWN'} (${payload?.error?.message ?? 'no explanation'})`,
+      );
+    return payload;
+  };
+  let trip = await apiJson('/trips', 'POST', {
+    name: 'SYNTHETIC P5E2 handoff replacement',
+    planningAnchorDate: date,
+    defaultPeopleCount: 1,
+  });
+  for (const [index, name] of [
+    'SYNTHETIC_P5E2_GROUND_ORIGIN',
+    'SYNTHETIC_P5E2_GROUND_DESTINATION',
+  ].entries()) {
+    trip = await apiJson(`/trips/${trip.id}/commands`, 'POST', {
+      baseTripVersion: trip.version,
+      command: {
+        type: 'ADD_PLACE_VISIT',
+        targetDay:
+          index === 0
+            ? { type: 'NEW', localDate: date, sequence: 0 }
+            : {
+                type: 'EXISTING',
+                dayOccurrenceId: trip.days[0].dayOccurrenceId,
+              },
+        position: index,
+        place: {
+          type: 'CUSTOM',
+          name,
+          latitude: index === 0 ? 35.6762 : 35.6895,
+          longitude: index === 0 ? 139.6503 : 139.6917,
+        },
+      },
+    });
+  }
+  const [from, to] = trip.days[0].nodes;
+  let initialQuery;
+  try {
+    initialQuery = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
+      basisVersion: trip.version,
+      fromNodeId: from.id,
+      toNodeId: to.id,
+      hint: {
+        type: 'DEPART_AT',
+        instant: new Date(Date.now() + 8 * 60_000).toISOString(),
+        timeZone: 'Asia/Tokyo',
+      },
+    });
+  } catch (error) {
+    throw new Error(`P5E2 initial handoff route query: ${error.message}`, {
+      cause: error,
+    });
+  }
+  const firstPreview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
+    basisVersion: trip.version,
+    candidateSnapshotId: initialQuery.candidates[0].candidateSnapshotId,
+  });
+  const firstAdopt = await apiJson(
+    `/trips/${trip.id}/previews/${firstPreview.previewId}/adopt`,
+    'POST',
+    {
+      baseTripVersion: trip.version,
+      idempotencyKey: randomUUID(),
+    },
+  );
+  const legs = await apiJson(
+    `/trips/${trip.id}/execution/ground-transit`,
+    'GET',
+  );
+  const fixed = legs.legs.find((leg) => leg.serviceClass === 'FIXED_SERVICE');
+  if (!fixed) throw new Error('P5E2 handoff route lacks fixed service');
+  await apiJson(
+    `/trips/${trip.id}/assistance/GROUND_TRANSIT_MONITORING`,
+    'POST',
+    {
+      action: 'ENABLE',
+      baseCapabilityRevision: 0,
+      idempotencyKey: randomUUID(),
+    },
+  );
+  await waitFor(
+    'P5E2 handoff worker cancellation',
+    async () => {
+      const current = await apiJson(
+        `/trips/${trip.id}/execution/ground-transit`,
+        'GET',
+      );
+      return (
+        current.legs.find((leg) => leg.id === fixed.id)?.operational
+          .requiredAction === 'ROUTE_REEVALUATION_REQUIRED'
+      );
+    },
+    120_000,
+  );
+  const before = await sql(
+    `SELECT (SELECT count(*) FROM "RouteCandidateSnapshot" WHERE "tripId"='${trip.id}') || ':' || (SELECT count(*) FROM "RoutePreview" WHERE "tripId"='${trip.id}') || ':' || (SELECT count(*) FROM "AdoptedRoute" WHERE "tripId"='${trip.id}' AND "status"='ACTIVE');`,
+  );
+  const handoff = await apiJson(
+    `/trips/${trip.id}/execution/ground-transit/${fixed.transportEdgeId}/route-reevaluation`,
+    'GET',
+  );
+  if (
+    handoff.readiness !== 'READY' ||
+    handoff.query?.fromNodeId !== from.id ||
+    handoff.query?.toNodeId !== to.id ||
+    handoff.query?.hint?.type !== 'DEPART_AT' ||
+    handoff.query?.hint?.timeZone !== 'Asia/Tokyo'
+  )
+    throw new Error(
+      `P5E2 handoff did not prepare the current route query: ${JSON.stringify(handoff)}`,
+    );
+  const after = await sql(
+    `SELECT (SELECT count(*) FROM "RouteCandidateSnapshot" WHERE "tripId"='${trip.id}') || ':' || (SELECT count(*) FROM "RoutePreview" WHERE "tripId"='${trip.id}') || ':' || (SELECT count(*) FROM "AdoptedRoute" WHERE "tripId"='${trip.id}' AND "status"='ACTIVE');`,
+  );
+  if (before !== after)
+    throw new Error(
+      'P5E2 handoff automatically queried, previewed, or adopted',
+    );
+  let alternatives;
+  try {
+    alternatives = await apiJson(
+      `/trips/${trip.id}/routes/query`,
+      'POST',
+      handoff.query,
+    );
+  } catch (error) {
+    throw new Error(`P5E2 explicit handoff route query: ${error.message}`, {
+      cause: error,
+    });
+  }
+  if (alternatives.candidates.length === 0)
+    throw new Error('P5E2 explicit handoff Query returned no candidates');
+  const nextPreview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
+    basisVersion: handoff.query.basisVersion,
+    candidateSnapshotId: alternatives.candidates[0].candidateSnapshotId,
+  });
+  if (!nextPreview.adoptable)
+    throw new Error('P5E2 explicit replacement Preview is blocked');
+  const beforeAdopt = await sql(
+    `SELECT "status" FROM "AdoptedRoute" WHERE "id"='${firstAdopt.operationReceipt.adoptedRouteId}';`,
+  );
+  if (beforeAdopt !== 'ACTIVE')
+    throw new Error('P5E2 Preview unexpectedly replaced the route');
+  const replacement = await apiJson(
+    `/trips/${trip.id}/previews/${nextPreview.previewId}/adopt`,
+    'POST',
+    {
+      baseTripVersion: handoff.query.basisVersion,
+      idempotencyKey: randomUUID(),
+    },
+  );
+  const routeStates = await sql(
+    `SELECT (SELECT "status" FROM "AdoptedRoute" WHERE "id"='${firstAdopt.operationReceipt.adoptedRouteId}') || ':' || (SELECT "status" FROM "AdoptedRoute" WHERE "id"='${replacement.operationReceipt.adoptedRouteId}');`,
+  );
+  if (routeStates !== 'REPLACED:ACTIVE')
+    throw new Error(
+      `P5E2 explicit replacement did not preserve lifecycle (${routeStates})`,
+    );
+  const oldHandoff = await apiJson(
+    `/trips/${trip.id}/execution/ground-transit/${fixed.transportEdgeId}/route-reevaluation`,
+    'GET',
+  );
+  if (oldHandoff.readiness === 'READY')
+    throw new Error('P5E2 replaced route still offers READY handoff');
+  return {
+    tripId: trip.id,
+    readiness: handoff.readiness,
+    routeStates,
+    automaticPlanning: false,
   };
 }
 

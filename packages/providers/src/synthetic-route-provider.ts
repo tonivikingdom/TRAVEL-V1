@@ -129,9 +129,19 @@ function developmentCandidate(
 ): NormalizedRouteCandidate {
   const latestArrival = input.latestArrival;
   const earliestDeparture = input.earliestDeparture;
-  const departure =
+  const suggestedDeparture =
     earliestDeparture ??
     new Date((latestArrival ?? observedAt).getTime() - 30 * 60 * 1_000);
+  // A replacement query can carry an adopted planned arrival and a fresh
+  // DEPART_AT hint with different millisecond components. Keep the synthetic
+  // candidate inside both bounds while producing canonical whole-second legs.
+  const departure =
+    earliestDeparture !== null && latestArrival !== null
+      ? new Date(
+          suggestedDeparture.getTime() +
+            ((latestArrival.getTime() - suggestedDeparture.getTime()) % 1_000),
+        )
+      : suggestedDeparture;
   const arrival =
     latestArrival === null
       ? new Date(departure.getTime() + 30 * 60 * 1_000)

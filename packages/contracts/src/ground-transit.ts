@@ -92,3 +92,12 @@ export interface GroundTransitRefreshResponse {
     | 'DIFFERENT_SERVICE';
   readonly leg: GroundTransitLegView;
 }
+
+export interface GroundTransitRouteReevaluationHandoffView {
+  readonly tripId: string;
+  readonly sourceTransportEdgeId: string;
+  readonly adoptedRouteId: string;
+  readonly readiness: 'NOT_REQUIRED' | 'READY' | 'ORIGIN_UNRESOLVED';
+  readonly reasonCodes: readonly string[];
+  readonly query: import('./routes.js').RouteQueryRequest | null;
+}

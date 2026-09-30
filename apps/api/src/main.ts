@@ -5,6 +5,7 @@ import {
   ExecutionRiskService,
   FlightMonitoringService,
   GroundTransitService,
+  GroundTransitRouteReevaluationService,
   FlightService,
   NotificationService,
   RouteAdoptionService,
@@ -23,6 +24,7 @@ import {
   PrismaFlightRepository,
   PrismaFlightMonitoringRepository,
   PrismaGroundTransitRepository,
+  PrismaGroundTransitRouteProgressRepository,
   PrismaNotificationRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
@@ -58,6 +60,8 @@ let executionRiskService: ExecutionRiskService | undefined;
 let flightService: FlightService | undefined;
 let flightMonitoringService: FlightMonitoringService | undefined;
 let groundTransitService: GroundTransitService | undefined;
+let groundTransitRouteReevaluationService:
+  GroundTransitRouteReevaluationService | undefined;
 let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
@@ -119,6 +123,12 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     () => new Date(),
     executionRiskService,
   );
+  groundTransitRouteReevaluationService =
+    new GroundTransitRouteReevaluationService(
+      tripRepository,
+      groundTransitRepository,
+      new PrismaGroundTransitRouteProgressRepository(managedPrisma.client),
+    );
   executionLocationService = new ExecutionLocationService(
     new PrismaExecutionLocationRepository(managedPrisma.client),
     executionRiskService,
@@ -187,6 +197,9 @@ const app = buildApi({
   ...(flightService === undefined ? {} : { flightService }),
   ...(flightMonitoringService === undefined ? {} : { flightMonitoringService }),
   ...(groundTransitService === undefined ? {} : { groundTransitService }),
+  ...(groundTransitRouteReevaluationService === undefined
+    ? {}
+    : { groundTransitRouteReevaluationService }),
   ...(routeQueryService === undefined ? {} : { routeQueryService }),
   ...(routePreviewService === undefined ? {} : { routePreviewService }),
   ...(routeAdoptionService === undefined ? {} : { routeAdoptionService }),

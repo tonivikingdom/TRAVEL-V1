@@ -5,6 +5,7 @@ import {
   digestOpaqueToken,
   ExecutionRiskService,
   GroundTransitService,
+  GroundTransitRouteReevaluationService,
   type GroundTransitProvider,
   hashRoutePreviewPayload,
   RouteAdoptionService,
@@ -20,6 +21,7 @@ import {
 } from '@travel/application';
 import type {
   GroundTransitExecutionResponse,
+  GroundTransitRouteReevaluationHandoffView,
   RoutePreviewView,
   RouteQueryResponse,
   TripView,
@@ -29,6 +31,7 @@ import {
   PrismaAuthRepository,
   PrismaExecutionRiskRepository,
   PrismaGroundTransitRepository,
+  PrismaGroundTransitRouteProgressRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
   type ManagedPrismaClient,
@@ -163,6 +166,13 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         () => currentNow,
         executionRiskService,
       ),
+      groundTransitRouteReevaluationService:
+        new GroundTransitRouteReevaluationService(
+          tripRepository,
+          groundTransitRepository,
+          new PrismaGroundTransitRouteProgressRepository(managed.client),
+          () => currentNow,
+        ),
       executionRiskService,
     });
   }
@@ -854,6 +864,275 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       },
     });
     expect(oldDecision).toEqual({ status: 'OBSERVATION_OBSOLETE' });
+  });
+
+  it('hands off a cancelled active leg to explicit Query, Preview, and Adopt without planning side effects', async () => {
+    const { trip, adopted, leg, from } = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider((input) => {
+        providerInputs.push(input);
+        return providerResult;
+      }),
+      groundSequence(['CANCELLED']),
+    );
+    const refresh = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refresh.statusCode).toBe(200);
+    expect(refresh.json()).toMatchObject({
+      leg: { operational: { requiredAction: 'ROUTE_REEVALUATION_REQUIRED' } },
+    });
+    const countsBefore = await Promise.all([
+      managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+      managed.client.routePreview.count({ where: { tripId: trip.id } }),
+      managed.client.operationReceipt.count({ where: { tripId: trip.id } }),
+    ]);
+    const handoffUrl = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/route-reevaluation`;
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: handoffUrl,
+      headers: bearer(userB),
+    });
+    expect(forbidden.statusCode).toBe(404);
+    const handoffResponse = await app.inject({
+      method: 'GET',
+      url: handoffUrl,
+      headers: bearer(userA),
+    });
+    expect(handoffResponse.statusCode).toBe(200);
+    const handoff =
+      handoffResponse.json() as GroundTransitRouteReevaluationHandoffView;
+    const current = await managed.client.trip.findUniqueOrThrow({
+      where: { id: trip.id },
+    });
+    expect(handoff).toMatchObject({
+      adoptedRouteId: adopted.operationReceipt.adoptedRouteId,
+      readiness: 'READY',
+      query: {
+        basisVersion: current.version,
+        fromNodeId: from.id,
+        toNodeId: adopted.trip.days[0]!.nodes.at(-1)!.id,
+        hint: {
+          type: 'DEPART_AT',
+          instant: currentNow.toISOString(),
+          timeZone: 'UTC',
+        },
+      },
+    });
+    expect(
+      await Promise.all([
+        managed.client.routeCandidateSnapshot.count({
+          where: { tripId: trip.id },
+        }),
+        managed.client.routePreview.count({ where: { tripId: trip.id } }),
+        managed.client.operationReceipt.count({ where: { tripId: trip.id } }),
+      ]),
+    ).toEqual(countsBefore);
+    expect(providerInputs).toHaveLength(1); // Only the original user query.
+
+    const firstCandidate =
+      providerResult.status === 'SUCCESS'
+        ? providerResult.candidates[0]!
+        : null;
+    if (firstCandidate === null) throw new Error('Synthetic candidate missing');
+    const originalLeg = firstCandidate.legs[0]!;
+    if (
+      originalLeg.groundTransit === undefined ||
+      originalLeg.groundTransit === null
+    )
+      throw new Error('Ground transit metadata missing');
+    if (handoff.query === null)
+      throw new Error('READY handoff must include a query');
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...firstCandidate,
+          candidateId: `replacement-${randomUUID()}`,
+          providerCandidateRef: `replacement-${randomUUID()}`,
+          legs: [
+            {
+              ...originalLeg,
+              providerRef: `replacement-${randomUUID()}`,
+              groundTransit: {
+                ...originalLeg.groundTransit,
+                serviceIdentityKey: 'synthetic:replacement:1',
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const queried = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/routes/query`,
+      headers: bearer(userA),
+      payload: handoff.query,
+    });
+    expect(queried.statusCode).toBe(200);
+    const queryResult = queried.json() as RouteQueryResponse;
+    expect(queryResult.candidates).toHaveLength(1);
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(countsBefore[0] + 1);
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: handoff.query!.basisVersion,
+        candidateSnapshotId: queryResult.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    const preview = previewResponse.json() as RoutePreviewView;
+    expect(preview.adoptable).toBe(true);
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: adopted.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'ACTIVE' });
+    const replacement = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews/${preview.previewId}/adopt`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: handoff.query!.basisVersion,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    expect(replacement.statusCode).toBe(200);
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: adopted.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'REPLACED' });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: handoffUrl,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({ readiness: 'NOT_REQUIRED', query: null });
+  });
+
+  it('stops a recovered plan handoff and rejects an independently progressed origin', async () => {
+    const { trip, leg, from } = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED', 'RECOVERY']),
+    );
+    const refreshUrl = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+    const handoffUrl = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/route-reevaluation`;
+    await app.inject({
+      method: 'POST',
+      url: refreshUrl,
+      headers: bearer(userA),
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: handoffUrl,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({ readiness: 'READY' });
+    const departureFact = await managed.client.temporalValue.create({
+      data: {
+        nodeId: from.id,
+        layer: 'ACTUAL',
+        pointKind: 'DEPARTURE',
+        instant: new Date('2030-10-01T09:50:30Z'),
+        timeZone: 'UTC',
+        sourceKind: 'USER_VALUE',
+      },
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: handoffUrl,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      readiness: 'ORIGIN_UNRESOLVED',
+      query: null,
+      reasonCodes: expect.arrayContaining(['EXECUTION_ALREADY_PROGRESSING']),
+    });
+    await managed.client.temporalValue.delete({
+      where: { id: departureFact.id },
+    });
+    currentNow = new Date('2030-10-01T09:51:00Z');
+    await app.inject({
+      method: 'POST',
+      url: refreshUrl,
+      headers: bearer(userA),
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: handoffUrl,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({ readiness: 'NOT_REQUIRED', query: null });
+  });
+
+  it('uses current Trip.version and leaves stale handoff queries to the existing version fence', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED']),
+    );
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`,
+      headers: bearer(userA),
+    });
+    const handoff = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/route-reevaluation`,
+        headers: bearer(userA),
+      })
+    ).json() as GroundTransitRouteReevaluationHandoffView;
+    expect(handoff.readiness).toBe('READY');
+    if (handoff.query === null) throw new Error('READY handoff has no query');
+    const owned = await managed.client.trip.findUniqueOrThrow({
+      where: { id: trip.id },
+    });
+    await managed.client.trip.update({
+      where: { id: trip.id },
+      data: { version: { increment: 1 } },
+    });
+    const stale = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/routes/query`,
+      headers: bearer(userA),
+      payload: handoff.query,
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(1);
+    expect(handoff.query?.basisVersion).toBe(owned.version);
   });
 
   it('does not rewind independently confirmed destination arrival on a later provider cancellation', async () => {

@@ -6,6 +6,7 @@ import {
   ExecutionRiskService,
   FlightMonitoringService,
   GroundTransitService,
+  GroundTransitRouteReevaluationService,
   FlightService,
   NotificationService,
   RouteAdoptionService,
@@ -53,6 +54,7 @@ export interface ApiDependencies {
   readonly flightService?: FlightService;
   readonly flightMonitoringService?: FlightMonitoringService;
   readonly groundTransitService?: GroundTransitService;
+  readonly groundTransitRouteReevaluationService?: GroundTransitRouteReevaluationService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
   readonly routeAdoptionService?: RouteAdoptionService;
@@ -573,6 +575,24 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.get<{ Params: { tripId: string; transportEdgeId: string } }>(
+    '/trips/:tripId/execution/ground-transit/:transportEdgeId/route-reevaluation',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireGroundTransitRouteReevaluationService(
+        dependencies,
+      ).getHandoff(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.transportEdgeId,
+      );
+    },
+  );
+
   app.post<{ Params: { tripId: string } }>(
     '/trips/:tripId/execution/events',
     async (request) => {
@@ -879,6 +899,20 @@ function requireGroundTransitService(
     );
   }
   return dependencies.groundTransitService;
+}
+
+function requireGroundTransitRouteReevaluationService(
+  dependencies: ApiDependencies,
+): GroundTransitRouteReevaluationService {
+  if (dependencies.groundTransitRouteReevaluationService === undefined) {
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '路线重新规划衔接服务暂时不可用。',
+      503,
+      true,
+    );
+  }
+  return dependencies.groundTransitRouteReevaluationService;
 }
 
 function requireAssistanceCapabilityService(

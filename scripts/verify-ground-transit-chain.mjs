@@ -414,7 +414,7 @@ async function verifyHandoffReplacement({
     const payload = await response.json();
     if (!response.ok)
       throw new Error(
-        `P5E2 handoff ${method} ${pathname} failed: ${response.status} ${payload?.error?.code ?? 'UNKNOWN'}`,
+        `P5E2 handoff ${method} ${pathname} failed: ${response.status} ${payload?.error?.code ?? 'UNKNOWN'} (${payload?.error?.message ?? 'no explanation'})`,
       );
     return payload;
   };
@@ -424,7 +424,7 @@ async function verifyHandoffReplacement({
     defaultPeopleCount: 1,
   });
   for (const [index, name] of [
-    'SYNTHETIC_HANDOFF_FROM',
+    'SYNTHETIC_P5E2_GROUND_ORIGIN',
     'SYNTHETIC_P5E2_GROUND_DESTINATION',
   ].entries()) {
     trip = await apiJson(`/trips/${trip.id}/commands`, 'POST', {

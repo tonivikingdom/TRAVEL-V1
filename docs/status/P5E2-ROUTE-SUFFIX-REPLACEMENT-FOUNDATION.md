@@ -11,6 +11,10 @@ Batch 4A establishes safe suffix Query / Preview / Adopt / Undo infrastructure. 
 
 **Batch 3 handoff still returns ORIGIN_UNRESOLVED for progressed execution. Live-origin handoff activation is deferred to Batch 4B.** No Batch 3 readiness, execution-origin selection or timezone fallback policy is enabled by this batch. An explicit suffix request uses reliable origin-local timezone evidence. The suffix infrastructure itself has no ACTUAL-arrival prerequisite.
 
+## Subsequent Batch 4B authorization
+
+The statements below record the frozen 4A and review-repair behavior. The authorized follow-up [Batch 4B — Confirmed Live-Origin Authorization](P5E2-CONFIRMED-LIVE-ORIGIN-AUTHORIZATION.md) keeps this topology foundation and adds server-side execution authorization for public SUFFIX Query and locked Adopt. It enables read-only Handoff from a durable confirmed internal node. A topology-only internal origin no longer authorizes public SUFFIX Query. See that status document for current behavior and acceptance evidence.
+
 ## PR #33 blocking review repair
 
 Reviewed HEAD: `ded697c30fc89edf8ca961b7ef37903bc06c4f20`. The repair stays on the original feature branch and Draft PR; starting main is unchanged. The original acceptance evidence below describes the pre-review implementation. Repair validation is recorded separately here.

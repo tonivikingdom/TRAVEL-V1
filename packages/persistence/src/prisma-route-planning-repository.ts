@@ -15,6 +15,7 @@ import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { adoptRoutePreview } from './prisma-route-adoption.js';
 import { undoRouteAdoption } from './prisma-route-undo.js';
 import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
+import { resolveLockedConfirmedRouteExecutionOrigin } from './prisma-confirmed-route-execution-origin.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -42,7 +43,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       await lockOwner(transaction, input.ownerUserId);
       const tripStatus = await lockTrip(transaction, input);
       if (tripStatus !== 'SUCCESS') return { status: tripStatus };
-      if (!(await isCurrentRouteCorridor(transaction, input))) {
+      if (!(await isCurrentRouteCorridor(transaction, input, true))) {
         return { status: 'NOT_ADJACENT' };
       }
       const snapshots: RouteCandidateSnapshotRecord[] = [];
@@ -232,14 +233,24 @@ async function isCurrentRouteCorridor(
     readonly fromNodeId: string;
     readonly toNodeId: string;
   },
+  authorizeSuffix = false,
 ): Promise<boolean> {
+  const corridor = await resolveLockedRouteCorridor(
+    transaction,
+    input.tripId,
+    input.fromNodeId,
+    input.toNodeId,
+  );
+  if (corridor === null) return false;
+  if (!authorizeSuffix || corridor.replacementScope !== 'SUFFIX') return true;
+  const origin = await resolveLockedConfirmedRouteExecutionOrigin(
+    transaction,
+    input.tripId,
+    corridor.sourceRouteAnchorFromNodeId!,
+    corridor.sourceRouteAnchorToNodeId!,
+  );
   return (
-    (await resolveLockedRouteCorridor(
-      transaction,
-      input.tripId,
-      input.fromNodeId,
-      input.toNodeId,
-    )) !== null
+    origin.status === 'CONFIRMED_NODE' && origin.nodeId === input.fromNodeId
   );
 }
 

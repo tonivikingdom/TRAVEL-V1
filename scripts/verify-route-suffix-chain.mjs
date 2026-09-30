@@ -26,14 +26,14 @@ export async function verifyRouteSuffixChain({
     const payload = await response.json();
     if (!response.ok)
       throw new Error(
-        `P5E2 4A ${method} ${pathname}: ${response.status} ${payload?.error?.code ?? 'UNKNOWN'}`,
+        `P5E2 Batch 4 ${method} ${pathname}: ${response.status} ${payload?.error?.code ?? 'UNKNOWN'}`,
       );
     return payload;
   };
   await adminJson('/admin/invitations', 'POST', { email });
   await request(null, '/auth/magic-link/request', 'POST', { email });
   let token;
-  await waitFor('P5E2 4A synthetic owner Worker delivery', async () => {
+  await waitFor('P5E2 Batch 4 synthetic owner Worker delivery', async () => {
     const captured = await composeQuiet(
       'exec',
       '--no-TTY',
@@ -61,7 +61,7 @@ export async function verifyRouteSuffixChain({
   });
   token = undefined;
   if (typeof session.credential !== 'string')
-    throw new Error('P5E2 4A synthetic owner session missing');
+    throw new Error('P5E2 Batch 4 synthetic owner session missing');
   const apiJson = (pathname, method, body) =>
     request(session.credential, pathname, method, body);
   const sql = async (query) =>
@@ -81,7 +81,7 @@ export async function verifyRouteSuffixChain({
       )
     ).trim();
   const assert = (condition, message) => {
-    if (!condition) throw new Error(`P5E2 4A ${message}`);
+    if (!condition) throw new Error(`P5E2 Batch 4 ${message}`);
   };
   const zone = 'Asia/Tokyo';
   const departure = new Date(Date.now() - 15 * 60_000);
@@ -169,39 +169,136 @@ export async function verifyRouteSuffixChain({
     `SELECT jsonb_agg(jsonb_build_array(n."id",n."dayOccurrenceId",n."position") ORDER BY o."sequence",n."position") FROM "ItineraryNode" n JOIN "DayOccurrence" o ON o."id"=n."dayOccurrenceId" WHERE n."tripId"='${trip.id}';`,
   );
   const recordedArrival = query.candidates[0].legs[0].arrival;
-  for (const subject of [
-    { type: 'TRANSPORT', transportEdgeId: prefix.id },
-    { type: 'NODE', nodeId: b.id },
+  const unauthorizedCount = await sql(
+    `SELECT count(*) FROM "RouteCandidateSnapshot" WHERE "tripId"='${trip.id}';`,
+  );
+  const rejected = await fetch(
+    `http://127.0.0.1:${apiPort}/trips/${trip.id}/routes/query`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        basisVersion: trip.version,
+        fromNodeId: b.id,
+        toNodeId: d.id,
+        hint: {
+          type: 'DEPART_AT',
+          instant: new Date().toISOString(),
+          timeZone: zone,
+        },
+      }),
+    },
+  );
+  const rejection = await rejected.json();
+  assert(
+    rejected.status === 422 &&
+      rejection.error?.code === 'ROUTE_QUERY_UNSUPPORTED',
+    'unconfirmed direct suffix Query must fail',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "RouteCandidateSnapshot" WHERE "tripId"='${trip.id}';`,
+    )) === unauthorizedCount,
+    'unauthorized Query created a snapshot',
+  );
+
+  // Independent user confirmation goes through the existing execution API.
+  // A raw TemporalValue/GPS/provider observation cannot authorize this suffix.
+  for (const [nodeId, type, occurredAt] of [
+    [a.id, 'MANUAL_ARRIVAL', query.candidates[0].overall.departure.instant],
+    [a.id, 'MANUAL_DEPARTURE', query.candidates[0].overall.departure.instant],
+    [b.id, 'MANUAL_ARRIVAL', recordedArrival.instant],
+  ]) {
+    await apiJson(`/trips/${trip.id}/execution/events`, 'POST', {
+      baseTripVersion: trip.version,
+      idempotencyKey: randomUUID(),
+      nodeId,
+      type,
+      occurredAt,
+    });
+    trip = await apiJson(`/trips/${trip.id}`, 'GET');
+  }
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "ExecutionEvent" e JOIN "TemporalValue" v ON v."nodeId"=e."nodeId" AND v."sourceRef"='execution-event:'||e."id"::text WHERE e."tripId"='${trip.id}' AND e."nodeId"='${b.id}' AND e."type"='ARRIVAL' AND e."undoneAt" IS NULL AND v."layer"='ACTUAL' AND v."pointKind"='ARRIVAL' AND v."instant"=e."occurredAt";`,
+    )) === '1',
+    'confirmed B arrival lacks durable linked ACTUAL',
+  );
+  for (const [pointKind, instant] of [
+    ['ARRIVAL', recordedArrival.instant],
+    ['DEPARTURE', query.candidates[0].overall.departure.instant],
   ]) {
     trip = await apiJson(`/trips/${trip.id}/temporal-values`, 'POST', {
       baseTripVersion: trip.version,
-      subject,
+      subject: { type: 'TRANSPORT', transportEdgeId: prefix.id },
       value: {
         layer: 'ACTUAL',
-        pointKind: 'ARRIVAL',
-        instant: recordedArrival.instant,
+        pointKind,
+        instant,
         timeZone: zone,
         sourceKind: 'USER_VALUE',
       },
     });
   }
-  // Explicit test fixture completion evidence, not inferred from Provider/GPS.
-  await sql(
-    `UPDATE "GroundTransitLegExecution" SET "state"='COMPLETED' WHERE "transportEdgeId"='${prefix.id}';`,
+  const downstreamEdgeId = trip.connections.find(
+    (connection) => connection.toNodeId === d.id,
+  ).transport.id;
+  await apiJson(
+    `/trips/${trip.id}/assistance/GROUND_TRANSIT_MONITORING`,
+    'POST',
+    {
+      action: 'ENABLE',
+      baseCapabilityRevision: 0,
+      idempotencyKey: randomUUID(),
+    },
+  );
+  await waitFor(
+    'P5E2 Batch 4 downstream synthetic disruption',
+    async () => {
+      const execution = await apiJson(
+        `/trips/${trip.id}/execution/ground-transit`,
+        'GET',
+      );
+      return (
+        execution.legs.find((leg) => leg.transportEdgeId === downstreamEdgeId)
+          ?.operational.requiredAction === 'ROUTE_REEVALUATION_REQUIRED'
+      );
+    },
+    120_000,
+  );
+  const planningFootprint = () =>
+    sql(
+      `SELECT jsonb_build_object('version',(SELECT "version" FROM "Trip" WHERE "id"='${trip.id}'),'snapshots',(SELECT count(*) FROM "RouteCandidateSnapshot" WHERE "tripId"='${trip.id}'),'previews',(SELECT count(*) FROM "RoutePreview" WHERE "tripId"='${trip.id}'),'routes',(SELECT jsonb_agg(jsonb_build_array("id","status","anchorFromNodeId","anchorToNodeId") ORDER BY "id") FROM "AdoptedRoute" WHERE "tripId"='${trip.id}'),'edges',(SELECT jsonb_agg(to_jsonb(e) ORDER BY e."id") FROM "TransportEdge" e WHERE e."tripId"='${trip.id}'),'nodes',(SELECT jsonb_agg(to_jsonb(n) ORDER BY n."id") FROM "ItineraryNode" n WHERE n."tripId"='${trip.id}'));`,
+    );
+  const beforeHandoff = await planningFootprint();
+  const handoff = await apiJson(
+    `/trips/${trip.id}/execution/ground-transit/${downstreamEdgeId}/route-reevaluation`,
+    'GET',
+  );
+  assert(
+    handoff.readiness === 'READY' &&
+      handoff.originBasis === 'CONFIRMED_EXECUTION_NODE' &&
+      handoff.query?.fromNodeId === b.id &&
+      handoff.query?.toNodeId === d.id &&
+      handoff.query?.basisVersion === trip.version &&
+      handoff.query?.hint?.timeZone === recordedArrival.timeZone,
+    'confirmed B handoff did not prepare safe B to D query',
+  );
+  assert(
+    (await planningFootprint()) === beforeHandoff,
+    'handoff wrote planning data',
   );
   const prefixFacts = await sql(
     `SELECT jsonb_build_object('edge',to_jsonb(e),'values',(SELECT jsonb_agg(to_jsonb(v) ORDER BY v."id") FROM "TemporalValue" v WHERE v."transportEdgeId"=e."id"),'leg',(SELECT to_jsonb(l) FROM "GroundTransitLegExecution" l WHERE l."transportEdgeId"=e."id")) FROM "TransportEdge" e WHERE e."id"='${prefix.id}';`,
   );
-  const next = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
-    basisVersion: trip.version,
-    fromNodeId: b.id,
-    toNodeId: d.id,
-    hint: {
-      type: 'DEPART_AT',
-      instant: new Date().toISOString(),
-      timeZone: recordedArrival.timeZone,
-    },
-  });
+  const next = await apiJson(
+    `/trips/${trip.id}/routes/query`,
+    'POST',
+    handoff.query,
+  );
   const preview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
     basisVersion: trip.version,
     candidateSnapshotId: next.candidates[0].candidateSnapshotId,
@@ -316,6 +413,10 @@ export async function verifyRouteSuffixChain({
     adopt: 'PASS',
     undo: 'PASS',
     preservedPrefix: true,
+    originBasis: handoff.originBasis,
+    confirmedUserArrival: true,
+    unauthorizedSuffixRejected: true,
+    handoffReadOnly: true,
     automaticQuery: false,
     automaticPreview: false,
     automaticAdopt: false,

@@ -160,3 +160,8 @@ export {
   type RouteReplacementScope,
   type RouteReplacementCorridor,
 } from './route-replacement-corridor.js';
+export {
+  resolveConfirmedRouteExecutionOrigin,
+  type ConfirmedRouteExecutionOrigin,
+  type RouteExecutionOriginEvent,
+} from './confirmed-route-execution-origin.js';

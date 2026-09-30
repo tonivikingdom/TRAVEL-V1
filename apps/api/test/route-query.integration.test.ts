@@ -4,6 +4,8 @@ import {
   AuthService,
   digestOpaqueToken,
   ExecutionRiskService,
+  ExecutionLocationService,
+  type FlightMonitoringService,
   GroundTransitService,
   GroundTransitRouteReevaluationService,
   type GroundTransitProvider,
@@ -30,6 +32,7 @@ import {
   createPrismaClient,
   PrismaAuthRepository,
   PrismaExecutionRiskRepository,
+  PrismaExecutionLocationRepository,
   PrismaGroundTransitRepository,
   PrismaGroundTransitRouteProgressRepository,
   PrismaRoutePlanningRepository,
@@ -174,6 +177,12 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           () => currentNow,
         ),
       executionRiskService,
+      executionLocationService: new ExecutionLocationService(
+        new PrismaExecutionLocationRepository(managed.client),
+        executionRiskService,
+        { trigger: async () => ({}) } as unknown as FlightMonitoringService,
+        { now: () => currentNow },
+      ),
     });
   }
 
@@ -973,7 +982,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       method: 'POST',
       url: `/trips/${trip.id}/routes/query`,
       headers: bearer(userA),
-      payload: handoff.query,
+      payload: handoff.query!,
     });
     expect(queried.statusCode).toBe(200);
     const queryResult = queried.json() as RouteQueryResponse;
@@ -1124,7 +1133,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       method: 'POST',
       url: `/trips/${trip.id}/routes/query`,
       headers: bearer(userA),
-      payload: handoff.query,
+      payload: handoff.query!,
     });
     expect(stale.statusCode).toBe(409);
     expect(stale.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
@@ -4884,7 +4893,11 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   }
 
-  async function suffixFixture(actual = true, originDwell = false) {
+  async function suffixFixture(
+    actual = true,
+    originDwell = false,
+    confirmed = true,
+  ) {
     const initial = await tripWithVisits(userA, ['SYNTHETIC A', 'SYNTHETIC D']);
     const [a, d] = initial.days[0]!.nodes;
     providerResult = suffixFoundationCandidate(false);
@@ -4930,14 +4943,6 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       await managed.client.temporalValue.createMany({
         data: [
           {
-            nodeId: B!.id,
-            layer: 'ACTUAL',
-            pointKind: 'ARRIVAL',
-            instant: new Date('2030-10-01T10:20:00Z'),
-            timeZone: 'UTC',
-            sourceKind: 'USER_VALUE',
-          },
-          {
             transportEdgeId: prefix.id,
             layer: 'ACTUAL',
             pointKind: 'ARRIVAL',
@@ -4956,9 +4961,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         ],
       });
     }
+    const originArrival = confirmed
+      ? await confirmSourceOrigin(first.trip, A!.id, B!.id)
+      : null;
+    if (originArrival !== null) first.trip = originArrival.trip;
     providerResult = suffixFoundationCandidate(true);
     return {
       first,
+      originArrivalEventId: originArrival?.eventId ?? null,
       A: A!,
       B: B!,
       C: C!,
@@ -4968,9 +4978,674 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     };
   }
 
+  it.each([
+    'none',
+    'provider-only',
+    'gps-only',
+    'bare-node-actual',
+    'departed',
+    'later-event',
+    'inconsistent',
+  ] as const)(
+    'P5E2 4B: direct suffix Query rejects %s without snapshots or route/monitor writes',
+    async (kind) => {
+      const f = await suffixFixture(
+        false,
+        false,
+        !['none', 'provider-only', 'gps-only', 'bare-node-actual'].includes(
+          kind,
+        ),
+      );
+      if (kind === 'provider-only') {
+        await managed.client.temporalValue.createMany({
+          data: ['ARRIVAL', 'DEPARTURE'].map((pointKind) => ({
+            transportEdgeId: f.prefix.id,
+            layer: 'ACTUAL' as const,
+            pointKind: pointKind as 'ARRIVAL' | 'DEPARTURE',
+            instant: new Date('2030-10-01T10:20:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'PROVIDER_OBSERVATION' as const,
+          })),
+        });
+      }
+      if (kind === 'gps-only') {
+        await managed.client.executionLocationState.create({
+          data: {
+            tripId: f.first.trip.id,
+            currentNodeId: f.B.id,
+            targetNodeId: f.C.id,
+            lastObservedAt: NOW,
+            outsideTargetConsecutiveCount: 0,
+            locationStatus: 'RELIABLE',
+          },
+        });
+      }
+      if (kind === 'bare-node-actual') {
+        f.first.trip = (
+          await manualExecution(
+            f.first.trip,
+            f.A.id,
+            'MANUAL_ARRIVAL',
+            '2030-10-01T10:00:00Z',
+          )
+        ).trip;
+        f.first.trip = (
+          await manualExecution(
+            f.first.trip,
+            f.A.id,
+            'MANUAL_DEPARTURE',
+            '2030-10-01T10:00:00Z',
+          )
+        ).trip;
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.B.id,
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: new Date('2030-10-01T10:20:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+          },
+        });
+      }
+      if (kind === 'departed')
+        f.first.trip = (
+          await manualExecution(
+            f.first.trip,
+            f.B.id,
+            'MANUAL_DEPARTURE',
+            '2030-10-01T10:20:00Z',
+          )
+        ).trip;
+      if (kind === 'later-event') {
+        const event = await managed.client.executionEvent.create({
+          data: {
+            ownerUserId: userA.actor.userId,
+            tripId: f.first.trip.id,
+            nodeId: f.C.id,
+            type: 'DEPARTURE',
+            source: 'MANUAL',
+            occurredAt: new Date('2030-10-01T10:40:00Z'),
+          },
+        });
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.C.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: event.occurredAt,
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+            sourceRef: `execution-event:${event.id}`,
+          },
+        });
+      }
+      if (kind === 'inconsistent')
+        await managed.client.temporalValue.deleteMany({
+          where: { nodeId: f.A.id, pointKind: 'DEPARTURE', layer: 'ACTUAL' },
+        });
+      await managed.client.tripAssistanceCapability.create({
+        data: {
+          ownerUserId: userA.actor.userId,
+          tripId: f.first.trip.id,
+          kind: 'GROUND_TRANSIT_MONITORING',
+          state: 'ENABLED',
+          revision: 1,
+          enabledAt: NOW,
+        },
+      });
+      await managed.client.job.create({
+        data: {
+          type: 'GROUND_TRANSIT_MONITOR',
+          runAt: NOW,
+          uniqueKey: `SYNTHETIC_4B_MONITOR_${kind}`,
+          payloadRef: f.first.operationReceipt.adoptedRouteId,
+          capabilityRevision: 1,
+          maxAttempts: 3,
+        },
+      });
+      const count = await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.first.trip.id },
+      });
+      const before = await repairDurableState(f.first.trip.id);
+      const jobs = await managed.client.job.findMany({
+        orderBy: { id: 'asc' },
+      });
+      const providerCalls = providerInputs.length;
+      const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toMatchObject({
+        error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+      });
+      expect(providerInputs).toHaveLength(providerCalls);
+      expect(
+        await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: f.first.trip.id },
+        }),
+      ).toBe(count);
+      expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      expect(
+        await managed.client.job.findMany({ orderBy: { id: 'asc' } }),
+      ).toEqual(jobs);
+      expect(before.adoptedRoutes).toEqual([
+        expect.objectContaining({ status: 'ACTIVE' }),
+      ]);
+    },
+  );
+
+  it('P5E2 4B: only a durable execution event linked to ACTUAL enables direct suffix Query', async () => {
+    const f = await suffixFixture(false);
+    const event = await managed.client.executionEvent.findUniqueOrThrow({
+      where: { id: f.originArrivalEventId! },
+    });
+    expect(event).toMatchObject({
+      type: 'ARRIVAL',
+      source: 'MANUAL',
+      nodeId: f.B.id,
+      undoneAt: null,
+    });
+    expect(
+      await managed.client.temporalValue.findFirstOrThrow({
+        where: { nodeId: f.B.id, layer: 'ACTUAL', pointKind: 'ARRIVAL' },
+      }),
+    ).toMatchObject({ sourceRef: `execution-event:${event.id}` });
+    const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    expect(response.statusCode).toBe(200);
+    const snapshot =
+      await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+        where: {
+          id: response.json<RouteQueryResponse>().candidates[0]!
+            .candidateSnapshotId,
+        },
+      });
+    expect(snapshot).toMatchObject({
+      fromNodeId: f.B.id,
+      toNodeId: f.D.id,
+      basisVersion: f.first.trip.version,
+    });
+  });
+
+  it.each([false, true])(
+    'P5E2 4B: reliable location authorizes only after durable ARRIVAL (autoRecord=%s)',
+    async (autoRecord) => {
+      const f = await suffixFixture(false, false, false);
+      f.first.trip = (
+        await manualExecution(
+          f.first.trip,
+          f.A.id,
+          'MANUAL_ARRIVAL',
+          '2030-10-01T10:00:00Z',
+        )
+      ).trip;
+      f.first.trip = (
+        await manualExecution(
+          f.first.trip,
+          f.A.id,
+          'MANUAL_DEPARTURE',
+          '2030-10-01T10:00:00Z',
+        )
+      ).trip;
+      await managed.client.tripAssistanceCapability.createMany({
+        data: [
+          {
+            ownerUserId: userA.actor.userId,
+            tripId: f.first.trip.id,
+            kind: 'LOCATION_ASSISTANCE',
+            state: 'ENABLED',
+            revision: 1,
+            enabledAt: NOW,
+          },
+          ...(autoRecord
+            ? [
+                {
+                  ownerUserId: userA.actor.userId,
+                  tripId: f.first.trip.id,
+                  kind: 'AUTO_RECORD' as const,
+                  state: 'ENABLED' as const,
+                  revision: 1,
+                  enabledAt: NOW,
+                },
+              ]
+            : []),
+        ],
+      });
+      currentNow = new Date('2030-10-01T10:20:00Z');
+      const observed = await app.inject({
+        method: 'POST',
+        url: `/trips/${f.first.trip.id}/execution/location`,
+        headers: bearer(userA),
+        payload: {
+          latitude: 35.68,
+          longitude: 139.66,
+          accuracyMeters: 10,
+          observedAt: currentNow.toISOString(),
+        },
+      });
+      expect(observed.statusCode, observed.body).toBe(200);
+      expect(observed.json()).toMatchObject({
+        status: autoRecord ? 'CONFIRMED_ARRIVAL' : 'ARRIVAL_DETECTED',
+      });
+      f.first.trip = (
+        await app.inject({
+          method: 'GET',
+          url: `/trips/${f.first.trip.id}`,
+          headers: bearer(userA),
+        })
+      ).json<TripView>();
+      const before = await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.first.trip.id },
+      });
+      const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      if (autoRecord) {
+        expect(response.statusCode, response.body).toBe(200);
+        expect(
+          await managed.client.executionEvent.findFirstOrThrow({
+            where: { nodeId: f.B.id, type: 'ARRIVAL', undoneAt: null },
+          }),
+        ).toMatchObject({
+          source: 'LOCATION',
+          evidenceReliability: 'SUFFICIENT',
+        });
+      } else {
+        expect(response.statusCode).toBe(422);
+        expect(response.json()).toMatchObject({
+          error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+        });
+        expect(
+          await managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.first.trip.id },
+          }),
+        ).toBe(before);
+        expect(
+          await managed.client.executionEvent.count({
+            where: { nodeId: f.B.id },
+          }),
+        ).toBe(0);
+      }
+    },
+  );
+
+  it('P5E2 4B: provider-return race cannot save suffix snapshots after user departure', async () => {
+    const f = await suffixFixture(false);
+    const count = await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: f.first.trip.id },
+    });
+    providerHook = async () => {
+      f.first.trip = (
+        await manualExecution(
+          f.first.trip,
+          f.B.id,
+          'MANUAL_DEPARTURE',
+          '2030-10-01T10:20:00Z',
+        )
+      ).trip;
+    };
+    const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: { code: 'VERSION_CONFLICT' },
+    });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.first.trip.id },
+      }),
+    ).toBe(count);
+  });
+
+  it.each(['save-snapshots', 'adopt'] as const)(
+    'P5E2 4B: locked %s rechecks departure proof independently of Trip.version',
+    async (action) => {
+      const f = await suffixFixture(false);
+      const preview =
+        action === 'adopt'
+          ? await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+              type: 'DEPART_AT',
+              instant: '2030-10-01T10:30:00Z',
+              timeZone: 'UTC',
+            })
+          : null;
+      // Deliberately leave version unchanged to isolate the lock-protected proof
+      // read. Normal Execution API writes are covered by the departure race.
+      const changeProof = async () => {
+        const event = await managed.client.executionEvent.create({
+          data: {
+            ownerUserId: userA.actor.userId,
+            tripId: f.first.trip.id,
+            nodeId: f.B.id,
+            type: 'DEPARTURE',
+            source: 'MANUAL',
+            occurredAt: new Date('2030-10-01T10:20:00Z'),
+          },
+        });
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.B.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: event.occurredAt,
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+            sourceRef: `execution-event:${event.id}`,
+          },
+        });
+      };
+      if (action === 'save-snapshots') {
+        const count = await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: f.first.trip.id },
+        });
+        providerHook = changeProof;
+        const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+          type: 'DEPART_AT',
+          instant: '2030-10-01T10:30:00Z',
+          timeZone: 'UTC',
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toMatchObject({
+          error: { code: 'VERSION_CONFLICT' },
+        });
+        expect(
+          await managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.first.trip.id },
+          }),
+        ).toBe(count);
+      } else {
+        await changeProof();
+        const before = await repairDurableState(f.first.trip.id);
+        const response = await adopt(
+          userA,
+          f.first.trip,
+          preview!.previewId,
+          'synthetic-4b-locked-proof',
+        );
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toMatchObject({
+          error: { code: 'PREVIEW_STALE' },
+        });
+        expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      }
+      expect(
+        (
+          await managed.client.trip.findUniqueOrThrow({
+            where: { id: f.first.trip.id },
+          })
+        ).version,
+      ).toBe(f.first.trip.version);
+      expect(
+        (
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: f.first.operationReceipt.adoptedRouteId },
+          })
+        ).status,
+      ).toBe('ACTIVE');
+    },
+  );
+
+  it.each(['adopt', 'depart'] as const)(
+    'P5E2 4B: read-only Handoff follows confirmed origin and fences %s',
+    async (action) => {
+      const f = await suffixFixture(false, false, false);
+      await app.close();
+      app = buildTestApi(
+        new SyntheticRouteProvider(() => providerResult),
+        groundSequence(['CANCELLED']),
+      );
+      const downstreamEdge = f.suffixEdges.find(
+        (edge) => edge.fromNodeId === f.C.id,
+      )!;
+      const baseUrl = `/trips/${f.first.trip.id}/execution/ground-transit/${downstreamEdge.id}`;
+      const refreshed = await app.inject({
+        method: 'POST',
+        url: `${baseUrl}/refresh`,
+        headers: bearer(userA),
+      });
+      expect(refreshed.statusCode, refreshed.body).toBe(200);
+      const planned = await app.inject({
+        method: 'GET',
+        url: `${baseUrl}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(planned.json()).toMatchObject({
+        readiness: 'READY',
+        originBasis: 'PLANNED_ROUTE_ORIGIN',
+        query: { fromNodeId: f.A.id, toNodeId: f.D.id },
+      });
+      f.first.trip = (
+        await confirmSourceOrigin(f.first.trip, f.A.id, f.B.id)
+      ).trip;
+      const before = await repairDurableState(f.first.trip.id);
+      const handoffResponse = await app.inject({
+        method: 'GET',
+        url: `${baseUrl}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      const handoff =
+        handoffResponse.json<GroundTransitRouteReevaluationHandoffView>();
+      expect(handoff).toMatchObject({
+        readiness: 'READY',
+        originBasis: 'CONFIRMED_EXECUTION_NODE',
+        query: {
+          basisVersion: f.first.trip.version,
+          fromNodeId: f.B.id,
+          toNodeId: f.D.id,
+          hint: { timeZone: 'UTC' },
+        },
+      });
+      expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      const queried = await app.inject({
+        method: 'POST',
+        url: `/trips/${f.first.trip.id}/routes/query`,
+        headers: bearer(userA),
+        payload: handoff.query!,
+      });
+      expect(queried.statusCode, queried.body).toBe(200);
+      const preview = await previewFromSnapshot(
+        userA,
+        f.first.trip,
+        queried.json<RouteQueryResponse>().candidates[0]!.candidateSnapshotId,
+      );
+      expect(preview.adoptable).toBe(true);
+      if (action === 'depart') {
+        const departed = await manualExecution(
+          f.first.trip,
+          f.B.id,
+          'MANUAL_DEPARTURE',
+          '2030-10-01T10:20:00Z',
+        );
+        expect(
+          (
+            await app.inject({
+              method: 'GET',
+              url: `${baseUrl}/route-reevaluation`,
+              headers: bearer(userA),
+            })
+          ).json(),
+        ).toMatchObject({
+          readiness: 'ORIGIN_UNRESOLVED',
+          originBasis: null,
+          query: null,
+        });
+        const beforeRejected = await repairDurableState(f.first.trip.id);
+        const rejected = await adopt(
+          userA,
+          f.first.trip,
+          preview.previewId,
+          'synthetic-4b-departure-race',
+        );
+        expect(rejected.statusCode).toBe(409);
+        expect(rejected.json()).toMatchObject({
+          error: { code: 'VERSION_CONFLICT' },
+        });
+        expect(await repairDurableState(f.first.trip.id)).toEqual(
+          beforeRejected,
+        );
+        const count = await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: f.first.trip.id },
+        });
+        expect(
+          (
+            await query(userA, departed.trip, f.B.id, f.D.id, {
+              ...handoff.query!.hint!,
+            })
+          ).json(),
+        ).toMatchObject({ error: { code: 'ROUTE_QUERY_UNSUPPORTED' } });
+        expect(
+          await managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.first.trip.id },
+          }),
+        ).toBe(count);
+      } else {
+        const adopted = await adoptSuccessfully(
+          userA,
+          f.first.trip,
+          preview.previewId,
+          'synthetic-4b-confirmed-adopt',
+        );
+        expect(
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: f.first.operationReceipt.adoptedRouteId },
+          }),
+        ).toMatchObject({ status: 'REPLACED' });
+        expect(
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: adopted.operationReceipt.adoptedRouteId },
+          }),
+        ).toMatchObject({
+          status: 'ACTIVE',
+          anchorFromNodeId: f.B.id,
+          anchorToNodeId: f.D.id,
+        });
+        expect(
+          await managed.client.transportEdge.findUniqueOrThrow({
+            where: { id: f.prefix.id },
+          }),
+        ).toMatchObject({
+          adoptedRouteId: f.first.operationReceipt.adoptedRouteId,
+        });
+        const undone = await undoSuccessfully(
+          userA,
+          adopted.trip,
+          adopted.operationReceipt.id,
+          'synthetic-4b-confirmed-undo',
+        );
+        expect(
+          undone.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+        ).toEqual([f.A.id, f.B.id, f.C.id, f.D.id]);
+      }
+    },
+  );
+
+  async function manualExecution(
+    trip: TripView,
+    nodeId: string,
+    type: 'MANUAL_ARRIVAL' | 'MANUAL_DEPARTURE',
+    instant: string,
+  ) {
+    if (currentNow < new Date(instant)) currentNow = new Date(instant);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/events`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        idempotencyKey: randomUUID(),
+        type,
+        nodeId,
+        occurredAt: instant,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const read = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(read.statusCode).toBe(200);
+    return {
+      trip: read.json() as TripView,
+      eventId: (response.json() as { event: { id: string } }).event.id,
+    };
+  }
+
+  async function confirmSourceOrigin(
+    trip: TripView,
+    fromNodeId: string,
+    originNodeId: string,
+    departure = '2030-10-01T10:00:00Z',
+    arrival = '2030-10-01T10:20:00Z',
+  ) {
+    const arrived = await manualExecution(
+      trip,
+      fromNodeId,
+      'MANUAL_ARRIVAL',
+      departure,
+    );
+    const departed = await manualExecution(
+      arrived.trip,
+      fromNodeId,
+      'MANUAL_DEPARTURE',
+      departure,
+    );
+    return manualExecution(
+      departed.trip,
+      originNodeId,
+      'MANUAL_ARRIVAL',
+      arrival,
+    );
+  }
+
+  async function undoExecution(trip: TripView, eventId: string) {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/events/${eventId}/undo`,
+      headers: bearer(userA),
+      payload: { baseTripVersion: trip.version, idempotencyKey: randomUUID() },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const read = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(read.statusCode).toBe(200);
+    return read.json() as TripView;
+  }
+
   async function repairRestoredFixture(origin: 'B' | 'C' = 'B') {
     const f = await suffixFixture(false);
+    let arrivalEventId = f.originArrivalEventId!;
+    let departureEventId: string | null = null;
     if (origin === 'C') {
+      const departed = await manualExecution(
+        f.first.trip,
+        f.B.id,
+        'MANUAL_DEPARTURE',
+        '2030-10-01T10:20:00Z',
+      );
+      departureEventId = departed.eventId;
+      const arrived = await manualExecution(
+        departed.trip,
+        f.C.id,
+        'MANUAL_ARRIVAL',
+        '2030-10-01T10:40:00Z',
+      );
+      arrivalEventId = arrived.eventId;
+      f.first.trip = arrived.trip;
       providerResult = {
         status: 'SUCCESS',
         candidates: [
@@ -5007,6 +5682,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       second.operationReceipt.id,
       'repair-undo',
     );
+    restored.trip = await undoExecution(restored.trip, arrivalEventId);
+    if (departureEventId !== null)
+      restored.trip = await undoExecution(restored.trip, departureEventId);
     return { ...f, second, restored };
   }
 
@@ -5029,6 +5707,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
             transportProjections: { orderBy: { transportEdgeId: 'asc' } },
           },
         },
+        executionEvents: { orderBy: { id: 'asc' } },
+        executionLocationState: true,
         adoptedRoutes: { orderBy: { id: 'asc' } },
         routeCandidateSnapshots: { orderBy: { id: 'asc' } },
         routePreviews: { orderBy: { id: 'asc' } },
@@ -5179,6 +5859,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       instant: '2030-10-01T10:30:00Z',
       timeZone: 'UTC',
     });
+    f.first.trip = await undoExecution(f.first.trip, f.originArrivalEventId!);
     providerResult = suffixFoundationCandidate(
       true,
       '2030-10-01T10:00:00Z',
@@ -5221,6 +5902,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       const evidence = await managed.client.routePreview.findUniqueOrThrow({
         where: { id: temporary.previewId },
       });
+      f.first.trip = await undoExecution(f.first.trip, f.originArrivalEventId!);
       providerResult = suffixFoundationCandidate(
         true,
         '2030-10-01T10:00:00Z',
@@ -5307,7 +5989,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   );
 
   it.each([false, true])(
-    'P5E2 4A: suffix Query/Preview/Adopt/Undo preserves prefix identity and facts (ACTUAL=%s)',
+    'P5E2 4A: suffix Query/Preview/Adopt/Undo preserves prefix identity and facts (prefix ACTUAL=%s; confirmed execution origin)',
     async (actual) => {
       const f = await suffixFixture(actual);
       const route1 = f.first.operationReceipt.adoptedRouteId;
@@ -5548,6 +6230,20 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
   it('P5E2 4A: later suffix C→D preserves both prefix edges across Adopt/Undo', async () => {
     const f = await suffixFixture();
+    const departedB = await manualExecution(
+      f.first.trip,
+      f.B.id,
+      'MANUAL_DEPARTURE',
+      '2030-10-01T10:20:00Z',
+    );
+    f.first.trip = (
+      await manualExecution(
+        departedB.trip,
+        f.C.id,
+        'MANUAL_ARRIVAL',
+        '2030-10-01T10:40:00Z',
+      )
+    ).trip;
     providerResult = {
       status: 'SUCCESS',
       candidates: [
@@ -5790,6 +6486,15 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       'synthetic-cross-day-source',
     );
     const b = first.trip.days.flatMap((day) => day.nodes)[1]!;
+    first.trip = (
+      await confirmSourceOrigin(
+        first.trip,
+        a!.id,
+        b.id,
+        '2030-10-01T20:00:00Z',
+        '2030-10-02T08:00:00Z',
+      )
+    ).trip;
     const beforeNodes = await managed.client.itineraryNode.findMany({
       where: { tripId: initial.id },
       orderBy: { id: 'asc' },
@@ -5933,6 +6638,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     'P5E2 4A: protects ACTUAL inside mutable suffix (%s)',
     async (kind) => {
       const f = await suffixFixture();
+      const queried = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(queried.statusCode).toBe(200);
+      const snapshotId = (queried.json() as RouteQueryResponse).candidates[0]!
+        .candidateSnapshotId;
       await managed.client.temporalValue.create({
         data: {
           ...(kind === 'node'
@@ -5945,11 +6658,11 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           sourceKind: 'USER_VALUE',
         },
       });
-      const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
-        type: 'DEPART_AT',
-        instant: '2030-10-01T10:30:00Z',
-        timeZone: 'UTC',
-      });
+      const preview = await previewFromSnapshot(
+        userA,
+        f.first.trip,
+        snapshotId,
+      );
       expect(preview.adoptable).toBe(false);
       const response = await adopt(
         userA,
@@ -6293,13 +7006,25 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     );
     expect(routeResponse.statusCode).toBe(200);
     const route = routeResponse.json() as RouteQueryResponse;
+    return previewFromSnapshot(
+      identity,
+      trip,
+      route.candidates[0]!.candidateSnapshotId,
+    );
+  }
+
+  async function previewFromSnapshot(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    snapshotId: string,
+  ): Promise<RoutePreviewView> {
     const previewResponse = await app.inject({
       method: 'POST',
       url: `/trips/${trip.id}/previews`,
       headers: bearer(identity),
       payload: {
         basisVersion: trip.version,
-        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+        candidateSnapshotId: snapshotId,
       },
     });
     expect(previewResponse.statusCode).toBe(201);

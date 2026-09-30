@@ -19,6 +19,7 @@ import type {
 } from '@travel/contracts';
 
 import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
+import { resolveLockedConfirmedRouteExecutionOrigin } from './prisma-confirmed-route-execution-origin.js';
 import { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
 import {
   nodeDeletionReferenceInclude,
@@ -341,6 +342,20 @@ async function executeAdoption(
     )
       ? { status: 'FACT_PROTECTED' }
       : { status: 'PREVIEW_STALE' };
+  }
+
+  if (corridor.replacementScope === 'SUFFIX') {
+    const origin = await resolveLockedConfirmedRouteExecutionOrigin(
+      transaction,
+      input.tripId,
+      corridor.sourceRouteAnchorFromNodeId!,
+      corridor.sourceRouteAnchorToNodeId!,
+    );
+    if (
+      origin.status !== 'CONFIRMED_NODE' ||
+      origin.nodeId !== corridor.replacementAnchorFromNodeId
+    )
+      return { status: 'PREVIEW_STALE' };
   }
 
   if (plan.currentAdoptedRouteId !== null) {

@@ -368,15 +368,16 @@ export function assessGroundTransitOperational(input: {
     priorArrival !== null && baselineArrival !== null
       ? priorArrival.getTime() - baselineArrival
       : null;
-  // A persistent incident is not a new user-visible event. Escalation is
-  // expressed in context-relative threshold bands, not each ETA drift.
+  // Context determines when delay first becomes actionable. Escalation bands
+  // use the stable base threshold, so entering the near window does not
+  // re-alert an incident already presented for a downstream consequence.
   const currentDelayBand =
     materialDelay && arrivalDelta !== null
-      ? Math.floor(arrivalDelta / delayThresholdMs)
+      ? Math.floor(arrivalDelta / (baseDelayThreshold * 1000))
       : 0;
   const previousDelayBand =
     previousArrivalDelta !== null && previousArrivalDelta >= delayThresholdMs
-      ? Math.floor(previousArrivalDelta / delayThresholdMs)
+      ? Math.floor(previousArrivalDelta / (baseDelayThreshold * 1000))
       : 0;
   const materialDelayEscalated = currentDelayBand > previousDelayBand;
   const attentionState = input.attentionState;

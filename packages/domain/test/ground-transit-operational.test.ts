@@ -214,6 +214,45 @@ describe('ground transit operational facts', () => {
     });
   });
 
+  it('does not re-alert the same delay only because the execution window begins', () => {
+    const far = {
+      ...normal,
+      fetchedAt: at(-90),
+      estimatedArrival: at(75),
+    };
+    const near = {
+      ...far,
+      observationIdentity: 'near',
+      fetchedAt: at(0),
+    };
+    const state = advanceGroundTransitAttentionState({
+      previous: null,
+      previousObservation: null,
+      observation: far,
+      baseline,
+    });
+    const presented = assess(far, {
+      now: at(-90),
+      attentionState: state,
+      downstreamProtectedDeparture: at(69),
+    });
+    expect(presented.requiresUserAttention).toBe(true);
+    const continued = assess(near, {
+      now: at(0),
+      previousObservation: far,
+      attentionState: {
+        ...state,
+        presentedDelayBand: presented.materialDelayBand,
+      },
+      downstreamProtectedDeparture: at(69),
+    });
+    expect(continued).toMatchObject({
+      attentionActivationKinds: [],
+      persistentAttentionActive: true,
+      requiresUserAttention: false,
+    });
+  });
+
   it('treats a skipped adopted destination and short turn as goal failure', () => {
     const result = assess({
       ...normal,

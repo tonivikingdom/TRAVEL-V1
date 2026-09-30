@@ -25,6 +25,20 @@ describe('P5E2 5A external execution origin migration', () => {
       for (const name of names) await applyMigration(client, name);
       expect(await count(client, 'ExternalExecutionOrigin')).toBe(0);
       expect(await count(client, 'ExternalExecutionOriginReceipt')).toBe(0);
+      expect(
+        (
+          await client.query(
+            `SELECT enumlabel FROM pg_enum WHERE enumtypid='"ExternalExecutionOriginTransition"'::regtype ORDER BY enumsortorder`,
+          )
+        ).rows.map((row) => row.enumlabel),
+      ).toEqual(['ARRIVAL', 'DEPARTURE', 'INVALIDATION']);
+      expect(
+        (
+          await client.query(
+            `SELECT is_nullable FROM information_schema.columns WHERE table_name='ExternalExecutionOriginReceipt' AND column_name='idempotencyKey'`,
+          )
+        ).rows[0].is_nullable,
+      ).toBe('YES');
       const foreignKeys =
         await client.query(`SELECT confrelid::regclass::text AS target, confdeltype AS deletion
         FROM pg_constraint WHERE contype='f' AND conrelid='"ExternalExecutionOrigin"'::regclass`);

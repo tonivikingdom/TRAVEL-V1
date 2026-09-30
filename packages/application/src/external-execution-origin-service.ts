@@ -172,7 +172,7 @@ export class ExternalExecutionOriginService {
     tripId: string,
     transportEdgeId: string,
   ): Promise<ExternalOriginResponse> {
-    ids(actor, tripId, transportEdgeId);
+    ids(actor, 'READ_PRIVATE_RESOURCE', tripId, transportEdgeId);
     const context = await this.repository.read({
       ownerUserId: actor.userId,
       tripId,
@@ -214,7 +214,7 @@ export class ExternalExecutionOriginService {
     transportEdgeId: string,
     input: ConfirmExternalOriginRequest,
   ) {
-    ids(actor, tripId, transportEdgeId);
+    ids(actor, 'WRITE_PRIVATE_RESOURCE', tripId, transportEdgeId);
     validateMutation(input);
     if (!/^[0-9a-f]{64}$/u.test(input.candidateRef))
       throw new ApplicationError(
@@ -258,7 +258,7 @@ export class ExternalExecutionOriginService {
     originId: string,
     input: DepartExternalOriginRequest,
   ) {
-    ids(actor, tripId, originId);
+    ids(actor, 'WRITE_PRIVATE_RESOURCE', tripId, originId);
     validateMutation(input);
     return this.repository.mutate({
       ownerUserId: actor.userId,
@@ -283,10 +283,14 @@ export class ExternalExecutionOriginService {
 function digest(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-function ids(actor: Actor, ...values: string[]) {
+function ids(
+  actor: Actor,
+  action: 'READ_PRIVATE_RESOURCE' | 'WRITE_PRIVATE_RESOURCE',
+  ...values: string[]
+) {
   if (values.some((value) => !UUID.test(value)))
     throw new ApplicationError('VALIDATION_ERROR', 'id 无效。', 400);
-  authorize(actor, 'READ_PRIVATE_RESOURCE', {
+  authorize(actor, action, {
     kind: 'PRIVATE_RESOURCE',
     ownerUserId: actor.userId,
   });

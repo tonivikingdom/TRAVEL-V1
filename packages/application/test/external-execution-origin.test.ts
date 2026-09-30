@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as authorization from '../src/authorization.js';
 import { ExternalExecutionOriginService } from '../src/external-execution-origin-service.js';
 import type {
   ExternalOriginContext,
@@ -95,6 +96,56 @@ function service(resolver: GroundTransitHubResolver) {
   );
 }
 describe('external origin ephemeral candidate', () => {
+  it('authorizes GET as READ and confirmation/departure as WRITE', async () => {
+    const id = '00000000-0000-4000-8000-000000000001';
+    const actor = {
+      userId: id,
+      email: 'synthetic@example.test',
+      role: 'USER' as const,
+      status: 'ACTIVE' as const,
+    };
+    const subject = new ExternalExecutionOriginService(
+      {
+        read: async () => context,
+        mutate: async () => {
+          throw new Error('transaction boundary');
+        },
+      },
+      { resolveHub: async () => ({ status: 'RESOLVED', hub }) },
+      () => now,
+    );
+    const spy = vi.spyOn(authorization, 'authorize');
+    try {
+      await subject.get(actor, id, id);
+      expect(spy).toHaveBeenLastCalledWith(actor, 'READ_PRIVATE_RESOURCE', {
+        kind: 'PRIVATE_RESOURCE',
+        ownerUserId: id,
+      });
+      await expect(
+        subject.confirm(actor, id, id, {
+          baseTripVersion: 1,
+          candidateRef: 'a'.repeat(64),
+          idempotencyKey: 'confirm',
+        }),
+      ).rejects.toThrow('transaction boundary');
+      expect(spy).toHaveBeenLastCalledWith(actor, 'WRITE_PRIVATE_RESOURCE', {
+        kind: 'PRIVATE_RESOURCE',
+        ownerUserId: id,
+      });
+      await expect(
+        subject.depart(actor, id, id, {
+          baseTripVersion: 1,
+          idempotencyKey: 'depart',
+        }),
+      ).rejects.toThrow('transaction boundary');
+      expect(spy).toHaveBeenLastCalledWith(actor, 'WRITE_PRIVATE_RESOURCE', {
+        kind: 'PRIVATE_RESOURCE',
+        ownerUserId: id,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
   it('does not hide an open origin behind departed history with the same arrival timestamp', async () => {
     const id = '00000000-0000-4000-8000-000000000001';
     const origin: ExternalOriginRecord = {

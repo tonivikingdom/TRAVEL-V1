@@ -3,9 +3,13 @@ import {
   externalOriginView,
   type ExternalExecutionOriginRepository,
   type ExternalOriginContext,
+  type ExternalOriginRecord,
 } from '@travel/application';
 import type { ExternalOriginMutationResponse } from '@travel/contracts';
-import { resolveExecutionFrontier } from '@travel/domain';
+import {
+  resolveExecutionFrontier,
+  resolveExternalExecutionOriginCurrentness,
+} from '@travel/domain';
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { readExternalOriginGroundLeg } from './prisma-ground-transit-repository.js';
 
@@ -52,10 +56,32 @@ export class PrismaExternalExecutionOriginRepository implements ExternalExecutio
           input.transportEdgeId,
         ))!;
         let origin;
+        const invalidated: ExternalOriginRecord[] = [];
         if (input.action === 'ARRIVAL') {
           const candidate = await input.revalidate(context);
-          if (context.origins.some((row) => row.status === 'ARRIVED'))
-            throw error('EXTERNAL_ORIGIN_CONFLICT');
+          const openOrigins = context.origins.filter(
+            (row) => row.status === 'ARRIVED',
+          );
+          // Recompute all proof before any write. Persisted ARRIVED history may
+          // already be superseded; CURRENT and inconsistent evidence stay blocked.
+          for (const existing of openOrigins) {
+            const currentness = resolveExternalExecutionOriginCurrentness({
+              origin: existing,
+              origins: context.origins,
+              executionEvents: context.executionEvents,
+              frontierState: context.frontierState,
+            });
+            if (currentness !== 'SUPERSEDED' || input.now < existing.arrivedAt)
+              throw error('EXTERNAL_ORIGIN_CONFLICT');
+          }
+          for (const existing of openOrigins) {
+            invalidated.push(
+              await tx.externalExecutionOrigin.update({
+                where: { id: existing.id },
+                data: { status: 'INVALIDATED', invalidatedAt: input.now },
+              }),
+            );
+          }
           const { candidateRef: _candidateRef, ...metadata } = candidate;
           void _candidateRef;
           origin = await tx.externalExecutionOrigin.create({
@@ -90,26 +116,54 @@ export class PrismaExternalExecutionOriginRepository implements ExternalExecutio
           ...context,
           origins: [
             origin,
-            ...context.origins.filter((row) => row.id !== origin.id),
+            ...context.origins
+              .filter((row) => row.id !== origin.id)
+              .map(
+                (row) =>
+                  invalidated.find((updated) => updated.id === row.id) ?? row,
+              ),
           ],
         };
         const response = {
           origin: externalOriginView(origin, updatedContext),
           resultingTripVersion: trip.version,
         };
-        await tx.externalExecutionOriginReceipt.create({
-          data: {
-            ownerUserId: input.ownerUserId,
-            tripId: input.tripId,
-            externalOriginId: origin.id,
-            transition: input.action,
-            idempotencyKey: input.idempotencyKey,
-            requestHash: input.requestHash,
-            occurredAt: input.now,
-            resultingTripVersion: trip.version,
-            response: response as unknown as Prisma.InputJsonValue,
-          },
-        });
+        const arrivalOrDepartureReceipt =
+          await tx.externalExecutionOriginReceipt.create({
+            data: {
+              ownerUserId: input.ownerUserId,
+              tripId: input.tripId,
+              externalOriginId: origin.id,
+              transition: input.action,
+              idempotencyKey: input.idempotencyKey,
+              requestHash: input.requestHash,
+              occurredAt: input.now,
+              resultingTripVersion: trip.version,
+              response: response as unknown as Prisma.InputJsonValue,
+            },
+          });
+        for (const previous of invalidated) {
+          await tx.externalExecutionOriginReceipt.create({
+            data: {
+              ownerUserId: input.ownerUserId,
+              tripId: input.tripId,
+              externalOriginId: previous.id,
+              transition: 'INVALIDATION',
+              idempotencyKey: null,
+              requestHash: input.requestHash,
+              triggeringReceiptId: arrivalOrDepartureReceipt.id,
+              invalidationReason: 'SUPERSEDED_BY_LATER_EXECUTION',
+              occurredAt: input.now,
+              resultingTripVersion: trip.version,
+              response: {
+                origin: externalOriginView(previous, updatedContext),
+                triggeringReceiptId: arrivalOrDepartureReceipt.id,
+                newExternalOriginId: origin.id,
+                reason: 'SUPERSEDED_BY_LATER_EXECUTION',
+              } as unknown as Prisma.InputJsonValue,
+            },
+          });
+        }
         return response;
       },
       { timeout: 10_000 },

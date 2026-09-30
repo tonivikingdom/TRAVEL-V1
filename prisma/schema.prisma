@@ -1151,6 +1151,11 @@ enum ExternalExecutionOriginStatus {
 enum ExternalExecutionOriginTransition {
   ARRIVAL
   DEPARTURE
+  INVALIDATION
+}
+
+enum ExternalExecutionOriginInvalidationReason {
+  SUPERSEDED_BY_LATER_EXECUTION
 }
 
 // Evidence identifiers intentionally have no route/edge/observation FK. History
@@ -1195,7 +1200,9 @@ model ExternalExecutionOriginReceipt {
   tripId               String                            @db.Uuid
   externalOriginId     String                            @db.Uuid
   transition           ExternalExecutionOriginTransition
-  idempotencyKey       String                            @db.VarChar(200)
+  idempotencyKey       String?                           @db.VarChar(200)
+  triggeringReceiptId String?                           @db.Uuid
+  invalidationReason  ExternalExecutionOriginInvalidationReason?
   requestHash          String                            @db.VarChar(64)
   occurredAt           DateTime                          @db.Timestamptz(3)
   resultingTripVersion Int

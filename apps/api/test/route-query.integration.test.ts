@@ -8,6 +8,7 @@ import {
   type FlightMonitoringService,
   GroundTransitService,
   ExternalExecutionOriginService,
+  externalOriginView,
   type GroundTransitHubResolver,
   GroundTransitRouteReevaluationService,
   type GroundTransitProvider,
@@ -270,6 +271,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       | 'RECOVERY'
       | 'RECOVERY_WITH_SERVICE_DEPARTURE'
       | 'SHORT_TURN'
+      | 'SHORT_TURN_F'
       | 'ACTUAL_MISS'
       | 'DELAY_16'
       | 'DELAY_17'
@@ -284,7 +286,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         const selected = replay ? index - 1 : index++;
         const kind = changes[Math.min(selected, changes.length - 1)]!;
         const source = new SyntheticGroundTransitProvider(
-          kind === 'SHORT_TURN' ? 'SHORT_TURN' : 'RECOVERY',
+          kind === 'SHORT_TURN' || kind === 'SHORT_TURN_F'
+            ? 'SHORT_TURN'
+            : 'RECOVERY',
           () => currentNow,
         );
         const result = await source.fetchObservation({ leg });
@@ -302,6 +306,13 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           status: 'SUCCESS',
           observation: {
             ...result.observation,
+            ...(kind === 'SHORT_TURN_F'
+              ? {
+                  currentTerminusRef: 'synthetic:second-terminus',
+                  operatingToHubRef: 'synthetic:second-terminus',
+                  currentTerminusLabel: 'Synthetic F',
+                }
+              : {}),
             observationIdentity: `operational:${leg.id}:${selected}`,
             serviceStatus:
               kind === 'CANCELLED'
@@ -389,6 +400,94 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     return {
       planning: await repairDurableState(tripId),
       places: await managed.client.place.findMany({ orderBy: { id: 'asc' } }),
+    };
+  }
+  async function nextExternalCandidate(
+    f: Awaited<ReturnType<typeof externalFixture>>,
+  ) {
+    const originalResolver = new SyntheticGroundTransitHubResolver();
+    hubResolver.resolveHub = async (input) =>
+      input.provider === 'SYNTHETIC' &&
+      input.providerHubRef === 'synthetic:second-terminus'
+        ? {
+            status: 'RESOLVED',
+            hub: {
+              provider: 'SYNTHETIC',
+              providerHubRef: 'synthetic:second-terminus',
+              canonicalHubRef: 'synthetic:hub:second-terminus',
+              name: 'Synthetic Second Terminus',
+              latitude: 35.71,
+              longitude: 139.71,
+              timeZone: 'Asia/Tokyo',
+            },
+          }
+        : originalResolver.resolveHub(input);
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    const refresh = await app.inject({
+      method: 'POST',
+      url: `${f.base}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refresh.statusCode, refresh.body).toBe(200);
+    f.trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    f.view = (
+      await app.inject({
+        method: 'GET',
+        url: `${f.base}/external-origin`,
+        headers: bearer(userA),
+      })
+    ).json<ExternalOriginResponse>();
+    expect(f.view.candidate).toMatchObject({
+      providerHubRef: 'synthetic:second-terminus',
+    });
+  }
+  async function supersededExternalFixture() {
+    const f = await externalFixture(['SHORT_TURN', 'SHORT_TURN_F']);
+    const confirmation = await confirmExternal(f);
+    expect(confirmation.statusCode, confirmation.body).toBe(200);
+    const e = confirmation.json<ExternalOriginMutationResponse>();
+    f.trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    await manualExecution(
+      f.trip,
+      f.from.id,
+      'MANUAL_ARRIVAL',
+      currentNow.toISOString(),
+    );
+    await nextExternalCandidate(f);
+    expect(f.view).toMatchObject({
+      availability: 'CONFIRMATION_REQUIRED',
+      currentOrigin: {
+        id: e.origin.id,
+        status: 'ARRIVED',
+        currentness: 'SUPERSEDED',
+      },
+    });
+    return { f, e };
+  }
+  async function externalDurableState(tripId: string) {
+    return {
+      footprint: await externalFootprint(tripId),
+      origins: await managed.client.externalExecutionOrigin.findMany({
+        where: { tripId },
+        orderBy: { id: 'asc' },
+      }),
+      receipts: await managed.client.externalExecutionOriginReceipt.findMany({
+        where: { tripId },
+        orderBy: { id: 'asc' },
+      }),
     };
   }
   it('P5E2 5A: candidate is deterministic and read-only; confirmed/departed execution never mutates itinerary or planning', async () => {
@@ -727,7 +826,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(await managed.client.externalExecutionOrigin.count()).toBe(0);
   });
   it('P5E2 5A: later valid itinerary ExecutionEvent supersedes E without rewriting its history', async () => {
-    const f = await externalFixture();
+    const f = await externalFixture(['SHORT_TURN', 'SHORT_TURN_F']);
     const confirmed = (
       await confirmExternal(f)
     ).json<ExternalOriginMutationResponse>();
@@ -767,6 +866,280 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         })
       ).status,
     ).toBe('ARRIVED');
+    const beforeOrigin =
+      await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+        where: { id: confirmed.origin.id },
+      });
+    const beforeReceipt =
+      await managed.client.externalExecutionOriginReceipt.findMany({
+        where: { tripId: f.trip.id },
+      });
+    await nextExternalCandidate(f);
+    expect(f.view).toMatchObject({
+      availability: 'CONFIRMATION_REQUIRED',
+      currentOrigin: {
+        id: confirmed.origin.id,
+        status: 'ARRIVED',
+        currentness: 'SUPERSEDED',
+      },
+    });
+    const beforePlanning = await externalFootprint(f.trip.id);
+    const key = randomUUID();
+    const next = await confirmExternal(f, key);
+    expect(next.statusCode, next.body).toBe(200);
+    const result = next.json<ExternalOriginMutationResponse>();
+    expect(result).toMatchObject({
+      resultingTripVersion: f.trip.version + 1,
+      origin: {
+        providerHubRef: 'synthetic:second-terminus',
+        status: 'ARRIVED',
+        currentness: 'CURRENT',
+      },
+    });
+    const old = await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+      where: { id: confirmed.origin.id },
+    });
+    expect({
+      ...old,
+      status: beforeOrigin.status,
+      invalidatedAt: beforeOrigin.invalidatedAt,
+      updatedAt: beforeOrigin.updatedAt,
+    }).toEqual(beforeOrigin);
+    expect(old).toMatchObject({
+      status: 'INVALIDATED',
+      invalidatedAt: currentNow,
+      departedAt: null,
+    });
+    const context = await new PrismaExternalExecutionOriginRepository(
+      managed.client,
+    ).read({
+      ownerUserId: userA.actor.userId,
+      tripId: f.trip.id,
+      transportEdgeId: f.leg.transportEdgeId,
+    });
+    expect(externalOriginView(old, context!)).toMatchObject({
+      status: 'INVALIDATED',
+      currentness: 'SUPERSEDED',
+      arrivedAt: confirmed.origin.arrivedAt,
+      departedAt: null,
+    });
+    expect(
+      await managed.client.externalExecutionOriginReceipt.findMany({
+        where: { id: { in: beforeReceipt.map((row) => row.id) } },
+      }),
+    ).toEqual(beforeReceipt);
+    const arrival =
+      await managed.client.externalExecutionOriginReceipt.findUniqueOrThrow({
+        where: {
+          ownerUserId_idempotencyKey: {
+            ownerUserId: userA.actor.userId,
+            idempotencyKey: key,
+          },
+        },
+      });
+    const invalidation =
+      await managed.client.externalExecutionOriginReceipt.findFirstOrThrow({
+        where: { tripId: f.trip.id, transition: 'INVALIDATION' },
+      });
+    expect(invalidation).toMatchObject({
+      externalOriginId: confirmed.origin.id,
+      triggeringReceiptId: arrival.id,
+      idempotencyKey: null,
+      invalidationReason: 'SUPERSEDED_BY_LATER_EXECUTION',
+      occurredAt: currentNow,
+      resultingTripVersion: f.trip.version + 1,
+      requestHash: arrival.requestHash,
+      response: {
+        newExternalOriginId: result.origin.id,
+        triggeringReceiptId: arrival.id,
+        reason: 'SUPERSEDED_BY_LATER_EXECUTION',
+        origin: {
+          id: confirmed.origin.id,
+          status: 'INVALIDATED',
+          currentness: 'SUPERSEDED',
+        },
+      },
+    });
+    const afterPlanning = await externalFootprint(f.trip.id);
+    expect({
+      ...afterPlanning,
+      planning: {
+        ...afterPlanning.planning,
+        version: beforePlanning.planning.version,
+        updatedAt: beforePlanning.planning.updatedAt,
+      },
+    }).toEqual(beforePlanning);
+    const state = await externalDurableState(f.trip.id);
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    const replay = await confirmExternal(f, key);
+    expect(replay.json()).toEqual(result);
+    expect(await externalDurableState(f.trip.id)).toEqual(state);
+  });
+  it('P5E2 5A repair: CURRENT E blocks a valid F candidate without writes', async () => {
+    const f = await externalFixture(['SHORT_TURN', 'SHORT_TURN_F']);
+    expect((await confirmExternal(f)).statusCode).toBe(200);
+    await nextExternalCandidate(f);
+    expect(f.view.currentOrigin?.currentness).toBe('CURRENT');
+    const before = await externalDurableState(f.trip.id);
+    const denied = await confirmExternal(f);
+    expect(denied.statusCode).toBe(409);
+    expect(denied.json()).toMatchObject({
+      error: { code: 'EXTERNAL_ORIGIN_CONFLICT' },
+    });
+    expect(await externalDurableState(f.trip.id)).toEqual(before);
+  });
+  it('P5E2 5A repair: CONFLICT E is not automatically invalidated', async () => {
+    const { f } = await supersededExternalFixture();
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    await manualExecution(
+      f.trip,
+      f.trip.days[0]!.nodes.at(-1)!.id,
+      'MANUAL_ARRIVAL',
+      currentNow.toISOString(),
+    );
+    // Re-read the same F evidence after the durable frontier becomes inconsistent.
+    f.trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    f.view = (
+      await app.inject({
+        method: 'GET',
+        url: `${f.base}/external-origin`,
+        headers: bearer(userA),
+      })
+    ).json<ExternalOriginResponse>();
+    expect(f.view.currentOrigin?.currentness).toBe('CONFLICT');
+    const before = await externalDurableState(f.trip.id);
+    const denied = await confirmExternal(f);
+    expect(denied.statusCode).toBe(409);
+    expect(denied.json()).toMatchObject({
+      error: { code: 'EXTERNAL_ORIGIN_CONFLICT' },
+    });
+    expect(await externalDurableState(f.trip.id)).toEqual(before);
+  });
+  it('P5E2 5A repair: locked confirmation rechecks supersession after candidate GET', async () => {
+    const { f } = await supersededExternalFixture();
+    const event = await managed.client.executionEvent.findFirstOrThrow({
+      where: { tripId: f.trip.id, nodeId: f.from.id, undoneAt: null },
+    });
+    // Deliberately preserve Trip.version to isolate locked proof validation from
+    // normal Execution Undo version fencing. Remove the linked ACTUAL as well.
+    await managed.client.$transaction(async (tx) => {
+      await tx.executionEvent.update({
+        where: { id: event.id },
+        data: { undoneAt: currentNow },
+      });
+      await tx.temporalValue.deleteMany({
+        where: {
+          nodeId: f.from.id,
+          layer: 'ACTUAL',
+          sourceRef: `execution-event:${event.id}`,
+        },
+      });
+    });
+    const before = await externalDurableState(f.trip.id);
+    const denied = await confirmExternal(f);
+    expect(denied.statusCode).toBe(409);
+    expect(denied.json()).toMatchObject({
+      error: { code: 'EXTERNAL_ORIGIN_CONFLICT' },
+    });
+    expect(await externalDurableState(f.trip.id)).toEqual(before);
+  });
+  it.each(['same-key', 'different-key'] as const)(
+    'P5E2 5A repair: superseded E and concurrent F confirmations (%s)',
+    async (kind) => {
+      const { f, e } = await supersededExternalFixture();
+      const key = randomUUID();
+      const results = await Promise.all([
+        confirmExternal(f, key),
+        confirmExternal(f, kind === 'same-key' ? key : randomUUID()),
+      ]);
+      const successes = results.filter((row) => row.statusCode === 200);
+      expect(successes).toHaveLength(kind === 'same-key' ? 2 : 1);
+      if (kind === 'same-key')
+        expect(successes[0]!.json()).toEqual(successes[1]!.json());
+      else
+        expect(
+          results.find((row) => row.statusCode !== 200)!.json(),
+        ).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+      expect(
+        await managed.client.externalExecutionOrigin.count({
+          where: { tripId: f.trip.id, status: 'ARRIVED' },
+        }),
+      ).toBe(1);
+      expect(
+        await managed.client.externalExecutionOrigin.count({
+          where: { tripId: f.trip.id },
+        }),
+      ).toBe(2);
+      expect(
+        await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+          where: { id: e.origin.id },
+        }),
+      ).toMatchObject({
+        status: 'INVALIDATED',
+        departedAt: null,
+        invalidatedAt: currentNow,
+      });
+      expect(
+        await managed.client.externalExecutionOriginReceipt.count({
+          where: { tripId: f.trip.id, transition: 'INVALIDATION' },
+        }),
+      ).toBe(1);
+      expect(
+        await managed.client.externalExecutionOriginReceipt.count({
+          where: { tripId: f.trip.id },
+        }),
+      ).toBe(3);
+      expect(
+        (
+          await managed.client.trip.findUniqueOrThrow({
+            where: { id: f.trip.id },
+          })
+        ).version,
+      ).toBe(f.trip.version + 1);
+    },
+  );
+  it('P5E2 5A repair: explicit E departure/replay still allows later F confirmation', async () => {
+    const f = await externalFixture(['SHORT_TURN', 'SHORT_TURN_F']);
+    const e = (await confirmExternal(f)).json<ExternalOriginMutationResponse>();
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    const request = {
+      method: 'POST' as const,
+      url: `/trips/${f.trip.id}/execution/external-origins/${e.origin.id}/depart`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: e.resultingTripVersion,
+        idempotencyKey: randomUUID(),
+      },
+    };
+    const departure = await app.inject(request);
+    expect(departure.statusCode, departure.body).toBe(200);
+    expect((await app.inject(request)).json()).toEqual(departure.json());
+    const old = await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+      where: { id: e.origin.id },
+    });
+    await nextExternalCandidate(f);
+    const next = await confirmExternal(f);
+    expect(next.statusCode, next.body).toBe(200);
+    expect(next.json()).toMatchObject({
+      resultingTripVersion: f.trip.version + 1,
+      origin: { status: 'ARRIVED', currentness: 'CURRENT' },
+    });
+    expect(
+      await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+        where: { id: e.origin.id },
+      }),
+    ).toEqual(old);
+    expect(
+      await managed.client.externalExecutionOriginReceipt.count({
+        where: { tripId: f.trip.id, transition: 'INVALIDATION' },
+      }),
+    ).toBe(0);
   });
   it('P5E2 5A: provider recovery preserves confirmed user ARRIVAL and does not enable external routing', async () => {
     const f = await externalFixture(['SHORT_TURN', 'RECOVERY']);

@@ -5,7 +5,9 @@ CREATE TYPE "ExternalExecutionOriginKind" AS ENUM ('TRANSIT_HUB');
 CREATE TYPE "ExternalExecutionOriginStatus" AS ENUM ('ARRIVED', 'DEPARTED', 'INVALIDATED');
 
 -- CreateEnum
-CREATE TYPE "ExternalExecutionOriginTransition" AS ENUM ('ARRIVAL', 'DEPARTURE');
+CREATE TYPE "ExternalExecutionOriginTransition" AS ENUM ('ARRIVAL', 'DEPARTURE', 'INVALIDATION');
+
+CREATE TYPE "ExternalExecutionOriginInvalidationReason" AS ENUM ('SUPERSEDED_BY_LATER_EXECUTION');
 
 -- CreateTable
 CREATE TABLE "ExternalExecutionOrigin" (
@@ -44,7 +46,9 @@ CREATE TABLE "ExternalExecutionOriginReceipt" (
     "tripId" UUID NOT NULL,
     "externalOriginId" UUID NOT NULL,
     "transition" "ExternalExecutionOriginTransition" NOT NULL,
-    "idempotencyKey" VARCHAR(200) NOT NULL,
+    "idempotencyKey" VARCHAR(200),
+    "triggeringReceiptId" UUID,
+    "invalidationReason" "ExternalExecutionOriginInvalidationReason",
     "requestHash" VARCHAR(64) NOT NULL,
     "occurredAt" TIMESTAMPTZ(3) NOT NULL,
     "resultingTripVersion" INTEGER NOT NULL,
@@ -87,5 +91,12 @@ ALTER TABLE "ExternalExecutionOrigin" ADD CONSTRAINT "ExternalExecutionOrigin_co
 ALTER TABLE "ExternalExecutionOrigin" ADD CONSTRAINT "ExternalExecutionOrigin_lifecycle_check" CHECK (
   ("status" = 'ARRIVED' AND "departedAt" IS NULL AND "invalidatedAt" IS NULL) OR
   ("status" = 'DEPARTED' AND "departedAt" IS NOT NULL AND "departedAt" >= "arrivedAt" AND "invalidatedAt" IS NULL) OR
-  ("status" = 'INVALIDATED' AND "invalidatedAt" IS NOT NULL AND "invalidatedAt" >= "arrivedAt")
+  ("status" = 'INVALIDATED' AND "departedAt" IS NULL AND "invalidatedAt" IS NOT NULL AND "invalidatedAt" >= "arrivedAt")
+);
+
+-- Automatic transitions are audit rows, not client idempotency entries. The
+-- triggering receipt identity is retained without a new historical FK cascade.
+ALTER TABLE "ExternalExecutionOriginReceipt" ADD CONSTRAINT "ExternalExecutionOriginReceipt_audit_check" CHECK (
+  ("transition" = 'INVALIDATION' AND "idempotencyKey" IS NULL AND "triggeringReceiptId" IS NOT NULL AND "invalidationReason" IS NOT NULL) OR
+  ("transition" <> 'INVALIDATION' AND "idempotencyKey" IS NOT NULL AND "triggeringReceiptId" IS NULL AND "invalidationReason" IS NULL)
 );

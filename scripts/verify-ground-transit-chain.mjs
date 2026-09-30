@@ -338,9 +338,14 @@ export async function verifyGroundTransitChain({
 }
 
 async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
+  // DateOwnership is per owner: the second isolated scenario cannot reuse the
+  // first scenario's day, even though both use the same synthetic session.
+  const handoffDate = new Date(Date.parse(`${date}T00:00:00.000Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 handoff replacement',
-    planningAnchorDate: date,
+    planningAnchorDate: handoffDate,
     defaultPeopleCount: 1,
   });
   for (const [index, name] of [
@@ -353,7 +358,7 @@ async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
         type: 'ADD_PLACE_VISIT',
         targetDay:
           index === 0
-            ? { type: 'NEW', localDate: date, sequence: 0 }
+            ? { type: 'NEW', localDate: handoffDate, sequence: 0 }
             : {
                 type: 'EXISTING',
                 dayOccurrenceId: trip.days[0].dayOccurrenceId,
@@ -375,7 +380,7 @@ async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
     toNodeId: to.id,
     hint: {
       type: 'DEPART_AT',
-      instant: new Date(Date.now() + 8 * 60_000).toISOString(),
+      instant: new Date(Date.now() + 23 * 60 * 60_000).toISOString(),
       timeZone: 'Asia/Tokyo',
     },
   });

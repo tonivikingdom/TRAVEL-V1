@@ -347,16 +347,23 @@ async function verifyCompose(compose, composeQuiet, env) {
       providerSecretSentinel,
     });
   }
+  // Keep this synthetic owner's date separate from other Compose scenarios.
+  // The exact calendar date is not part of the P4B2/P4B3 assertion.
+  const routeDate = env.SYNTHETIC_FLIGHT_SCHEDULED_UTC
+    ? new Date(Date.parse(env.SYNTHETIC_FLIGHT_SCHEDULED_UTC) + 14 * 86_400_000)
+        .toISOString()
+        .slice(0, 10)
+    : '2030-10-01';
   let routeTrip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC Compose route adoption',
-    planningAnchorDate: '2030-10-01',
+    planningAnchorDate: routeDate,
     defaultPeopleCount: 1,
   });
   routeTrip = await apiJson(`/trips/${routeTrip.id}/commands`, 'POST', {
     baseTripVersion: routeTrip.version,
     command: {
       type: 'ADD_PLACE_VISIT',
-      targetDay: { type: 'NEW', localDate: '2030-10-01', sequence: 0 },
+      targetDay: { type: 'NEW', localDate: routeDate, sequence: 0 },
       position: 0,
       place: {
         type: 'CUSTOM',
@@ -393,7 +400,7 @@ async function verifyCompose(compose, composeQuiet, env) {
       toNodeId: routeTo.id,
       hint: {
         type: 'DEPART_AT',
-        instant: '2030-10-01T10:00:00Z',
+        instant: `${routeDate}T10:00:00Z`,
         timeZone: 'Asia/Tokyo',
       },
     },

@@ -280,6 +280,8 @@ model User {
   executionRisks          ExecutionRisk[]
   flightBindings          FlightBinding[]
   executionEvents         ExecutionEvent[]
+  externalExecutionOrigins ExternalExecutionOrigin[]
+  externalOriginReceipts ExternalExecutionOriginReceipt[]
 
   @@index([status])
 }
@@ -462,6 +464,8 @@ model Trip {
   executionArrivalSuppressions  ExecutionArrivalSuppression[]
   assistanceCapabilities TripAssistanceCapability[]
   groundTransitLegs       GroundTransitLegExecution[]
+  externalExecutionOrigins ExternalExecutionOrigin[]
+  externalOriginReceipts ExternalExecutionOriginReceipt[]
 
   @@unique([id, ownerUserId])
   @@index([ownerUserId, updatedAt(sort: Desc), id(sort: Desc)])
@@ -1131,4 +1135,83 @@ model TransportEdgeHistoryTimeValue {
 
   @@unique([transportEdgeHistoryId, pointKind, layer])
   @@index([transportEdgeHistoryId])
+}
+
+
+enum ExternalExecutionOriginKind {
+  TRANSIT_HUB
+}
+
+enum ExternalExecutionOriginStatus {
+  ARRIVED
+  DEPARTED
+  INVALIDATED
+}
+
+enum ExternalExecutionOriginTransition {
+  ARRIVAL
+  DEPARTURE
+  INVALIDATION
+}
+
+enum ExternalExecutionOriginInvalidationReason {
+  SUPERSEDED_BY_LATER_EXECUTION
+}
+
+// Evidence identifiers intentionally have no route/edge/observation FK. History
+// survives replacement and provider recovery; Trip deletion still owns its data.
+model ExternalExecutionOrigin {
+  id                                String                           @id @default(uuid()) @db.Uuid
+  ownerUserId                       String                           @db.Uuid
+  tripId                            String                           @db.Uuid
+  kind                              ExternalExecutionOriginKind      @default(TRANSIT_HUB)
+  sourceAdoptedRouteId              String                           @db.Uuid
+  sourceTransportEdgeId             String                           @db.Uuid
+  sourceGroundTransitLegExecutionId String                           @db.Uuid
+  sourceGroundTransitObservationId  String                           @db.Uuid
+  sourceObservationIdentity         String                           @db.VarChar(300)
+  sourceObservationFetchedAt        DateTime                         @db.Timestamptz(3)
+  sourceObservationFactsHash        String                           @db.VarChar(64)
+  provider                          String                           @db.VarChar(100)
+  providerHubRef                    String                           @db.VarChar(300)
+  canonicalHubRef                   String                           @db.VarChar(300)
+  name                              String                           @db.VarChar(300)
+  latitude                          Float
+  longitude                         Float
+  timeZone                          String                           @db.VarChar(100)
+  status                            ExternalExecutionOriginStatus    @default(ARRIVED)
+  arrivedAt                         DateTime                         @db.Timestamptz(3)
+  departedAt                        DateTime?                        @db.Timestamptz(3)
+  invalidatedAt                     DateTime?                        @db.Timestamptz(3)
+  createdAt                         DateTime                         @default(now()) @db.Timestamptz(3)
+  updatedAt                         DateTime                         @updatedAt @db.Timestamptz(3)
+  owner                             User                             @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                              Trip                             @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  receipts                          ExternalExecutionOriginReceipt[]
+
+  @@unique([id, tripId])
+  @@index([tripId, status])
+}
+
+// Immutable owner-scoped transition receipts also serve as durable manual audit.
+model ExternalExecutionOriginReceipt {
+  id                   String                            @id @default(uuid()) @db.Uuid
+  ownerUserId          String                            @db.Uuid
+  tripId               String                            @db.Uuid
+  externalOriginId     String                            @db.Uuid
+  transition           ExternalExecutionOriginTransition
+  idempotencyKey       String?                           @db.VarChar(200)
+  triggeringReceiptId String?                           @db.Uuid
+  invalidationReason  ExternalExecutionOriginInvalidationReason?
+  requestHash          String                            @db.VarChar(64)
+  occurredAt           DateTime                          @db.Timestamptz(3)
+  resultingTripVersion Int
+  response             Json                              @db.JsonB
+  createdAt            DateTime                          @default(now()) @db.Timestamptz(3)
+  owner                User                              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                 Trip                              @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  origin               ExternalExecutionOrigin           @relation(fields: [externalOriginId, tripId], references: [id, tripId], onDelete: Cascade)
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([tripId, occurredAt])
 }

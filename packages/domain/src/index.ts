@@ -165,3 +165,12 @@ export {
   type ConfirmedRouteExecutionOrigin,
   type RouteExecutionOriginEvent,
 } from './confirmed-route-execution-origin.js';
+
+export {
+  resolveExternalTransitHubIdentity,
+  isValidResolvedTransitHub,
+  resolveExternalExecutionOriginCurrentness,
+  type GroundTransitHubMetadata,
+  type ExternalOriginFact,
+  type ExternalExecutionOriginCurrentness,
+} from './external-execution-origin.js';

@@ -23,19 +23,24 @@ export function createDevelopmentSyntheticRouteProvider(
   now: () => Date = () => new Date(),
 ): SyntheticRouteProvider {
   return new SyntheticRouteProvider((input) =>
-    input.destination.name === 'SYNTHETIC_P5E2_SUFFIX_DESTINATION'
+    input.destination.name === 'SYNTHETIC_P5E2_EXTERNAL_DESTINATION'
       ? {
           status: 'SUCCESS',
-          candidates: [suffixFoundationCandidate(input, now())],
+          candidates: [externalOriginFoundationCandidate(input, now())],
         }
-      : input.destination.name === 'SYNTHETIC_P5E2_GROUND_DESTINATION'
-        ? createDevelopmentSyntheticGroundTransitRouteProvider(now).queryRoutes(
-            input,
-          )
-        : {
+      : input.destination.name === 'SYNTHETIC_P5E2_SUFFIX_DESTINATION'
+        ? {
             status: 'SUCCESS',
-            candidates: [developmentCandidate(input, now())],
-          },
+            candidates: [suffixFoundationCandidate(input, now())],
+          }
+        : input.destination.name === 'SYNTHETIC_P5E2_GROUND_DESTINATION'
+          ? createDevelopmentSyntheticGroundTransitRouteProvider(
+              now,
+            ).queryRoutes(input)
+          : {
+              status: 'SUCCESS',
+              candidates: [developmentCandidate(input, now())],
+            },
   );
 }
 
@@ -283,4 +288,37 @@ function developmentCandidate(
 
 function providerTimeZone(input: RouteProviderQueryInput): string {
   return input.preference.type === 'NONE' ? 'UTC' : input.preference.timeZone;
+}
+
+/** Explicit synthetic external hub execution fixture; no external planning. */
+function externalOriginFoundationCandidate(
+  input: RouteProviderQueryInput,
+  observedAt: Date,
+): NormalizedRouteCandidate {
+  const base = developmentCandidate(input, observedAt);
+  return {
+    ...base,
+    legs: [
+      {
+        ...base.legs[0]!,
+        mode: 'RAIL',
+        fixedService: true,
+        serviceLabel: 'SYNTHETIC EXTERNAL ORIGIN SERVICE',
+        groundTransit: {
+          serviceClass: 'FIXED_SERVICE',
+          serviceIdentityKey: `synthetic:external-service:${base.providerCandidateRef}`,
+          lineRef: 'synthetic:external-origin',
+          lineName: 'SYNTHETIC EXTERNAL ORIGIN',
+          directionRef: 'toward-destination',
+          directionLabel: 'Destination',
+          boardingHubRef: `synthetic-origin:${input.origin.placeId}`,
+          alightingHubRef: `synthetic-destination:${input.destination.placeId}`,
+          headwayMinSeconds: null,
+          headwayMaxSeconds: null,
+          minimumTransferSeconds: null,
+          boardingAccessMinimumSeconds: 0,
+        },
+      },
+    ],
+  };
 }

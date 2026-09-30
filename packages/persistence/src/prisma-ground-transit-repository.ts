@@ -1288,3 +1288,27 @@ async function lockOwner(transaction: Transaction, ownerUserId: string) {
   await transaction.$queryRaw`
     SELECT true FROM pg_advisory_xact_lock(hashtextextended(${ownerUserId}, 2))`;
 }
+
+/** Shared accepted-leg hydration for locked external execution confirmation. */
+export async function readExternalOriginGroundLeg(
+  client: PrismaClient | Transaction,
+  tripId: string,
+  transportEdgeId: string,
+): Promise<GroundTransitLegRecord | null> {
+  const row = await client.groundTransitLegExecution.findFirst({
+    where: { tripId, transportEdgeId },
+    include: { _count: { select: { observations: true } } },
+  });
+  if (row === null) return null;
+  const edge = await client.transportEdge.findFirst({
+    where: {
+      id: transportEdgeId,
+      tripId,
+      source: 'ADOPTED_ROUTE',
+      adoptedRouteId: row.adoptedRouteId,
+      adoptedRoute: { status: 'ACTIVE' },
+    },
+    select: { id: true },
+  });
+  return toRecord(row, edge !== null, await operationalContext(client, row));
+}

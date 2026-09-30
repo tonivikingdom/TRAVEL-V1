@@ -29,3 +29,9 @@ export {
   createGroundTransitProvider,
   type SyntheticGroundTransitScenario,
 } from './synthetic-ground-transit-provider.js';
+
+export {
+  SyntheticGroundTransitHubResolver,
+  UnconfiguredGroundTransitHubResolver,
+  createGroundTransitHubResolver,
+} from './ground-transit-hub-resolver.js';

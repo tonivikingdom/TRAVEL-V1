@@ -184,3 +184,15 @@ export type {
   TripRepository,
   UserTimeIntentRecord,
 } from './trip-ports.js';
+
+export {
+  ExternalExecutionOriginService,
+  externalOriginView,
+} from './external-execution-origin-service.js';
+export type {
+  GroundTransitHubResolver,
+  ExternalExecutionOriginRepository,
+  ExternalOriginContext,
+  ExternalOriginCandidate,
+  ExternalOriginRecord,
+} from './external-execution-origin-ports.js';

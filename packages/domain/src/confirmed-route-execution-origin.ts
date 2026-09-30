@@ -35,6 +35,7 @@ export function resolveConfirmedRouteExecutionOrigin(input: {
   readonly events: readonly RouteExecutionOriginEvent[];
   readonly locationCurrentNodeId?: string | null;
   readonly independentProgress?: boolean;
+  readonly externalExecutionFacts?: readonly Date[];
 }): ConfirmedRouteExecutionOrigin {
   if (input.corridorNodeIds.length < 2) return { status: 'UNRESOLVED' };
   const frontier = resolveExecutionFrontier(
@@ -75,6 +76,12 @@ export function resolveConfirmedRouteExecutionOrigin(input: {
           : 'EXECUTION_OBSERVATION') ||
       (arrival.source === 'LOCATION' &&
         arrival.evidenceReliability !== 'SUFFICIENT')
+    )
+      return { status: 'UNRESOLVED' };
+    if (
+      input.externalExecutionFacts?.some(
+        (instant) => instant >= arrival.occurredAt,
+      )
     )
       return { status: 'UNRESOLVED' };
     const originIndex = input.nodes.findIndex((item) => item.id === node.id);

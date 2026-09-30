@@ -169,3 +169,12 @@ export type {
   FlightExecutionTriggerType,
   RefreshFlightResponse,
 } from './flights.js';
+
+export type {
+  ExternalOriginCandidateView,
+  ExternalExecutionOriginView,
+  ExternalOriginResponse,
+  ConfirmExternalOriginRequest,
+  DepartExternalOriginRequest,
+  ExternalOriginMutationResponse,
+} from './external-execution-origin.js';

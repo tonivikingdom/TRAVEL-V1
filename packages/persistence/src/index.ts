@@ -24,3 +24,5 @@ export {
   PrismaClient,
   type ManagedPrismaClient,
 } from './prisma-client.js';
+
+export { PrismaExternalExecutionOriginRepository } from './prisma-external-execution-origin-repository.js';

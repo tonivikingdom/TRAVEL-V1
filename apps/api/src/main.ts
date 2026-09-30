@@ -5,6 +5,7 @@ import {
   ExecutionRiskService,
   FlightMonitoringService,
   GroundTransitService,
+  ExternalExecutionOriginService,
   GroundTransitRouteReevaluationService,
   FlightService,
   NotificationService,
@@ -24,6 +25,7 @@ import {
   PrismaFlightRepository,
   PrismaFlightMonitoringRepository,
   PrismaGroundTransitRepository,
+  PrismaExternalExecutionOriginRepository,
   PrismaGroundTransitRouteProgressRepository,
   PrismaNotificationRepository,
   PrismaRoutePlanningRepository,
@@ -40,6 +42,7 @@ import {
   UnconfiguredFlightProvider,
   SyntheticFlightProvider,
   createGroundTransitProvider,
+  createGroundTransitHubResolver,
   UnconfiguredRouteProvider,
 } from '@travel/providers';
 
@@ -59,6 +62,7 @@ let executionLocationService: ExecutionLocationService | undefined;
 let executionRiskService: ExecutionRiskService | undefined;
 let flightService: FlightService | undefined;
 let flightMonitoringService: FlightMonitoringService | undefined;
+let externalExecutionOriginService: ExternalExecutionOriginService | undefined;
 let groundTransitService: GroundTransitService | undefined;
 let groundTransitRouteReevaluationService:
   GroundTransitRouteReevaluationService | undefined;
@@ -123,11 +127,17 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     () => new Date(),
     executionRiskService,
   );
+  externalExecutionOriginService = new ExternalExecutionOriginService(
+    new PrismaExternalExecutionOriginRepository(managedPrisma.client),
+    createGroundTransitHubResolver(process.env),
+  );
   groundTransitRouteReevaluationService =
     new GroundTransitRouteReevaluationService(
       tripRepository,
       groundTransitRepository,
       new PrismaGroundTransitRouteProgressRepository(managedPrisma.client),
+      () => new Date(),
+      externalExecutionOriginService,
     );
   executionLocationService = new ExecutionLocationService(
     new PrismaExecutionLocationRepository(managedPrisma.client),
@@ -197,6 +207,9 @@ const app = buildApi({
   ...(flightService === undefined ? {} : { flightService }),
   ...(flightMonitoringService === undefined ? {} : { flightMonitoringService }),
   ...(groundTransitService === undefined ? {} : { groundTransitService }),
+  ...(externalExecutionOriginService === undefined
+    ? {}
+    : { externalExecutionOriginService }),
   ...(groundTransitRouteReevaluationService === undefined
     ? {}
     : { groundTransitRouteReevaluationService }),

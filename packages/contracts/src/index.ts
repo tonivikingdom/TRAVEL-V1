@@ -10,6 +10,7 @@ export type {
   GroundTransitLegStateView,
   GroundTransitLegView,
   GroundTransitRefreshResponse,
+  GroundTransitRouteReevaluationHandoffView,
 } from './ground-transit.js';
 export type {
   AssistanceAction,

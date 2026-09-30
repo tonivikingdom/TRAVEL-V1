@@ -1,0 +1,18 @@
+# P5E2 Batch 3 — Ground Transit Route Re-evaluation Handoff
+
+- Starting main: `1e25ec0340008a58b3bfed1c73db0660150e45ff`
+- Branch: `feature/p5e2-ground-transit-route-reevaluation-handoff`
+- Status: Draft PR; pending PostgreSQL, Compose, P5B and merge review.
+- Schema / migration: none.
+
+Batch 1 established ground-transit identity, observations, boarding/transfer safety, execution state, and explicitly opted-in monitoring. Batch 2 added accepted operational changes, risk/notification reconciliation, recovery, and persistent attention lifecycle. Batch 3 adds only a read-only bridge back to the existing route-planning flow.
+
+`GET /trips/:tripId/execution/ground-transit/:transportEdgeId/route-reevaluation` is owner-scoped. It returns `NOT_REQUIRED` if the current route recovered or the leg is no longer part of the active adopted route; `READY` only when the active full adopted-route corridor resolves, independent user execution evidence has not advanced past the planned origin, and a valid existing IANA time zone is available; otherwise `ORIGIN_UNRESOLVED` with machine-readable reasons. Unknown legacy operational metadata is not misreported as recovery.
+
+The `READY` query uses the ACTIVE AdoptedRoute's original anchor IDs, current Trip.version, and `DEPART_AT` at the handoff evaluation time. The time zone comes from corridor departure temporal values or the origin node's time intent/temporal values. No arbitrary live GPS origin or time zone is invented. Provider vehicle ACTUAL departure/arrival is never user ridership or location evidence. Node ACTUAL facts, durable skipped states, reliable progressed location, and independent ground-leg execution state (including the state immediately before a provider failure) can make the old planned origin unsafe.
+
+The endpoint itself does not call a route provider and does not write a CandidateSnapshot, Preview, AdoptedRoute, OperationReceipt, TransportEdge, or Trip version. A user must explicitly send its query to the existing RouteQueryService, then choose a candidate, create a Preview, and Adopt. Existing version fencing and route replacement protections remain in force; an old/replaced route cannot produce a READY handoff. A recovery before the user requests a fresh handoff yields NOT_REQUIRED. A Trip edit after READY causes the existing Query version fence to reject the stale basis.
+
+Batch 3 does **not** automatically query, preview, choose, or adopt an alternative route. There is no real paid ground-transit provider, Push, formal Desktop/Mobile UI, staging or production deployment. F-05/F-06/F-07/F-08 remain open.
+
+Verification: new pure Domain tests and PostgreSQL HTTP integration scenarios cover cancellation, owner isolation, read-only counts, explicit Query→Preview→Adopt, recovery, progressed origin, and old-route fencing. The isolated synthetic Compose chain adds worker-observed cancellation → READY handoff → explicit replacement. Local environment has no Docker or isolated PostgreSQL; PR CI is the database/Compose evidence source.

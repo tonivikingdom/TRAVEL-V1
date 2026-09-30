@@ -131,6 +131,12 @@ export {
   type LocationObservation,
 } from './execution-location.js';
 export {
+  resolveGroundTransitRouteReevaluationHandoff,
+  type GroundTransitRouteReevaluationDecision,
+  type GroundTransitRouteReevaluationReadiness,
+  type GroundTransitRouteReevaluationReason,
+} from './ground-transit-route-reevaluation.js';
+export {
   decideAcceptedFlightRefresh,
   decideProviderFailure,
   futureNormalCheckpoints,

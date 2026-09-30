@@ -167,19 +167,24 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   }
 
-  async function adoptedFixedGroundTrip() {
-    currentNow = new Date('2030-10-01T09:50:00Z');
+  async function adoptedFixedGroundTrip(
+    schedule: {
+      readonly now: string;
+      readonly departure: string;
+      readonly arrival: string;
+    } = {
+      now: '2030-10-01T09:50:00Z',
+      departure: '2030-10-01T10:00:00Z',
+      arrival: '2030-10-01T11:00:00Z',
+    },
+  ) {
+    currentNow = new Date(schedule.now);
     const trip = await tripWithVisits(userA, [
       'Ground origin',
       'Ground destination',
     ]);
     const [from, to] = trip.days[0]!.nodes;
-    const base = candidate(
-      '2030-10-01T10:00:00Z',
-      '2030-10-01T11:00:00Z',
-      'UTC',
-      'UTC',
-    );
+    const base = candidate(schedule.departure, schedule.arrival, 'UTC', 'UTC');
     providerResult = {
       status: 'SUCCESS',
       candidates: [
@@ -1018,6 +1023,148 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       ).toBe(true);
     }
   });
+
+  it.each([
+    {
+      name: 'departure platform',
+      facts: [
+        { departurePlatform: '2' },
+        { departurePlatform: '5' },
+        { departurePlatform: '5' },
+        { departurePlatform: '5' },
+      ],
+      expectedKind: 'DEPARTURE_PLATFORM_CHANGED',
+    },
+    {
+      name: 'early departure',
+      facts: [
+        { estimatedDeparture: null },
+        { estimatedDeparture: '2030-10-01T11:50:00Z' },
+        { estimatedDeparture: '2030-10-01T11:50:00Z' },
+        { estimatedDeparture: '2030-10-01T11:50:00Z' },
+      ],
+      expectedKind: 'EARLY_DEPARTURE',
+    },
+    {
+      name: 'material delay under the near-window policy',
+      facts: [
+        { estimatedArrival: null },
+        { estimatedArrival: '2030-10-01T13:20:00Z' },
+        { estimatedArrival: '2030-10-01T13:20:00Z' },
+        { estimatedArrival: '2030-10-01T13:20:00Z' },
+      ],
+      expectedKind: 'MATERIAL_DELAY',
+    },
+  ])(
+    'activates a persistent $name incident once when entering the execution window',
+    async ({ facts, expectedKind }) => {
+      const { trip, leg } = await adoptedFixedGroundTrip({
+        now: '2030-10-01T09:00:00Z',
+        departure: '2030-10-01T12:00:00Z',
+        arrival: '2030-10-01T13:00:00Z',
+      });
+      let index = 0;
+      const groundProvider: GroundTransitProvider = {
+        name: 'SYNTHETIC',
+        async fetchObservation({ leg: currentLeg }) {
+          const source = await new SyntheticGroundTransitProvider(
+            'RECOVERY',
+            () => currentNow,
+          ).fetchObservation({ leg: currentLeg });
+          if (source.status !== 'SUCCESS') return source;
+          const fact = facts[Math.min(index, facts.length - 1)]! as {
+            departurePlatform?: string;
+            estimatedDeparture?: string | null;
+            estimatedArrival?: string | null;
+          };
+          const result = {
+            ...source.observation,
+            observationIdentity: `attention:${currentLeg.id}:${index++}`,
+            departurePlatform: fact.departurePlatform ?? null,
+            estimatedDeparture:
+              fact.estimatedDeparture === undefined ||
+              fact.estimatedDeparture === null
+                ? null
+                : new Date(fact.estimatedDeparture),
+            estimatedArrival:
+              fact.estimatedArrival === undefined ||
+              fact.estimatedArrival === null
+                ? null
+                : new Date(fact.estimatedArrival),
+            serviceStatus:
+              fact.estimatedArrival === undefined ||
+              fact.estimatedArrival === null
+                ? ('ON_TIME' as const)
+                : ('DELAYED' as const),
+          };
+          return { status: 'SUCCESS', observation: result };
+        },
+      };
+      await app.close();
+      app = buildTestApi(
+        new SyntheticRouteProvider(() => providerResult),
+        groundProvider,
+      );
+      const url = `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`;
+      const samples = [
+        '2030-10-01T09:05:00Z',
+        '2030-10-01T09:30:00Z',
+        '2030-10-01T11:20:00Z',
+        '2030-10-01T11:25:00Z',
+      ];
+      for (const [sampleIndex, instant] of samples.entries()) {
+        currentNow = new Date(instant);
+        if (sampleIndex === 3) {
+          // A fresh service instance must honor the persisted presentation state.
+          await app.close();
+          app = buildTestApi(
+            new SyntheticRouteProvider(() => providerResult),
+            groundProvider,
+          );
+        }
+        const response = await app.inject({
+          method: 'POST',
+          url,
+          headers: bearer(userA),
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toMatchObject({ status: 'APPLIED' });
+        const presentations = await managed.client.notificationEvent.findMany({
+          where: {
+            tripId: trip.id,
+            presentationGroupKey: {
+              startsWith: `ground-transit-observation:${leg.id}:`,
+            },
+          },
+        });
+        expect(presentations).toHaveLength(sampleIndex < 2 ? 0 : 1);
+        if (sampleIndex >= 2) {
+          expect(presentations[0]).toMatchObject({
+            presentationActive: true,
+          });
+          expect(presentations[0]!.changeKinds).toContain(expectedKind);
+          expect(presentations[0]!.summary?.trim().length).toBeGreaterThan(0);
+          expect(presentations[0]!.body.trim().length).toBeGreaterThan(0);
+          if (expectedKind === 'DEPARTURE_PLATFORM_CHANGED') {
+            expect(presentations[0]!.summary).toContain('5');
+          }
+        }
+      }
+      const stored = await managed.client.groundTransitObservation.findMany({
+        where: { legExecutionId: leg.id },
+      });
+      expect(stored).toHaveLength(4);
+      expect(
+        stored.every(
+          (item) =>
+            !Object.hasOwn(
+              item.facts as Record<string, unknown>,
+              '__groundTransitAttention',
+            ),
+        ),
+      ).toBe(true);
+    },
+  );
 
   it('marks a skipped adopted stop infeasible and refuses to revive an actual missed service', async () => {
     const { trip, leg, adopted, from } = await adoptedFixedGroundTrip();

@@ -6,6 +6,7 @@ import type {
 } from '@travel/application';
 import {
   assessGroundTransitOperational,
+  advanceGroundTransitAttentionState,
   decideGroundTransitObservationOrdering,
   GROUND_TRANSIT_POLICY,
   matchGroundTransitIdentity,
@@ -13,6 +14,8 @@ import {
   type GroundTransitBaseline,
   type GroundTransitObservation,
   type GroundTransitChangeKind,
+  type GroundTransitAttentionState,
+  type GroundTransitOperationalAssessment,
 } from '@travel/domain';
 
 import {
@@ -312,7 +315,17 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
           latestFetchedAt: input.observation.fetchedAt,
           latestObservationId: input.observation.observationIdentity,
           latestObservationHash: factsHash,
-          latestObservation: facts as unknown as Prisma.InputJsonValue,
+          // Denormalized current snapshot also carries an internal presentation
+          // watermark. Canonical provider facts/history/hash remain untouched.
+          latestObservation: {
+            ...facts,
+            __groundTransitAttention: advanceGroundTransitAttentionState({
+              previous: parseAttentionState(row.latestObservation),
+              previousObservation,
+              observation: input.observation,
+              baseline,
+            }),
+          } as unknown as Prisma.InputJsonValue,
           state: providerState,
           deviationCount: consequentialDeviation ? row.deviationCount + 1 : 0,
           deviationStartedAt: consequentialDeviation
@@ -434,6 +447,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
           adoptedRouteId: true,
           latestObservationId: true,
           latestFetchedAt: true,
+          latestObservation: true,
         },
       });
       if (
@@ -466,6 +480,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
       const shouldPresent = input.assessment.requiresUserAttention;
       const quietCurrent =
         !shouldPresent &&
+        !input.assessment.persistentAttentionActive &&
         !input.relatedRiskActive &&
         input.assessment.disposition === 'CONTINUE_CURRENT_PLAN';
       if (current !== null || shouldPresent || quietCurrent) {
@@ -486,6 +501,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         input.assessment.changeKinds,
         input.assessment.requiredAction,
         input.hasDownstreamImpact,
+        parseObservation(leg.latestObservation),
       );
       if (summary.length === 0)
         throw new Error(
@@ -521,6 +537,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
               current.hasDownstreamImpact || input.hasDownstreamImpact,
           },
         });
+        await markAttentionPresented(transaction, leg, input.assessment);
         return 'CURRENT';
       }
       await transaction.notificationEvent.upsert({
@@ -550,6 +567,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         },
         update: {},
       });
+      await markAttentionPresented(transaction, leg, input.assessment);
       return 'CURRENT';
     });
   }
@@ -869,6 +887,7 @@ function toRecord(
     baseline: parseBaseline(row),
     state: row.state,
     latestObservation: parseObservation(row.latestObservation),
+    attentionState: parseAttentionState(row.latestObservation),
     latestFetchedAt: row.latestFetchedAt,
     observationCount: row._count.observations,
     current,
@@ -982,6 +1001,67 @@ function parseObservation(
     nextDepartureInSeconds: numberOrNull(item.nextDepartureInSeconds),
     minimumTransferSeconds: numberOrNull(item.minimumTransferSeconds),
   };
+}
+
+function parseAttentionState(
+  value: Prisma.JsonValue | null,
+): GroundTransitAttentionState | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return null;
+  const marker = (value as Record<string, unknown>).__groundTransitAttention;
+  if (marker === null || typeof marker !== 'object' || Array.isArray(marker))
+    return null;
+  const item = marker as Record<string, unknown>;
+  const platform = (value: unknown): value is string | null =>
+    value === null || typeof value === 'string';
+  if (
+    !platform(item.departurePlatformReference) ||
+    !platform(item.arrivalPlatformReference) ||
+    !platform(item.presentedDeparturePlatform) ||
+    !platform(item.presentedArrivalPlatform) ||
+    typeof item.presentedEarlyDeparture !== 'boolean' ||
+    !Number.isSafeInteger(item.presentedDelayBand) ||
+    (item.presentedDelayBand as number) < 0
+  )
+    return null;
+  return item as unknown as GroundTransitAttentionState;
+}
+
+async function markAttentionPresented(
+  transaction: Transaction,
+  leg: { readonly id: string; readonly latestObservation: Prisma.JsonValue },
+  assessment: GroundTransitOperationalAssessment,
+): Promise<void> {
+  if (assessment.attentionActivationKinds.length === 0) return;
+  const state = parseAttentionState(leg.latestObservation);
+  const observation = parseObservation(leg.latestObservation);
+  if (state === null || observation === null)
+    throw new Error('Ground transit attention watermark is unavailable');
+  const kinds = assessment.attentionActivationKinds;
+  const raw = leg.latestObservation as Record<string, unknown>;
+  const next: GroundTransitAttentionState = {
+    ...state,
+    presentedDeparturePlatform: kinds.includes('DEPARTURE_PLATFORM_CHANGED')
+      ? observation.departurePlatform
+      : state.presentedDeparturePlatform,
+    presentedArrivalPlatform: kinds.includes('ARRIVAL_PLATFORM_CHANGED')
+      ? observation.arrivalPlatform
+      : state.presentedArrivalPlatform,
+    presentedEarlyDeparture:
+      kinds.includes('EARLY_DEPARTURE') || state.presentedEarlyDeparture,
+    presentedDelayBand: kinds.includes('MATERIAL_DELAY')
+      ? Math.max(state.presentedDelayBand, assessment.materialDelayBand)
+      : state.presentedDelayBand,
+  };
+  await transaction.groundTransitLegExecution.update({
+    where: { id: leg.id },
+    data: {
+      latestObservation: {
+        ...raw,
+        __groundTransitAttention: next,
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
 }
 
 function serializableObservation(value: GroundTransitObservation) {
@@ -1145,13 +1225,18 @@ function operationalSummary(
   kinds: readonly GroundTransitChangeKind[],
   action: 'NONE' | 'ROUTE_REEVALUATION_REQUIRED',
   downstream: boolean,
+  observation: GroundTransitObservation | null,
 ): string {
   const labels: Partial<Record<GroundTransitChangeKind, string>> = {
     SERVICE_CANCELLED: '班次已取消',
     EARLY_DEPARTURE: '发车时间提前',
     MATERIAL_DELAY: '预计到达明显延后',
-    DEPARTURE_PLATFORM_CHANGED: '上车站台已变化',
-    ARRIVAL_PLATFORM_CHANGED: '到站站台已变化',
+    DEPARTURE_PLATFORM_CHANGED: observation?.departurePlatform
+      ? `当前上车站台已变更为 ${observation.departurePlatform.slice(0, 80)}`
+      : '上车站台已变化',
+    ARRIVAL_PLATFORM_CHANGED: observation?.arrivalPlatform
+      ? `当前到站站台已变更为 ${observation.arrivalPlatform.slice(0, 80)}`
+      : '到站站台已变化',
     BOARDING_TARGET_NO_LONGER_SERVED: '原上车站不再停靠',
     ALIGHTING_TARGET_NO_LONGER_SERVED: '原下车站不再停靠',
     SERVICE_SHORT_TURNED: '班次运行区间缩短',

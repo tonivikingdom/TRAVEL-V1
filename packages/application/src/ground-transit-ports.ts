@@ -2,6 +2,7 @@ import type {
   GroundTransitBaseline,
   GroundTransitObservation,
   GroundTransitOperationalAssessment,
+  GroundTransitAttentionState,
 } from '@travel/domain';
 
 export interface GroundTransitLegRecord {
@@ -23,6 +24,7 @@ export interface GroundTransitLegRecord {
     | 'NO_LONGER_FEASIBLE'
     | 'UNKNOWN';
   readonly latestObservation: GroundTransitObservation | null;
+  readonly attentionState?: GroundTransitAttentionState | null;
   readonly latestFetchedAt: Date | null;
   readonly observationCount: number;
   readonly deviationCount: number;

@@ -197,6 +197,7 @@ export class GroundTransitService {
             baseline: leg.baseline,
             previousObservation: leg.previousObservation ?? null,
             latestObservation: leg.latestObservation,
+            attentionState: leg.attentionState ?? null,
             now,
             state: leg.state,
             current: leg.current,
@@ -300,6 +301,7 @@ export class GroundTransitService {
         baseline: committed.leg.baseline,
         previousObservation: committed.leg.previousObservation ?? null,
         latestObservation: committed.leg.latestObservation,
+        attentionState: committed.leg.attentionState ?? null,
         now: this.now(),
         state: committed.leg.state,
         current: committed.leg.current,
@@ -379,6 +381,10 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
           },
           requiresUserAttention: false,
           notificationPriority: null,
+          attentionActivationKinds: [],
+          factChangeKinds: [],
+          persistentAttentionActive: false,
+          materialDelayBand: 0,
           observationEvidenceRef: null,
           irreversibleActualMiss: false,
         }
@@ -386,6 +392,7 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
           baseline: leg.baseline,
           previousObservation: leg.previousObservation ?? null,
           latestObservation: leg.latestObservation,
+          attentionState: leg.attentionState ?? null,
           now,
           state: leg.state,
           current: leg.current,
@@ -394,6 +401,18 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
           downstreamProtectedDeparture:
             leg.downstreamProtectedDeparture ?? null,
         });
+  const publicOperational = {
+    policyVersion: operational.policyVersion,
+    disposition: operational.disposition,
+    requiredAction: operational.requiredAction,
+    changeKinds: operational.changeKinds,
+    reasonCodes: operational.reasonCodes,
+    targetServiceability: operational.targetServiceability,
+    requiresUserAttention: operational.requiresUserAttention,
+    notificationPriority: operational.notificationPriority,
+    observationEvidenceRef: operational.observationEvidenceRef,
+    irreversibleActualMiss: operational.irreversibleActualMiss,
+  };
   return {
     id: leg.id,
     transportEdgeId: leg.transportEdgeId,
@@ -423,7 +442,7 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
     latestFetchedAt: leg.latestFetchedAt?.toISOString() ?? null,
     observationCount: leg.observationCount,
     current: leg.current,
-    operational,
+    operational: publicOperational,
     deviationConsecutiveObservations: leg.deviationCount,
     deviationStartedAt: leg.deviationStartedAt?.toISOString() ?? null,
     safety: {

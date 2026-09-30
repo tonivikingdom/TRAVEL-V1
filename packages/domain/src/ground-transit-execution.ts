@@ -177,6 +177,63 @@ export type GroundTransitChangeKind =
   | 'DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK'
   | 'SERVICE_RESTORED';
 
+/** Internal, durable presentation watermark; never part of provider facts. */
+export interface GroundTransitAttentionState {
+  readonly departurePlatformReference: string | null;
+  readonly arrivalPlatformReference: string | null;
+  readonly presentedDeparturePlatform: string | null;
+  readonly presentedArrivalPlatform: string | null;
+  readonly presentedEarlyDeparture: boolean;
+  readonly presentedDelayBand: number;
+}
+
+export function advanceGroundTransitAttentionState(input: {
+  readonly previous: GroundTransitAttentionState | null;
+  readonly previousObservation: GroundTransitObservation | null;
+  readonly observation: GroundTransitObservation;
+  readonly baseline: GroundTransitBaseline;
+}): GroundTransitAttentionState {
+  const previous = input.previous;
+  const observation = input.observation;
+  const prior = input.previousObservation;
+  const departurePlatformReference =
+    previous?.departurePlatformReference ??
+    prior?.departurePlatform ??
+    observation.departurePlatform;
+  const arrivalPlatformReference =
+    previous?.arrivalPlatformReference ??
+    prior?.arrivalPlatform ??
+    observation.arrivalPlatform;
+  const departure =
+    observation.actualDeparture ?? observation.estimatedDeparture;
+  const early =
+    departure !== null &&
+    input.baseline.plannedDeparture !== null &&
+    departure.getTime() < input.baseline.plannedDeparture.getTime();
+  const arrival = observation.actualArrival ?? observation.estimatedArrival;
+  const delayed =
+    arrival !== null &&
+    input.baseline.plannedArrival !== null &&
+    arrival.getTime() - input.baseline.plannedArrival.getTime() >=
+      baseDelayThresholdSeconds(input.baseline) * 1000;
+  return {
+    departurePlatformReference,
+    arrivalPlatformReference,
+    presentedDeparturePlatform:
+      observation.departurePlatform === prior?.departurePlatform
+        ? (previous?.presentedDeparturePlatform ?? null)
+        : null,
+    presentedArrivalPlatform:
+      observation.arrivalPlatform === prior?.arrivalPlatform
+        ? (previous?.presentedArrivalPlatform ?? null)
+        : null,
+    presentedEarlyDeparture: early
+      ? (previous?.presentedEarlyDeparture ?? false)
+      : false,
+    presentedDelayBand: delayed ? (previous?.presentedDelayBand ?? 0) : 0,
+  };
+}
+
 export interface GroundTransitOperationalAssessment {
   readonly policyVersion: typeof GROUND_TRANSIT_OPERATIONAL_POLICY.version;
   readonly disposition:
@@ -185,6 +242,11 @@ export interface GroundTransitOperationalAssessment {
     | 'CURRENT_PLAN_NO_LONGER_FEASIBLE';
   readonly requiredAction: 'NONE' | 'ROUTE_REEVALUATION_REQUIRED';
   readonly changeKinds: readonly GroundTransitChangeKind[];
+  readonly factChangeKinds: readonly GroundTransitChangeKind[];
+  /** A persisted incident became actionable, even without a new provider delta. */
+  readonly attentionActivationKinds: readonly GroundTransitChangeKind[];
+  readonly persistentAttentionActive: boolean;
+  readonly materialDelayBand: number;
   readonly reasonCodes: readonly string[];
   readonly targetServiceability: {
     readonly boarding: GroundTransitTargetServiceability;
@@ -207,6 +269,7 @@ export function assessGroundTransitOperational(input: {
   readonly availableAtBoarding: Date | null;
   readonly actualServiceDeparture?: Date | null;
   readonly downstreamProtectedDeparture: Date | null;
+  readonly attentionState?: GroundTransitAttentionState | null;
 }): GroundTransitOperationalAssessment {
   const { baseline, now } = input;
   const latest = input.latestObservation;
@@ -293,18 +356,7 @@ export function assessGroundTransitOperational(input: {
         priorArrival.getTime() + baseline.minimumTransferSeconds * 1000 >
           input.downstreamProtectedDeparture.getTime()));
   const newDownstreamImpact = downstreamImpact && !priorDownstreamImpact;
-  const durationSeconds =
-    baselineDeparture !== null && baselineArrival !== null
-      ? Math.max(0, (baselineArrival - baselineDeparture) / 1000)
-      : 0;
-  const baseDelayThreshold =
-    baseline.serviceClass === 'HIGH_FREQUENCY'
-      ? (baseline.headwayMaxSeconds ??
-          GROUND_TRANSIT_OPERATIONAL_POLICY.longFixedServiceDelaySeconds) *
-        GROUND_TRANSIT_OPERATIONAL_POLICY.highFrequencyHeadwayMultiplier
-      : durationSeconds <= GROUND_TRANSIT_OPERATIONAL_POLICY.longLegSeconds
-        ? GROUND_TRANSIT_OPERATIONAL_POLICY.shortFixedServiceDelaySeconds
-        : GROUND_TRANSIT_OPERATIONAL_POLICY.longFixedServiceDelaySeconds;
+  const baseDelayThreshold = baseDelayThresholdSeconds(baseline);
   const threshold = executionWindow
     ? baseDelayThreshold
     : baseDelayThreshold *
@@ -327,6 +379,51 @@ export function assessGroundTransitOperational(input: {
       ? Math.floor(previousArrivalDelta / delayThresholdMs)
       : 0;
   const materialDelayEscalated = currentDelayBand > previousDelayBand;
+  const attentionState = input.attentionState;
+  const departurePlatformReference =
+    attentionState?.departurePlatformReference ?? prior?.departurePlatform;
+  const arrivalPlatformReference =
+    attentionState?.arrivalPlatformReference ?? prior?.arrivalPlatform;
+  const departurePlatformIncident =
+    fact?.departurePlatform !== null &&
+    fact?.departurePlatform !== undefined &&
+    departurePlatformReference !== null &&
+    departurePlatformReference !== undefined &&
+    fact.departurePlatform !== departurePlatformReference;
+  const arrivalPlatformIncident =
+    fact?.arrivalPlatform !== null &&
+    fact?.arrivalPlatform !== undefined &&
+    arrivalPlatformReference !== null &&
+    arrivalPlatformReference !== undefined &&
+    fact.arrivalPlatform !== arrivalPlatformReference;
+  const presentedDelayBand =
+    attentionState?.presentedDelayBand ?? previousDelayBand;
+  const attentionActivationKinds: GroundTransitChangeKind[] = [];
+  if (
+    executionWindow &&
+    departurePlatformIncident &&
+    fact!.departurePlatform !== attentionState?.presentedDeparturePlatform
+  )
+    attentionActivationKinds.push('DEPARTURE_PLATFORM_CHANGED');
+  if (
+    executionWindow &&
+    arrivalPlatformIncident &&
+    fact!.arrivalPlatform !== attentionState?.presentedArrivalPlatform
+  )
+    attentionActivationKinds.push('ARRIVAL_PLATFORM_CHANGED');
+  if (
+    executionWindow &&
+    departureDelta !== null &&
+    departureDelta < 0 &&
+    !attentionState?.presentedEarlyDeparture
+  )
+    attentionActivationKinds.push('EARLY_DEPARTURE');
+  if (
+    materialDelay &&
+    (executionWindow || downstreamImpact) &&
+    currentDelayBand > presentedDelayBand
+  )
+    attentionActivationKinds.push('MATERIAL_DELAY');
   const changes: GroundTransitChangeKind[] = [];
   if (fact !== null) {
     if (cancelled && prior?.serviceStatus !== 'CANCELLED')
@@ -410,16 +507,27 @@ export function assessGroundTransitOperational(input: {
     (downstreamImpact ||
       (departureDelta !== null && departureDelta < 0 && executionWindow) ||
       (materialDelay && executionWindow));
+  const persistentAttentionActive =
+    (departurePlatformIncident &&
+      fact?.departurePlatform === attentionState?.presentedDeparturePlatform) ||
+    (arrivalPlatformIncident &&
+      fact?.arrivalPlatform === attentionState?.presentedArrivalPlatform) ||
+    (departureDelta !== null &&
+      departureDelta < 0 &&
+      attentionState?.presentedEarlyDeparture === true) ||
+    (materialDelay &&
+      currentDelayBand <= (attentionState?.presentedDelayBand ?? 0) &&
+      (attentionState?.presentedDelayBand ?? 0) > 0);
   const attention =
     current &&
     ((infeasible && changes.length > 0) ||
       changes.includes('SERVICE_RESTORED') ||
-      (changes.includes('EARLY_DEPARTURE') && executionWindow) ||
-      (materialDelayEscalated && (executionWindow || downstreamImpact)) ||
-      newDownstreamImpact ||
-      (executionWindow &&
-        (changes.includes('DEPARTURE_PLATFORM_CHANGED') ||
-          changes.includes('ARRIVAL_PLATFORM_CHANGED'))));
+      attentionActivationKinds.length > 0 ||
+      newDownstreamImpact);
+  const factChangeKinds = [...changes];
+  for (const kind of attentionActivationKinds) {
+    if (!changes.includes(kind)) changes.push(kind);
+  }
   return {
     policyVersion: GROUND_TRANSIT_OPERATIONAL_POLICY.version,
     disposition: infeasible
@@ -430,6 +538,10 @@ export function assessGroundTransitOperational(input: {
     requiredAction:
       infeasible || downstreamImpact ? 'ROUTE_REEVALUATION_REQUIRED' : 'NONE',
     changeKinds: changes,
+    factChangeKinds,
+    attentionActivationKinds,
+    persistentAttentionActive,
+    materialDelayBand: currentDelayBand,
     reasonCodes: [
       ...(cancelled ? ['SERVICE_CANCELLED'] : []),
       ...(boarding === 'NOT_SERVED' ? ['BOARDING_TARGET_NOT_SERVED'] : []),
@@ -452,6 +564,25 @@ export function assessGroundTransitOperational(input: {
         : `ground-transit-observation:${fact.observationIdentity}`,
     irreversibleActualMiss: latestArrivalMiss,
   };
+}
+
+function baseDelayThresholdSeconds(baseline: GroundTransitBaseline): number {
+  const durationSeconds =
+    baseline.plannedDeparture !== null && baseline.plannedArrival !== null
+      ? Math.max(
+          0,
+          (baseline.plannedArrival.getTime() -
+            baseline.plannedDeparture.getTime()) /
+            1000,
+        )
+      : 0;
+  return baseline.serviceClass === 'HIGH_FREQUENCY'
+    ? (baseline.headwayMaxSeconds ??
+        GROUND_TRANSIT_OPERATIONAL_POLICY.longFixedServiceDelaySeconds) *
+        GROUND_TRANSIT_OPERATIONAL_POLICY.highFrequencyHeadwayMultiplier
+    : durationSeconds <= GROUND_TRANSIT_OPERATIONAL_POLICY.longLegSeconds
+      ? GROUND_TRANSIT_OPERATIONAL_POLICY.shortFixedServiceDelaySeconds
+      : GROUND_TRANSIT_OPERATIONAL_POLICY.longFixedServiceDelaySeconds;
 }
 
 export type GroundTransitObservationAcceptance =

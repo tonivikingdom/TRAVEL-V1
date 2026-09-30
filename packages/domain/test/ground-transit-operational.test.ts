@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assessGroundTransitOperational,
+  advanceGroundTransitAttentionState,
   assessGroundTransitSafety,
   resolveGroundTransitProviderState,
   type GroundTransitBaseline,
@@ -138,6 +139,79 @@ describe('ground transit operational facts', () => {
         },
       }).requiresUserAttention,
     ).toBe(false);
+  });
+
+  it('separates a persistent fact from its later attention activation', () => {
+    const first = {
+      ...normal,
+      fetchedAt: at(-100),
+      departurePlatform: '2',
+    };
+    const changed = {
+      ...normal,
+      observationIdentity: 'two',
+      fetchedAt: at(-90),
+      departurePlatform: '5',
+    };
+    const same = {
+      ...changed,
+      observationIdentity: 'three',
+      fetchedAt: at(0),
+    };
+    const initialState = advanceGroundTransitAttentionState({
+      previous: null,
+      previousObservation: null,
+      observation: first,
+      baseline,
+    });
+    const farState = advanceGroundTransitAttentionState({
+      previous: initialState,
+      previousObservation: first,
+      observation: changed,
+      baseline,
+    });
+    expect(
+      assess(changed, {
+        previousObservation: first,
+        attentionState: farState,
+        now: at(-90),
+      }),
+    ).toMatchObject({
+      changeKinds: ['DEPARTURE_PLATFORM_CHANGED'],
+      attentionActivationKinds: [],
+      requiresUserAttention: false,
+    });
+    const nearState = advanceGroundTransitAttentionState({
+      previous: farState,
+      previousObservation: changed,
+      observation: same,
+      baseline,
+    });
+    const activated = assess(same, {
+      previousObservation: changed,
+      attentionState: nearState,
+      now: at(0),
+    });
+    expect(activated).toMatchObject({
+      changeKinds: ['DEPARTURE_PLATFORM_CHANGED'],
+      factChangeKinds: [],
+      attentionActivationKinds: ['DEPARTURE_PLATFORM_CHANGED'],
+      requiresUserAttention: true,
+    });
+    expect(
+      assess(same, {
+        previousObservation: changed,
+        attentionState: {
+          ...nearState,
+          presentedDeparturePlatform: '5',
+        },
+        now: at(0),
+      }),
+    ).toMatchObject({
+      attentionActivationKinds: [],
+      persistentAttentionActive: true,
+      requiresUserAttention: false,
+    });
   });
 
   it('treats a skipped adopted destination and short turn as goal failure', () => {

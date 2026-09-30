@@ -4,6 +4,8 @@ import {
   AuthService,
   digestOpaqueToken,
   ExecutionRiskService,
+  ExecutionLocationService,
+  type FlightMonitoringService,
   GroundTransitService,
   GroundTransitRouteReevaluationService,
   type GroundTransitProvider,
@@ -30,6 +32,7 @@ import {
   createPrismaClient,
   PrismaAuthRepository,
   PrismaExecutionRiskRepository,
+  PrismaExecutionLocationRepository,
   PrismaGroundTransitRepository,
   PrismaGroundTransitRouteProgressRepository,
   PrismaRoutePlanningRepository,
@@ -174,6 +177,12 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           () => currentNow,
         ),
       executionRiskService,
+      executionLocationService: new ExecutionLocationService(
+        new PrismaExecutionLocationRepository(managed.client),
+        executionRiskService,
+        { trigger: async () => ({}) } as unknown as FlightMonitoringService,
+        { now: () => currentNow },
+      ),
     });
   }
 
@@ -309,6 +318,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   });
 
   afterAll(async () => {
+    await resetSyntheticData(managed);
     await managed.close();
   });
 
@@ -972,7 +982,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       method: 'POST',
       url: `/trips/${trip.id}/routes/query`,
       headers: bearer(userA),
-      payload: handoff.query,
+      payload: handoff.query!,
     });
     expect(queried.statusCode).toBe(200);
     const queryResult = queried.json() as RouteQueryResponse;
@@ -1123,7 +1133,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       method: 'POST',
       url: `/trips/${trip.id}/routes/query`,
       headers: bearer(userA),
-      payload: handoff.query,
+      payload: handoff.query!,
     });
     expect(stale.statusCode).toBe(409);
     expect(stale.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
@@ -4883,28 +4893,2138 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   }
 
+  async function suffixFixture(
+    actual = true,
+    originDwell = false,
+    confirmed = true,
+  ) {
+    const initial = await tripWithVisits(userA, ['SYNTHETIC A', 'SYNTHETIC D']);
+    const [a, d] = initial.days[0]!.nodes;
+    providerResult = suffixFoundationCandidate(false);
+    if (originDwell) {
+      const source = providerResult.candidates[0]!;
+      // Flexible synthetic source services avoid a contradictory fixed departure
+      // while exercising the existing lookback/dwell policy at an ACTUAL origin.
+      providerResult = {
+        status: 'SUCCESS',
+        candidates: [
+          {
+            ...source,
+            legs: source.legs.map((leg) => ({
+              ...leg,
+              fixedService: false,
+              groundTransit: {
+                ...leg.groundTransit!,
+                serviceClass: 'HIGH_FREQUENCY',
+                headwayMinSeconds: 300,
+                headwayMaxSeconds: 600,
+              },
+            })),
+          },
+        ],
+      };
+    }
+    const preview = await createPreview(userA, initial, a!.id, d!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      preview.previewId,
+      'synthetic-suffix-source',
+    );
+    const [A, B, C, D] = first.trip.days.flatMap((day) => day.nodes);
+    const edges = await managed.client.transportEdge.findMany({
+      where: { tripId: initial.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    const prefix = edges.find((edge) => edge.fromNodeId === A!.id)!;
+    const full = await query(userA, first.trip, A!.id, D!.id, departHint());
+    expect(full.statusCode).toBe(200);
+    if (actual) {
+      await managed.client.temporalValue.createMany({
+        data: [
+          {
+            transportEdgeId: prefix.id,
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: new Date('2030-10-01T10:20:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+          },
+          {
+            transportEdgeId: prefix.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: new Date('2030-10-01T10:00:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+          },
+        ],
+      });
+    }
+    const originArrival = confirmed
+      ? await confirmSourceOrigin(first.trip, A!.id, B!.id)
+      : null;
+    if (originArrival !== null) first.trip = originArrival.trip;
+    providerResult = suffixFoundationCandidate(true);
+    return {
+      first,
+      originArrivalEventId: originArrival?.eventId ?? null,
+      A: A!,
+      B: B!,
+      C: C!,
+      D: D!,
+      prefix,
+      suffixEdges: edges.filter((edge) => edge.id !== prefix.id),
+    };
+  }
+
+  it.each([
+    'none',
+    'provider-only',
+    'gps-only',
+    'bare-node-actual',
+    'departed',
+    'later-event',
+    'inconsistent',
+  ] as const)(
+    'P5E2 4B: direct suffix Query rejects %s without snapshots or route/monitor writes',
+    async (kind) => {
+      const f = await suffixFixture(
+        false,
+        false,
+        !['none', 'provider-only', 'gps-only', 'bare-node-actual'].includes(
+          kind,
+        ),
+      );
+      if (kind === 'provider-only') {
+        await managed.client.temporalValue.createMany({
+          data: ['ARRIVAL', 'DEPARTURE'].map((pointKind) => ({
+            transportEdgeId: f.prefix.id,
+            layer: 'ACTUAL' as const,
+            pointKind: pointKind as 'ARRIVAL' | 'DEPARTURE',
+            instant: new Date('2030-10-01T10:20:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'PROVIDER_OBSERVATION' as const,
+          })),
+        });
+      }
+      if (kind === 'gps-only') {
+        await managed.client.executionLocationState.create({
+          data: {
+            tripId: f.first.trip.id,
+            currentNodeId: f.B.id,
+            targetNodeId: f.C.id,
+            lastObservedAt: NOW,
+            outsideTargetConsecutiveCount: 0,
+            locationStatus: 'RELIABLE',
+          },
+        });
+      }
+      if (kind === 'bare-node-actual') {
+        f.first.trip = (
+          await manualExecution(
+            f.first.trip,
+            f.A.id,
+            'MANUAL_ARRIVAL',
+            '2030-10-01T10:00:00Z',
+          )
+        ).trip;
+        f.first.trip = (
+          await manualExecution(
+            f.first.trip,
+            f.A.id,
+            'MANUAL_DEPARTURE',
+            '2030-10-01T10:00:00Z',
+          )
+        ).trip;
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.B.id,
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: new Date('2030-10-01T10:20:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+          },
+        });
+      }
+      if (kind === 'departed')
+        f.first.trip = (
+          await manualExecution(
+            f.first.trip,
+            f.B.id,
+            'MANUAL_DEPARTURE',
+            '2030-10-01T10:20:00Z',
+          )
+        ).trip;
+      if (kind === 'later-event') {
+        const event = await managed.client.executionEvent.create({
+          data: {
+            ownerUserId: userA.actor.userId,
+            tripId: f.first.trip.id,
+            nodeId: f.C.id,
+            type: 'DEPARTURE',
+            source: 'MANUAL',
+            occurredAt: new Date('2030-10-01T10:40:00Z'),
+          },
+        });
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.C.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: event.occurredAt,
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+            sourceRef: `execution-event:${event.id}`,
+          },
+        });
+      }
+      if (kind === 'inconsistent')
+        await managed.client.temporalValue.deleteMany({
+          where: { nodeId: f.A.id, pointKind: 'DEPARTURE', layer: 'ACTUAL' },
+        });
+      await managed.client.tripAssistanceCapability.create({
+        data: {
+          ownerUserId: userA.actor.userId,
+          tripId: f.first.trip.id,
+          kind: 'GROUND_TRANSIT_MONITORING',
+          state: 'ENABLED',
+          revision: 1,
+          enabledAt: NOW,
+        },
+      });
+      await managed.client.job.create({
+        data: {
+          type: 'GROUND_TRANSIT_MONITOR',
+          runAt: NOW,
+          uniqueKey: `SYNTHETIC_4B_MONITOR_${kind}`,
+          payloadRef: f.first.operationReceipt.adoptedRouteId,
+          capabilityRevision: 1,
+          maxAttempts: 3,
+        },
+      });
+      const count = await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.first.trip.id },
+      });
+      const before = await repairDurableState(f.first.trip.id);
+      const jobs = await managed.client.job.findMany({
+        orderBy: { id: 'asc' },
+      });
+      const providerCalls = providerInputs.length;
+      const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toMatchObject({
+        error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+      });
+      expect(providerInputs).toHaveLength(providerCalls);
+      expect(
+        await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: f.first.trip.id },
+        }),
+      ).toBe(count);
+      expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      expect(
+        await managed.client.job.findMany({ orderBy: { id: 'asc' } }),
+      ).toEqual(jobs);
+      expect(before.adoptedRoutes).toEqual([
+        expect.objectContaining({ status: 'ACTIVE' }),
+      ]);
+    },
+  );
+
+  it('P5E2 4B: only a durable execution event linked to ACTUAL enables direct suffix Query', async () => {
+    const f = await suffixFixture(false);
+    const event = await managed.client.executionEvent.findUniqueOrThrow({
+      where: { id: f.originArrivalEventId! },
+    });
+    expect(event).toMatchObject({
+      type: 'ARRIVAL',
+      source: 'MANUAL',
+      nodeId: f.B.id,
+      undoneAt: null,
+    });
+    expect(
+      await managed.client.temporalValue.findFirstOrThrow({
+        where: { nodeId: f.B.id, layer: 'ACTUAL', pointKind: 'ARRIVAL' },
+      }),
+    ).toMatchObject({ sourceRef: `execution-event:${event.id}` });
+    const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    expect(response.statusCode).toBe(200);
+    const snapshot =
+      await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+        where: {
+          id: response.json<RouteQueryResponse>().candidates[0]!
+            .candidateSnapshotId,
+        },
+      });
+    expect(snapshot).toMatchObject({
+      fromNodeId: f.B.id,
+      toNodeId: f.D.id,
+      basisVersion: f.first.trip.version,
+    });
+  });
+
+  it.each([false, true])(
+    'P5E2 4B: reliable location authorizes only after durable ARRIVAL (autoRecord=%s)',
+    async (autoRecord) => {
+      const f = await suffixFixture(false, false, false);
+      f.first.trip = (
+        await manualExecution(
+          f.first.trip,
+          f.A.id,
+          'MANUAL_ARRIVAL',
+          '2030-10-01T10:00:00Z',
+        )
+      ).trip;
+      f.first.trip = (
+        await manualExecution(
+          f.first.trip,
+          f.A.id,
+          'MANUAL_DEPARTURE',
+          '2030-10-01T10:00:00Z',
+        )
+      ).trip;
+      await managed.client.tripAssistanceCapability.createMany({
+        data: [
+          {
+            ownerUserId: userA.actor.userId,
+            tripId: f.first.trip.id,
+            kind: 'LOCATION_ASSISTANCE',
+            state: 'ENABLED',
+            revision: 1,
+            enabledAt: NOW,
+          },
+          ...(autoRecord
+            ? [
+                {
+                  ownerUserId: userA.actor.userId,
+                  tripId: f.first.trip.id,
+                  kind: 'AUTO_RECORD' as const,
+                  state: 'ENABLED' as const,
+                  revision: 1,
+                  enabledAt: NOW,
+                },
+              ]
+            : []),
+        ],
+      });
+      currentNow = new Date('2030-10-01T10:20:00Z');
+      const observed = await app.inject({
+        method: 'POST',
+        url: `/trips/${f.first.trip.id}/execution/location`,
+        headers: bearer(userA),
+        payload: {
+          latitude: 35.68,
+          longitude: 139.66,
+          accuracyMeters: 10,
+          observedAt: currentNow.toISOString(),
+        },
+      });
+      expect(observed.statusCode, observed.body).toBe(200);
+      expect(observed.json()).toMatchObject({
+        status: autoRecord ? 'CONFIRMED_ARRIVAL' : 'ARRIVAL_DETECTED',
+      });
+      f.first.trip = (
+        await app.inject({
+          method: 'GET',
+          url: `/trips/${f.first.trip.id}`,
+          headers: bearer(userA),
+        })
+      ).json<TripView>();
+      const before = await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.first.trip.id },
+      });
+      const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      if (autoRecord) {
+        expect(response.statusCode, response.body).toBe(200);
+        expect(
+          await managed.client.executionEvent.findFirstOrThrow({
+            where: { nodeId: f.B.id, type: 'ARRIVAL', undoneAt: null },
+          }),
+        ).toMatchObject({
+          source: 'LOCATION',
+          evidenceReliability: 'SUFFICIENT',
+        });
+      } else {
+        expect(response.statusCode).toBe(422);
+        expect(response.json()).toMatchObject({
+          error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+        });
+        expect(
+          await managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.first.trip.id },
+          }),
+        ).toBe(before);
+        expect(
+          await managed.client.executionEvent.count({
+            where: { nodeId: f.B.id },
+          }),
+        ).toBe(0);
+      }
+    },
+  );
+
+  it('P5E2 4B: provider-return race cannot save suffix snapshots after user departure', async () => {
+    const f = await suffixFixture(false);
+    const count = await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: f.first.trip.id },
+    });
+    providerHook = async () => {
+      f.first.trip = (
+        await manualExecution(
+          f.first.trip,
+          f.B.id,
+          'MANUAL_DEPARTURE',
+          '2030-10-01T10:20:00Z',
+        )
+      ).trip;
+    };
+    const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: { code: 'VERSION_CONFLICT' },
+    });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.first.trip.id },
+      }),
+    ).toBe(count);
+  });
+
+  it.each(['save-snapshots', 'adopt'] as const)(
+    'P5E2 4B: locked %s rechecks departure proof independently of Trip.version',
+    async (action) => {
+      const f = await suffixFixture(false);
+      const preview =
+        action === 'adopt'
+          ? await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+              type: 'DEPART_AT',
+              instant: '2030-10-01T10:30:00Z',
+              timeZone: 'UTC',
+            })
+          : null;
+      // Deliberately leave version unchanged to isolate the lock-protected proof
+      // read. Normal Execution API writes are covered by the departure race.
+      const changeProof = async () => {
+        const event = await managed.client.executionEvent.create({
+          data: {
+            ownerUserId: userA.actor.userId,
+            tripId: f.first.trip.id,
+            nodeId: f.B.id,
+            type: 'DEPARTURE',
+            source: 'MANUAL',
+            occurredAt: new Date('2030-10-01T10:20:00Z'),
+          },
+        });
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.B.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: event.occurredAt,
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+            sourceRef: `execution-event:${event.id}`,
+          },
+        });
+      };
+      if (action === 'save-snapshots') {
+        const count = await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: f.first.trip.id },
+        });
+        providerHook = changeProof;
+        const response = await query(userA, f.first.trip, f.B.id, f.D.id, {
+          type: 'DEPART_AT',
+          instant: '2030-10-01T10:30:00Z',
+          timeZone: 'UTC',
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toMatchObject({
+          error: { code: 'VERSION_CONFLICT' },
+        });
+        expect(
+          await managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.first.trip.id },
+          }),
+        ).toBe(count);
+      } else {
+        await changeProof();
+        const before = await repairDurableState(f.first.trip.id);
+        const response = await adopt(
+          userA,
+          f.first.trip,
+          preview!.previewId,
+          'synthetic-4b-locked-proof',
+        );
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toMatchObject({
+          error: { code: 'PREVIEW_STALE' },
+        });
+        expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      }
+      expect(
+        (
+          await managed.client.trip.findUniqueOrThrow({
+            where: { id: f.first.trip.id },
+          })
+        ).version,
+      ).toBe(f.first.trip.version);
+      expect(
+        (
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: f.first.operationReceipt.adoptedRouteId },
+          })
+        ).status,
+      ).toBe('ACTIVE');
+    },
+  );
+
+  it.each(['adopt', 'depart'] as const)(
+    'P5E2 4B: read-only Handoff follows confirmed origin and fences %s',
+    async (action) => {
+      const f = await suffixFixture(false, false, false);
+      await app.close();
+      app = buildTestApi(
+        new SyntheticRouteProvider(() => providerResult),
+        groundSequence(['CANCELLED']),
+      );
+      const downstreamEdge = f.suffixEdges.find(
+        (edge) => edge.fromNodeId === f.C.id,
+      )!;
+      const baseUrl = `/trips/${f.first.trip.id}/execution/ground-transit/${downstreamEdge.id}`;
+      const refreshed = await app.inject({
+        method: 'POST',
+        url: `${baseUrl}/refresh`,
+        headers: bearer(userA),
+      });
+      expect(refreshed.statusCode, refreshed.body).toBe(200);
+      const planned = await app.inject({
+        method: 'GET',
+        url: `${baseUrl}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(planned.json()).toMatchObject({
+        readiness: 'READY',
+        originBasis: 'PLANNED_ROUTE_ORIGIN',
+        query: { fromNodeId: f.A.id, toNodeId: f.D.id },
+      });
+      f.first.trip = (
+        await confirmSourceOrigin(f.first.trip, f.A.id, f.B.id)
+      ).trip;
+      const before = await repairDurableState(f.first.trip.id);
+      const handoffResponse = await app.inject({
+        method: 'GET',
+        url: `${baseUrl}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      const handoff =
+        handoffResponse.json<GroundTransitRouteReevaluationHandoffView>();
+      expect(handoff).toMatchObject({
+        readiness: 'READY',
+        originBasis: 'CONFIRMED_EXECUTION_NODE',
+        query: {
+          basisVersion: f.first.trip.version,
+          fromNodeId: f.B.id,
+          toNodeId: f.D.id,
+          hint: { timeZone: 'UTC' },
+        },
+      });
+      expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      const queried = await app.inject({
+        method: 'POST',
+        url: `/trips/${f.first.trip.id}/routes/query`,
+        headers: bearer(userA),
+        payload: handoff.query!,
+      });
+      expect(queried.statusCode, queried.body).toBe(200);
+      const preview = await previewFromSnapshot(
+        userA,
+        f.first.trip,
+        queried.json<RouteQueryResponse>().candidates[0]!.candidateSnapshotId,
+      );
+      expect(preview.adoptable).toBe(true);
+      if (action === 'depart') {
+        const departed = await manualExecution(
+          f.first.trip,
+          f.B.id,
+          'MANUAL_DEPARTURE',
+          '2030-10-01T10:20:00Z',
+        );
+        expect(
+          (
+            await app.inject({
+              method: 'GET',
+              url: `${baseUrl}/route-reevaluation`,
+              headers: bearer(userA),
+            })
+          ).json(),
+        ).toMatchObject({
+          readiness: 'ORIGIN_UNRESOLVED',
+          originBasis: null,
+          query: null,
+        });
+        const beforeRejected = await repairDurableState(f.first.trip.id);
+        const rejected = await adopt(
+          userA,
+          f.first.trip,
+          preview.previewId,
+          'synthetic-4b-departure-race',
+        );
+        expect(rejected.statusCode).toBe(409);
+        expect(rejected.json()).toMatchObject({
+          error: { code: 'VERSION_CONFLICT' },
+        });
+        expect(await repairDurableState(f.first.trip.id)).toEqual(
+          beforeRejected,
+        );
+        const count = await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: f.first.trip.id },
+        });
+        expect(
+          (
+            await query(userA, departed.trip, f.B.id, f.D.id, {
+              ...handoff.query!.hint!,
+            })
+          ).json(),
+        ).toMatchObject({ error: { code: 'ROUTE_QUERY_UNSUPPORTED' } });
+        expect(
+          await managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.first.trip.id },
+          }),
+        ).toBe(count);
+      } else {
+        const adopted = await adoptSuccessfully(
+          userA,
+          f.first.trip,
+          preview.previewId,
+          'synthetic-4b-confirmed-adopt',
+        );
+        expect(
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: f.first.operationReceipt.adoptedRouteId },
+          }),
+        ).toMatchObject({ status: 'REPLACED' });
+        expect(
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: adopted.operationReceipt.adoptedRouteId },
+          }),
+        ).toMatchObject({
+          status: 'ACTIVE',
+          anchorFromNodeId: f.B.id,
+          anchorToNodeId: f.D.id,
+        });
+        expect(
+          await managed.client.transportEdge.findUniqueOrThrow({
+            where: { id: f.prefix.id },
+          }),
+        ).toMatchObject({
+          adoptedRouteId: f.first.operationReceipt.adoptedRouteId,
+        });
+        const undone = await undoSuccessfully(
+          userA,
+          adopted.trip,
+          adopted.operationReceipt.id,
+          'synthetic-4b-confirmed-undo',
+        );
+        expect(
+          undone.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+        ).toEqual([f.A.id, f.B.id, f.C.id, f.D.id]);
+      }
+    },
+  );
+
+  async function manualExecution(
+    trip: TripView,
+    nodeId: string,
+    type: 'MANUAL_ARRIVAL' | 'MANUAL_DEPARTURE',
+    instant: string,
+  ) {
+    if (currentNow < new Date(instant)) currentNow = new Date(instant);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/events`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        idempotencyKey: randomUUID(),
+        type,
+        nodeId,
+        occurredAt: instant,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const read = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(read.statusCode).toBe(200);
+    return {
+      trip: read.json() as TripView,
+      eventId: (response.json() as { event: { id: string } }).event.id,
+    };
+  }
+
+  async function confirmSourceOrigin(
+    trip: TripView,
+    fromNodeId: string,
+    originNodeId: string,
+    departure = '2030-10-01T10:00:00Z',
+    arrival = '2030-10-01T10:20:00Z',
+  ) {
+    const arrived = await manualExecution(
+      trip,
+      fromNodeId,
+      'MANUAL_ARRIVAL',
+      departure,
+    );
+    const departed = await manualExecution(
+      arrived.trip,
+      fromNodeId,
+      'MANUAL_DEPARTURE',
+      departure,
+    );
+    return manualExecution(
+      departed.trip,
+      originNodeId,
+      'MANUAL_ARRIVAL',
+      arrival,
+    );
+  }
+
+  async function undoExecution(trip: TripView, eventId: string) {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/execution/events/${eventId}/undo`,
+      headers: bearer(userA),
+      payload: { baseTripVersion: trip.version, idempotencyKey: randomUUID() },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const read = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(read.statusCode).toBe(200);
+    return read.json() as TripView;
+  }
+
+  async function repairRestoredFixture(origin: 'B' | 'C' = 'B') {
+    const f = await suffixFixture(false);
+    let arrivalEventId = f.originArrivalEventId!;
+    let departureEventId: string | null = null;
+    if (origin === 'C') {
+      const departed = await manualExecution(
+        f.first.trip,
+        f.B.id,
+        'MANUAL_DEPARTURE',
+        '2030-10-01T10:20:00Z',
+      );
+      departureEventId = departed.eventId;
+      const arrived = await manualExecution(
+        departed.trip,
+        f.C.id,
+        'MANUAL_ARRIVAL',
+        '2030-10-01T10:40:00Z',
+      );
+      arrivalEventId = arrived.eventId;
+      f.first.trip = arrived.trip;
+      providerResult = {
+        status: 'SUCCESS',
+        candidates: [
+          candidate(
+            '2030-10-01T10:45:00Z',
+            '2030-10-01T11:00:00Z',
+            'UTC',
+            'UTC',
+          ),
+        ],
+      };
+    }
+    const suffix = await createPreview(
+      userA,
+      f.first.trip,
+      f[origin].id,
+      f.D.id,
+      {
+        type: 'DEPART_AT',
+        instant:
+          origin === 'B' ? '2030-10-01T10:30:00Z' : '2030-10-01T10:45:00Z',
+        timeZone: 'UTC',
+      },
+    );
+    const second = await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      suffix.previewId,
+      'repair-suffix',
+    );
+    const restored = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'repair-undo',
+    );
+    restored.trip = await undoExecution(restored.trip, arrivalEventId);
+    if (departureEventId !== null)
+      restored.trip = await undoExecution(restored.trip, departureEventId);
+    return { ...f, second, restored };
+  }
+
+  async function repairDurableState(tripId: string) {
+    return managed.client.trip.findUniqueOrThrow({
+      where: { id: tripId },
+      include: {
+        dayOccurrences: {
+          orderBy: { id: 'asc' },
+          include: {
+            nodes: {
+              orderBy: { id: 'asc' },
+              include: {
+                place: true,
+                temporalValues: { orderBy: { id: 'asc' } },
+                timeIntents: true,
+                systemDwellSuggestion: true,
+              },
+            },
+            transportProjections: { orderBy: { transportEdgeId: 'asc' } },
+          },
+        },
+        executionEvents: { orderBy: { id: 'asc' } },
+        executionLocationState: true,
+        adoptedRoutes: { orderBy: { id: 'asc' } },
+        routeCandidateSnapshots: { orderBy: { id: 'asc' } },
+        routePreviews: { orderBy: { id: 'asc' } },
+        transportEdges: {
+          orderBy: { id: 'asc' },
+          include: { temporalValues: { orderBy: { id: 'asc' } } },
+        },
+        transportHistory: {
+          orderBy: { id: 'asc' },
+          include: { temporalValues: { orderBy: { id: 'asc' } } },
+        },
+        operationReceipts: { orderBy: { id: 'asc' } },
+        outboxEvents: { orderBy: { id: 'asc' } },
+        groundTransitLegs: {
+          orderBy: { id: 'asc' },
+          include: {
+            observations: { orderBy: { id: 'asc' } },
+            stateTransitions: { orderBy: { id: 'asc' } },
+          },
+        },
+      },
+    });
+  }
+
+  it.each(['B', 'C'] as const)(
+    'P5E2 repair A/B: suffix Undo at %s protects deletion by full/earlier suffix replacement',
+    async (origin) => {
+      const f = await repairRestoredFixture(origin);
+      providerResult = suffixFoundationCandidate(
+        true,
+        origin === 'B' ? '2030-10-01T10:00:00Z' : '2030-10-01T10:30:00Z',
+        '2030-10-01T11:00:00Z',
+      );
+      const preview = await createPreview(
+        userA,
+        f.restored.trip,
+        origin === 'B' ? f.A.id : f.B.id,
+        f.D.id,
+        origin === 'B'
+          ? departHint()
+          : {
+              type: 'DEPART_AT',
+              instant: '2030-10-01T10:30:00Z',
+              timeZone: 'UTC',
+            },
+      );
+      expect(preview).toMatchObject({
+        adoptable: false,
+        status: 'BLOCKED',
+      });
+      expect(preview.changeSummary.routeCorridor?.replacementScope).toBe(
+        origin === 'B' ? 'FULL_CORRIDOR' : 'SUFFIX',
+      );
+      expect(preview.changeSummary.protectedBlockingNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: f[origin].id,
+            protectionReasons: expect.arrayContaining([
+              'REFERENCED_BY_ADOPTED_ROUTE',
+            ]),
+          }),
+        ]),
+      );
+      const before = await repairDurableState(f.restored.trip.id);
+      const response = await adopt(
+        userA,
+        f.restored.trip,
+        preview.previewId,
+        'repair-blocked',
+      );
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PREVIEW_BLOCKED' },
+      });
+      expect(await repairDurableState(f.restored.trip.id)).toEqual(before);
+      expect(before.adoptedRoutes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: f.first.operationReceipt.adoptedRouteId,
+            status: 'ACTIVE',
+          }),
+          expect.objectContaining({
+            id: f.second.operationReceipt.adoptedRouteId,
+            status: 'UNDONE',
+            anchorFromNodeId: f[origin].id,
+          }),
+        ]),
+      );
+      expect(before.operationReceipts).toHaveLength(3);
+    },
+  );
+
+  it('P5E2 repair C: referenced generated anchor can be reused with its original ID', async () => {
+    const f = await repairRestoredFixture();
+    const source = suffixFoundationCandidate(false).candidates[0]!;
+    const first = source.legs[0]!;
+    const last = source.legs.at(-1)!;
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...source,
+          legs: [
+            first,
+            {
+              ...last,
+              from: first.to,
+              departure: first.arrival,
+              durationSeconds: 2400,
+              groundTransit: {
+                ...last.groundTransit!,
+                boardingHubRef:
+                  first.to.providerHubRef ?? first.to.providerPlaceRef,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const preview = await createPreview(userA, f.restored.trip, f.A.id, f.D.id);
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.nodesToReuse).toEqual(
+      expect.arrayContaining([expect.objectContaining({ nodeId: f.B.id })]),
+    );
+    expect(
+      preview.changeSummary.nodesToRemove?.map((node) => node.nodeId),
+    ).toEqual([f.C.id]);
+    const adopted = await adoptSuccessfully(
+      userA,
+      f.restored.trip,
+      preview.previewId,
+      'repair-reuse',
+    );
+    expect(
+      adopted.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+    ).toEqual([f.A.id, f.B.id, f.D.id]);
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: f.second.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'UNDONE', anchorFromNodeId: f.B.id });
+  });
+
+  it('P5E2 repair D: unadopted suffix Query/Preview does not permanently protect nodes', async () => {
+    const f = await suffixFixture(false);
+    const temporary = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    f.first.trip = await undoExecution(f.first.trip, f.originArrivalEventId!);
+    providerResult = suffixFoundationCandidate(
+      true,
+      '2030-10-01T10:00:00Z',
+      '2030-10-01T11:00:00Z',
+    );
+    const full = await createPreview(userA, f.first.trip, f.A.id, f.D.id);
+    expect(full.adoptable).toBe(true);
+    await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      full.previewId,
+      'repair-temporary',
+    );
+    expect(
+      await managed.client.itineraryNode.findUnique({ where: { id: f.B.id } }),
+    ).toBeNull();
+    expect(
+      await managed.client.routePreview.findUnique({
+        where: { id: temporary.previewId },
+      }),
+    ).toBeNull();
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: f.first.trip.id },
+      }),
+    ).toBe(2);
+  });
+
+  it.each(['anchorFrom', 'anchorTo', 'snapshot', 'receipt'] as const)(
+    'P5E2 repair E: locked Adopt rechecks new persistent %s reference after Preview',
+    async (reference) => {
+      const f = await suffixFixture(false);
+      const temporary = await createPreview(
+        userA,
+        f.first.trip,
+        f.B.id,
+        f.D.id,
+        { type: 'DEPART_AT', instant: '2030-10-01T10:30:00Z', timeZone: 'UTC' },
+      );
+      const evidence = await managed.client.routePreview.findUniqueOrThrow({
+        where: { id: temporary.previewId },
+      });
+      f.first.trip = await undoExecution(f.first.trip, f.originArrivalEventId!);
+      providerResult = suffixFoundationCandidate(
+        true,
+        '2030-10-01T10:00:00Z',
+        '2030-10-01T11:00:00Z',
+      );
+      const full = await createPreview(userA, f.first.trip, f.A.id, f.D.id);
+      expect(full.adoptable).toBe(true);
+      const sourceRoute = await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: f.first.operationReceipt.adoptedRouteId },
+      });
+      if (reference === 'receipt') {
+        const receipt = await managed.client.operationReceipt.findUniqueOrThrow(
+          { where: { id: f.first.operationReceipt.id } },
+        );
+        await managed.client.operationReceipt.create({
+          data: {
+            ...receipt,
+            id: randomUUID(),
+            idempotencyKey: 'repair-retained-evidence',
+            delta: { synthetic: true },
+            previewId: evidence.id,
+          },
+        });
+      } else {
+        // Persistence-only fixture keeps Trip.version unchanged to isolate the
+        // locked reference recheck from the ordinary version fence.
+        await managed.client.adoptedRoute.create({
+          data: {
+            ...sourceRoute,
+            id: randomUUID(),
+            status: reference === 'anchorTo' ? 'REPLACED' : 'UNDONE',
+            sourcePreviewId: evidence.id,
+            candidateSnapshotId: evidence.candidateSnapshotId,
+            anchorFromNodeId: reference === 'anchorFrom' ? f.B.id : f.A.id,
+            anchorToNodeId: reference === 'anchorTo' ? f.C.id : f.D.id,
+          },
+        });
+      }
+      const before = await repairDurableState(f.first.trip.id);
+      const repository = new PrismaRoutePlanningRepository(managed.client);
+      expect(
+        await repository.adoptPreview({
+          ownerUserId: userA.actor.userId,
+          tripId: f.first.trip.id,
+          previewId: full.previewId,
+          baseTripVersion: f.first.trip.version,
+          idempotencyKey: 'repair-lock-recheck',
+          requestHash: 'a'.repeat(64),
+          acceptedUserAdjustments: [],
+          now: NOW,
+          undoExpiresAt: new Date(NOW.getTime() + 600_000),
+        }),
+      ).toEqual({ status: 'PREVIEW_BLOCKED' });
+      expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      const refreshed = await createPreview(
+        userA,
+        f.first.trip,
+        f.A.id,
+        f.D.id,
+      );
+      expect(refreshed.adoptable).toBe(false);
+      expect(refreshed.changeSummary.protectedBlockingNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: reference === 'anchorTo' ? f.C.id : f.B.id,
+            protectionReasons: expect.arrayContaining([
+              reference.startsWith('anchor')
+                ? 'REFERENCED_BY_ADOPTED_ROUTE'
+                : 'REFERENCED_BY_RETAINED_PLANNING_DATA',
+            ]),
+          }),
+        ]),
+      );
+      await managed.client.trip.update({
+        where: { id: f.first.trip.id },
+        data: { version: { increment: 1 } },
+      });
+      expect(
+        (
+          await adopt(userA, f.first.trip, full.previewId, 'repair-version')
+        ).json(),
+      ).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    },
+  );
+
+  it.each([false, true])(
+    'P5E2 4A: suffix Query/Preview/Adopt/Undo preserves prefix identity and facts (prefix ACTUAL=%s; confirmed execution origin)',
+    async (actual) => {
+      const f = await suffixFixture(actual);
+      const route1 = f.first.operationReceipt.adoptedRouteId;
+      const beforeNodes = await managed.client.itineraryNode.findMany({
+        where: { tripId: f.first.trip.id },
+        orderBy: { position: 'asc' },
+      });
+      const beforePrefix = await managed.client.transportEdge.findUniqueOrThrow(
+        {
+          where: { id: f.prefix.id },
+          include: {
+            temporalValues: { orderBy: { id: 'asc' } },
+            dayProjections: true,
+          },
+        },
+      );
+      const sourceLegs =
+        await managed.client.groundTransitLegExecution.findMany({
+          where: { adoptedRouteId: route1 },
+          orderBy: { legIndex: 'asc' },
+        });
+      expect(sourceLegs).toHaveLength(3);
+      await managed.client.groundTransitObservation.create({
+        data: {
+          legExecutionId: sourceLegs[1]!.id,
+          observationIdentity: 'SYNTHETIC_4A_HISTORY',
+          fetchedAt: NOW,
+          factsHash: 'a'.repeat(64),
+          facts: { synthetic: true },
+        },
+      });
+      await managed.client.groundTransitStateTransition.create({
+        data: {
+          legExecutionId: sourceLegs[1]!.id,
+          fromState: 'PENDING',
+          toState: 'UNKNOWN',
+          source: 'SYNTHETIC_TEST',
+          evidenceRef: 'SYNTHETIC_4A',
+          occurredAt: NOW,
+        },
+      });
+      const beforeLegs =
+        await managed.client.groundTransitLegExecution.findMany({
+          where: { adoptedRouteId: route1 },
+          include: { observations: true, stateTransitions: true },
+          orderBy: { legIndex: 'asc' },
+        });
+      const unsupported = await query(
+        userA,
+        f.first.trip,
+        f.B.id,
+        f.C.id,
+        departHint(),
+      );
+      expect(unsupported.json()).toMatchObject({
+        error: { code: 'ROUTE_QUERY_UNSUPPORTED' },
+      });
+      const queried = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(queried.statusCode).toBe(200);
+      const snapshotId = (queried.json() as RouteQueryResponse).candidates[0]!
+        .candidateSnapshotId;
+      expect(
+        await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+          where: { id: snapshotId },
+        }),
+      ).toMatchObject({ fromNodeId: f.B.id, toNodeId: f.D.id });
+      const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(preview.adoptable).toBe(true);
+      expect(preview.changeSummary.routeCorridor).toMatchObject({
+        replacementScope: 'SUFFIX',
+        sourceAdoptedRouteId: route1,
+        sourceRouteAnchorFromNodeId: f.A.id,
+        sourceRouteAnchorToNodeId: f.D.id,
+        replacementAnchorFromNodeId: f.B.id,
+        replacementAnchorToNodeId: f.D.id,
+      });
+      expect(
+        preview.changeSummary.willReplaceTransportEdgeIds?.slice().sort(),
+      ).toEqual(f.suffixEdges.map((edge) => edge.id).sort());
+      expect(
+        preview.changeSummary.nodesToRemove?.map((node) => node.nodeId),
+      ).toEqual([f.C.id]);
+      const second = await adoptSuccessfully(
+        userA,
+        f.first.trip,
+        preview.previewId,
+        'synthetic-suffix-adopt',
+      );
+      const route2 = second.operationReceipt.adoptedRouteId;
+      expect(
+        await managed.client.adoptedRoute.findUniqueOrThrow({
+          where: { id: route1 },
+        }),
+      ).toMatchObject({ status: 'REPLACED' });
+      expect(
+        await managed.client.adoptedRoute.findUniqueOrThrow({
+          where: { id: route2 },
+        }),
+      ).toMatchObject({
+        status: 'ACTIVE',
+        anchorFromNodeId: f.B.id,
+        anchorToNodeId: f.D.id,
+      });
+      expect(
+        await managed.client.transportEdge.findUniqueOrThrow({
+          where: { id: f.prefix.id },
+          include: {
+            temporalValues: { orderBy: { id: 'asc' } },
+            dayProjections: true,
+          },
+        }),
+      ).toEqual(beforePrefix);
+      const receipt = await managed.client.operationReceipt.findUniqueOrThrow({
+        where: { id: second.operationReceipt.id },
+      });
+      expect(receipt.delta).toMatchObject({
+        schemaVersion: 'route-adopt-delta-v4',
+        replacementScope: 'SUFFIX',
+        previousActiveAdoptedRouteId: route1,
+        preservedPrefixTransportEdgeIds: [f.prefix.id],
+      });
+      expect(
+        await managed.client.transportEdgeHistory.findMany({
+          where: { tripId: f.first.trip.id },
+        }),
+      ).toEqual(
+        expect.arrayContaining(
+          f.suffixEdges.map((edge) =>
+            expect.objectContaining({
+              originalTransportEdgeId: edge.id,
+              adoptedRouteId: route1,
+            }),
+          ),
+        ),
+      );
+      expect(
+        await managed.client.groundTransitLegExecution.findMany({
+          where: { adoptedRouteId: route1 },
+          include: { observations: true, stateTransitions: true },
+          orderBy: { legIndex: 'asc' },
+        }),
+      ).toEqual(beforeLegs);
+      expect(
+        await managed.client.groundTransitLegExecution.count({
+          where: { adoptedRouteId: route2 },
+        }),
+      ).toBe(2);
+      expect(
+        second.trip.connections.every(
+          (connection) => connection.state === 'ACTIVE',
+        ),
+      ).toBe(true);
+      const replay = await adopt(
+        userA,
+        f.first.trip,
+        preview.previewId,
+        'synthetic-suffix-adopt',
+      );
+      expect(replay.json()).toMatchObject({
+        operationReceipt: { id: receipt.id },
+        trip: { version: second.trip.version },
+      });
+      const undone = await undoSuccessfully(
+        userA,
+        second.trip,
+        receipt.id,
+        'synthetic-suffix-undo',
+      );
+      expect(undone.trip.version).toBe(second.trip.version + 1);
+      expect(
+        undone.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+      ).toEqual([f.A.id, f.B.id, f.C.id, f.D.id]);
+      expect(
+        undone.trip.connections
+          .map((connection) => connection.transport!.id)
+          .sort(),
+      ).toEqual([f.prefix.id, ...f.suffixEdges.map((edge) => edge.id)].sort());
+      expect(
+        await managed.client.transportEdge.findUniqueOrThrow({
+          where: { id: f.prefix.id },
+          include: {
+            temporalValues: { orderBy: { id: 'asc' } },
+            dayProjections: true,
+          },
+        }),
+      ).toEqual(beforePrefix);
+      expect(
+        await managed.client.adoptedRoute.findUniqueOrThrow({
+          where: { id: route1 },
+        }),
+      ).toMatchObject({ status: 'ACTIVE' });
+      expect(
+        await managed.client.adoptedRoute.findUniqueOrThrow({
+          where: { id: route2 },
+        }),
+      ).toMatchObject({ status: 'UNDONE' });
+      expect(
+        await managed.client.transportEdgeHistory.count({
+          where: { tripId: f.first.trip.id },
+        }),
+      ).toBe(0);
+      const restoredNodes = await managed.client.itineraryNode.findMany({
+        where: { tripId: f.first.trip.id },
+        orderBy: { position: 'asc' },
+      });
+      expect(
+        restoredNodes.map((node) => [
+          node.id,
+          node.dayOccurrenceId,
+          node.position,
+          node.adoptedRouteId,
+        ]),
+      ).toEqual(
+        beforeNodes.map((node) => [
+          node.id,
+          node.dayOccurrenceId,
+          node.position,
+          node.adoptedRouteId,
+        ]),
+      );
+      const undoReplay = await undoSuccessfully(
+        userA,
+        second.trip,
+        receipt.id,
+        'synthetic-suffix-undo',
+      );
+      expect(undoReplay.operationReceipt.id).toBe(undone.operationReceipt.id);
+    },
+  );
+
+  it('P5E2 4A: later suffix C→D preserves both prefix edges across Adopt/Undo', async () => {
+    const f = await suffixFixture();
+    const departedB = await manualExecution(
+      f.first.trip,
+      f.B.id,
+      'MANUAL_DEPARTURE',
+      '2030-10-01T10:20:00Z',
+    );
+    f.first.trip = (
+      await manualExecution(
+        departedB.trip,
+        f.C.id,
+        'MANUAL_ARRIVAL',
+        '2030-10-01T10:40:00Z',
+      )
+    ).trip;
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T10:45:00Z', '2030-10-01T11:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const preservedIds = [
+      f.prefix.id,
+      f.suffixEdges.find((edge) => edge.fromNodeId === f.B.id)!.id,
+    ];
+    const beforePrefix = await managed.client.transportEdge.findMany({
+      where: { id: { in: preservedIds } },
+      include: { temporalValues: true, dayProjections: true },
+      orderBy: { id: 'asc' },
+    });
+    const preview = await createPreview(userA, f.first.trip, f.C.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:45:00Z',
+      timeZone: 'UTC',
+    });
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.routeCorridor).toMatchObject({
+      replacementScope: 'SUFFIX',
+      preservedPrefixNodeIds: [f.A.id, f.B.id, f.C.id],
+      preservedPrefixTransportEdgeIds: preservedIds,
+    });
+    expect(preview.changeSummary.nodesToRemove).toEqual([]);
+    expect(preview.changeSummary.willReplaceTransportEdgeIds).toEqual([
+      f.suffixEdges.find((edge) => edge.fromNodeId === f.C.id)!.id,
+    ]);
+    const second = await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      preview.previewId,
+      'synthetic-later-suffix',
+    );
+    const undone = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-later-suffix-undo',
+    );
+    expect(
+      undone.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+    ).toEqual([f.A.id, f.B.id, f.C.id, f.D.id]);
+    expect(
+      await managed.client.transportEdge.findMany({
+        where: { id: { in: preservedIds } },
+        include: { temporalValues: true, dayProjections: true },
+        orderBy: { id: 'asc' },
+      }),
+    ).toEqual(beforePrefix);
+  });
+
+  it.each(['node', 'edge', 'prefix'])(
+    'P5E2 4A: locked Adopt rechecks ACTUAL after Preview (%s)',
+    async (kind) => {
+      const f = await suffixFixture();
+      const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(preview.adoptable).toBe(true);
+      const fact =
+        kind === 'prefix'
+          ? await managed.client.temporalValue.update({
+              where: {
+                id: (
+                  await managed.client.temporalValue.findFirstOrThrow({
+                    where: {
+                      transportEdgeId: f.prefix.id,
+                      layer: 'ACTUAL',
+                      pointKind: 'DEPARTURE',
+                    },
+                  })
+                ).id,
+              },
+              data: { instant: new Date('2030-10-01T10:01:00Z') },
+            })
+          : await managed.client.temporalValue.create({
+              data: {
+                ...(kind === 'node'
+                  ? { nodeId: f.C.id }
+                  : { transportEdgeId: f.suffixEdges[0]!.id }),
+                layer: 'ACTUAL',
+                pointKind: 'DEPARTURE',
+                instant: new Date('2030-10-01T10:30:00Z'),
+                timeZone: 'UTC',
+                sourceKind: 'USER_VALUE',
+              },
+            });
+      const response = await adopt(
+        userA,
+        f.first.trip,
+        preview.previewId,
+        'synthetic-suffix-actual-race',
+      );
+      expect(response.statusCode).toBe(kind === 'prefix' ? 200 : 409);
+      if (kind !== 'prefix')
+        expect(response.json()).toMatchObject({
+          error: { code: 'FACT_PROTECTED' },
+        });
+      expect(
+        await managed.client.temporalValue.findUniqueOrThrow({
+          where: { id: fact.id },
+        }),
+      ).toEqual(fact);
+    },
+  );
+
+  it('P5E2 4A: concurrent suffix Adopts admit one transaction and preserve the prefix', async () => {
+    const f = await suffixFixture();
+    const hint = {
+      type: 'DEPART_AT' as const,
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    };
+    const [left, right] = await Promise.all([
+      createPreview(userA, f.first.trip, f.B.id, f.D.id, hint),
+      createPreview(userA, f.first.trip, f.B.id, f.D.id, hint),
+    ]);
+    const responses = await Promise.all([
+      adopt(
+        userA,
+        f.first.trip,
+        left.previewId,
+        'synthetic-suffix-concurrent-a',
+      ),
+      adopt(
+        userA,
+        f.first.trip,
+        right.previewId,
+        'synthetic-suffix-concurrent-b',
+      ),
+    ]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([
+      200, 409,
+    ]);
+    expect(
+      responses.find((response) => response.statusCode === 409)!.json(),
+    ).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: f.first.trip.id, status: 'ACTIVE' },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.transportEdge.findUniqueOrThrow({
+        where: { id: f.prefix.id },
+      }),
+    ).toEqual(f.prefix);
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: f.first.trip.id, operationType: 'ROUTE_ADOPT' },
+      }),
+    ).toBe(2);
+  });
+
+  it('P5E2 4A: suffix V4 Undo restores accepted origin dwell adjustment', async () => {
+    const f = await suffixFixture(true, true);
+    const trip = await command(userA, f.first.trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: f.B.id,
+      durationSeconds: 1200,
+      locked: false,
+    });
+    const queried = await query(userA, trip, f.B.id, f.D.id, null);
+    expect(queried.statusCode, JSON.stringify(queried.json())).toBe(200);
+    const route = queried.json() as RouteQueryResponse;
+    expect(route.candidates).toHaveLength(1);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const preview = response.json() as RoutePreviewView;
+    const adjustments = preview.changeSummary.requiredUserAdjustments ?? [];
+    expect(adjustments).toEqual([
+      expect.objectContaining({
+        nodeId: f.B.id,
+        fromDurationSeconds: 1200,
+        toDurationSeconds: 600,
+      }),
+    ]);
+    expect(preview.adoptable).toBe(true);
+    const second = await adoptSuccessfully(
+      userA,
+      trip,
+      preview.previewId,
+      'synthetic-suffix-dwell',
+      adjustments,
+    );
+    expect(
+      await managed.client.userTimeIntent.findFirstOrThrow({
+        where: { nodeId: f.B.id, kind: 'MIN_DWELL' },
+      }),
+    ).toMatchObject({ durationSeconds: 600 });
+    const undone = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-suffix-dwell-undo',
+    );
+    expect(undone.trip.version).toBe(second.trip.version + 1);
+    expect(
+      await managed.client.userTimeIntent.findFirstOrThrow({
+        where: { nodeId: f.B.id, kind: 'MIN_DWELL' },
+      }),
+    ).toMatchObject({ durationSeconds: 1200 });
+    expect(
+      await managed.client.temporalValue.findMany({
+        where: { nodeId: f.B.id, layer: 'ACTUAL' },
+      }),
+    ).toEqual([
+      expect.objectContaining({ instant: new Date('2030-10-01T10:20:00Z') }),
+    ]);
+  });
+
+  it('P5E2 4A: suffix Undo restores cross-day projections and node placement', async () => {
+    let initial = await createTrip(userA);
+    initial = await addVisit(userA, initial, 'SYNTHETIC A', '2030-10-01');
+    initial = await addVisit(userA, initial, 'SYNTHETIC D', '2030-10-03');
+    const [a, d] = initial.days.flatMap((day) => day.nodes);
+    providerResult = suffixFoundationCandidate(
+      false,
+      '2030-10-01T20:00:00Z',
+      '2030-10-03T08:00:00Z',
+    );
+    const firstPreview = await createPreview(userA, initial, a!.id, d!.id);
+    const first = await adoptSuccessfully(
+      userA,
+      initial,
+      firstPreview.previewId,
+      'synthetic-cross-day-source',
+    );
+    const b = first.trip.days.flatMap((day) => day.nodes)[1]!;
+    first.trip = (
+      await confirmSourceOrigin(
+        first.trip,
+        a!.id,
+        b.id,
+        '2030-10-01T20:00:00Z',
+        '2030-10-02T08:00:00Z',
+      )
+    ).trip;
+    const beforeNodes = await managed.client.itineraryNode.findMany({
+      where: { tripId: initial.id },
+      orderBy: { id: 'asc' },
+    });
+    const beforeProjections =
+      await managed.client.transportDayProjection.findMany({
+        where: { tripId: initial.id },
+        select: { transportEdgeId: true, dayOccurrenceId: true, role: true },
+        orderBy: [
+          { transportEdgeId: 'asc' },
+          { dayOccurrenceId: 'asc' },
+          { role: 'asc' },
+        ],
+      });
+    expect(beforeProjections.map((projection) => projection.role)).toEqual(
+      expect.arrayContaining(['START', 'END', 'SAME_DAY']),
+    );
+    providerResult = suffixFoundationCandidate(
+      true,
+      '2030-10-02T08:30:00Z',
+      '2030-10-03T08:00:00Z',
+    );
+    const preview = await createPreview(userA, first.trip, b.id, d!.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-02T08:30:00Z',
+      timeZone: 'UTC',
+    });
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.routeCorridor?.replacementScope).toBe(
+      'SUFFIX',
+    );
+    const second = await adoptSuccessfully(
+      userA,
+      first.trip,
+      preview.previewId,
+      'synthetic-cross-day-suffix',
+    );
+    const undone = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-cross-day-suffix-undo',
+    );
+    expect(
+      undone.trip.days.map((day) => [day.dayOccurrenceId, day.localDate]),
+    ).toEqual(
+      first.trip.days.map((day) => [day.dayOccurrenceId, day.localDate]),
+    );
+    const restoredNodes = await managed.client.itineraryNode.findMany({
+      where: { tripId: initial.id },
+      orderBy: { id: 'asc' },
+    });
+    expect(
+      restoredNodes.map((node) => [
+        node.id,
+        node.dayOccurrenceId,
+        node.position,
+      ]),
+    ).toEqual(
+      beforeNodes.map((node) => [node.id, node.dayOccurrenceId, node.position]),
+    );
+    expect(
+      await managed.client.transportDayProjection.findMany({
+        where: { tripId: initial.id },
+        select: { transportEdgeId: true, dayOccurrenceId: true, role: true },
+        orderBy: [
+          { transportEdgeId: 'asc' },
+          { dayOccurrenceId: 'asc' },
+          { role: 'asc' },
+        ],
+      }),
+    ).toEqual(beforeProjections);
+  });
+
+  it.each(['route-adopt-delta-v2', 'route-adopt-delta-v3'])(
+    'P5E2 4A: reads legacy full Preview JSON and %s Undo delta',
+    async (schemaVersion) => {
+      const initial = await tripWithVisits(userA, [
+        'SYNTHETIC Legacy A',
+        'SYNTHETIC Legacy D',
+      ]);
+      const [a, d] = initial.days[0]!.nodes;
+      const preview = await createPreview(userA, initial, a!.id, d!.id);
+      const stored = await managed.client.routePreview.findUniqueOrThrow({
+        where: { id: preview.previewId },
+      });
+      const payload =
+        stored.previewPayload as unknown as StoredRoutePreviewPayload;
+      const corridor = payload.changeSummary.routeCorridor!;
+      const legacyPayload: StoredRoutePreviewPayload = {
+        ...payload,
+        changeSummary: {
+          ...payload.changeSummary,
+          routeCorridor: {
+            anchorFromNodeId: corridor.anchorFromNodeId,
+            anchorToNodeId: corridor.anchorToNodeId,
+            currentNodeIds: corridor.currentNodeIds,
+            currentAdoptedRouteId: corridor.currentAdoptedRouteId,
+          },
+        },
+      };
+      await managed.client.routePreview.update({
+        where: { id: preview.previewId },
+        data: {
+          previewPayload: legacyPayload as never,
+          previewHash: hashRoutePreviewPayload(legacyPayload),
+        },
+      });
+      const first = await adoptSuccessfully(
+        userA,
+        initial,
+        preview.previewId,
+        `synthetic-legacy-${schemaVersion}`,
+      );
+      const receipt = await managed.client.operationReceipt.findUniqueOrThrow({
+        where: { id: first.operationReceipt.id },
+      });
+      await managed.client.operationReceipt.update({
+        where: { id: receipt.id },
+        data: {
+          delta: {
+            ...(receipt.delta as Record<string, unknown>),
+            schemaVersion,
+          } as never,
+        },
+      });
+      const undone = await undoSuccessfully(
+        userA,
+        first.trip,
+        receipt.id,
+        `synthetic-legacy-undo-${schemaVersion}`,
+      );
+      expect(
+        undone.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+      ).toEqual([a!.id, d!.id]);
+      expect(undone.trip.version).toBe(first.trip.version + 1);
+    },
+  );
+
+  it.each(['node', 'edge'])(
+    'P5E2 4A: protects ACTUAL inside mutable suffix (%s)',
+    async (kind) => {
+      const f = await suffixFixture();
+      const queried = await query(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      expect(queried.statusCode).toBe(200);
+      const snapshotId = (queried.json() as RouteQueryResponse).candidates[0]!
+        .candidateSnapshotId;
+      await managed.client.temporalValue.create({
+        data: {
+          ...(kind === 'node'
+            ? { nodeId: f.C.id }
+            : { transportEdgeId: f.suffixEdges[0]!.id }),
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: new Date('2030-10-01T10:40:00Z'),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      });
+      const preview = await previewFromSnapshot(
+        userA,
+        f.first.trip,
+        snapshotId,
+      );
+      expect(preview.adoptable).toBe(false);
+      const response = await adopt(
+        userA,
+        f.first.trip,
+        preview.previewId,
+        'synthetic-protected-suffix',
+      );
+      expect(['PREVIEW_BLOCKED', 'FACT_PROTECTED']).toContain(
+        response.json().error.code,
+      );
+      expect(
+        await managed.client.adoptedRoute.count({
+          where: { tripId: f.first.trip.id },
+        }),
+      ).toBe(1);
+      expect(
+        await managed.client.transportEdge.count({
+          where: { tripId: f.first.trip.id },
+        }),
+      ).toBe(3);
+    },
+  );
+
+  it('P5E2 4A: uses existing monitoring cancellation and scheduler across suffix Adopt/Undo', async () => {
+    const f = await suffixFixture();
+    const r1 = f.first.operationReceipt.adoptedRouteId;
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        tripId: f.first.trip.id,
+        ownerUserId: userA.actor.userId,
+        kind: 'GROUND_TRANSIT_MONITORING',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: NOW,
+      },
+    });
+    const queued = await managed.client.job.create({
+      data: {
+        type: 'GROUND_TRANSIT_MONITOR',
+        runAt: NOW,
+        uniqueKey: 'SYNTHETIC_4A_QUEUED',
+        payloadRef: r1,
+        capabilityRevision: 1,
+        maxAttempts: 3,
+      },
+    });
+    const running = await managed.client.job.create({
+      data: {
+        type: 'GROUND_TRANSIT_MONITOR',
+        runAt: NOW,
+        uniqueKey: 'SYNTHETIC_4A_RUNNING',
+        payloadRef: r1,
+        capabilityRevision: 1,
+        maxAttempts: 3,
+        status: 'RUNNING',
+        leaseOwner: 'SYNTHETIC_WORKER',
+        leaseUntil: new Date(NOW.getTime() + 30000),
+      },
+    });
+    const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    const second = await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      preview.previewId,
+      'synthetic-suffix-monitor',
+    );
+    expect(
+      await managed.client.job.findUniqueOrThrow({ where: { id: queued.id } }),
+    ).toMatchObject({ status: 'CANCELLED', cancelRequested: true });
+    expect(
+      await managed.client.job.findUniqueOrThrow({ where: { id: running.id } }),
+    ).toMatchObject({ status: 'RUNNING', cancelRequested: true });
+    const repository = new PrismaGroundTransitRepository(managed.client);
+    expect(
+      await repository.ensureEligibleMonitoring(
+        new Date('2030-10-01T10:25:00Z'),
+      ),
+    ).toBe(1);
+    expect(
+      await repository.listJobLegs({
+        adoptedRouteId: r1,
+        capabilityRevision: 1,
+        now: new Date('2030-10-01T10:25:00Z'),
+      }),
+    ).toEqual([]);
+    expect(
+      await managed.client.job.findFirstOrThrow({
+        where: {
+          payloadRef: second.operationReceipt.adoptedRouteId,
+          type: 'GROUND_TRANSIT_MONITOR',
+        },
+      }),
+    ).toMatchObject({ status: 'QUEUED', cancelRequested: false });
+    await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-suffix-monitor-undo',
+    );
+    expect(
+      await managed.client.job.findFirstOrThrow({
+        where: {
+          payloadRef: second.operationReceipt.adoptedRouteId,
+          type: 'GROUND_TRANSIT_MONITOR',
+        },
+      }),
+    ).toMatchObject({ status: 'CANCELLED', cancelRequested: true });
+    expect(
+      await managed.client.tripAssistanceCapability.findFirstOrThrow({
+        where: { tripId: f.first.trip.id, kind: 'GROUND_TRANSIT_MONITORING' },
+      }),
+    ).toMatchObject({ state: 'ENABLED', revision: 1 });
+  });
+
+  it.each([
+    'new-actual',
+    'prefix-facts',
+    'prefix-topology',
+    'delta-prefix',
+    'delta-histories',
+  ])('P5E2 4A: Undo fences %s without overwriting facts', async (mutation) => {
+    const f = await suffixFixture();
+    const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    const second = await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      preview.previewId,
+      'synthetic-suffix-conflict',
+    );
+    if (mutation === 'new-actual' || mutation === 'prefix-facts') {
+      const edge =
+        mutation === 'prefix-facts'
+          ? f.prefix
+          : await managed.client.transportEdge.findFirstOrThrow({
+              where: { adoptedRouteId: second.operationReceipt.adoptedRouteId },
+            });
+      if (mutation === 'prefix-facts') {
+        await managed.client.temporalValue.updateMany({
+          where: {
+            transportEdgeId: edge.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+          },
+          data: { instant: new Date('2030-10-01T10:01:00Z') },
+        });
+      } else {
+        await managed.client.temporalValue.create({
+          data: {
+            transportEdgeId: edge.id,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: new Date('2030-10-01T10:30:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE',
+          },
+        });
+      }
+    } else if (mutation === 'prefix-topology') {
+      await managed.client.transportEdge.update({
+        where: { id: f.prefix.id },
+        data: { adoptedRouteId: second.operationReceipt.adoptedRouteId },
+      });
+    } else {
+      const receipt = await managed.client.operationReceipt.findUniqueOrThrow({
+        where: { id: second.operationReceipt.id },
+      });
+      const delta = receipt.delta as Record<string, unknown>;
+      await managed.client.operationReceipt.update({
+        where: { id: receipt.id },
+        data: {
+          delta: {
+            ...delta,
+            ...(mutation === 'delta-prefix'
+              ? { preservedPrefixTransportEdgeIds: [f.suffixEdges[0]!.id] }
+              : { archivedTransportEdgeIds: [f.prefix.id] }),
+          } as never,
+        },
+      });
+    }
+    const response = await undo(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'synthetic-suffix-conflict-undo',
+    );
+    expect(response.json()).toMatchObject({ error: { code: 'UNDO_CONFLICT' } });
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: second.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'ACTIVE' });
+    expect(
+      await managed.client.operationReceipt.count({
+        where: { tripId: f.first.trip.id, operationType: 'ROUTE_UNDO' },
+      }),
+    ).toBe(0);
+  });
+
+  it.each(['version', 'route', 'origin', 'topology'])(
+    'P5E2 4A: Preview/Adopt fence stale %s',
+    async (mutation) => {
+      const f = await suffixFixture();
+      const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T10:30:00Z',
+        timeZone: 'UTC',
+      });
+      if (mutation === 'version')
+        await managed.client.trip.update({
+          where: { id: f.first.trip.id },
+          data: { version: { increment: 1 } },
+        });
+      if (mutation === 'route')
+        await managed.client.adoptedRoute.update({
+          where: { id: f.first.operationReceipt.adoptedRouteId },
+          data: { status: 'REPLACED' },
+        });
+      if (mutation === 'origin')
+        await managed.client.itineraryNode.update({
+          where: { id: f.B.id },
+          data: { source: 'USER_PLANNED', adoptedRouteId: null },
+        });
+      if (mutation === 'topology')
+        await managed.client.transportEdge.delete({
+          where: { id: f.suffixEdges[0]!.id },
+        });
+      const freshPreview = await app.inject({
+        method: 'POST',
+        url: `/trips/${f.first.trip.id}/previews`,
+        headers: bearer(userA),
+        payload: {
+          basisVersion: f.first.trip.version,
+          candidateSnapshotId: preview.candidateSnapshotId,
+        },
+      });
+      expect(['VERSION_CONFLICT', 'PREVIEW_STALE']).toContain(
+        freshPreview.json().error.code,
+      );
+      const response = await adopt(
+        userA,
+        f.first.trip,
+        preview.previewId,
+        'synthetic-stale-suffix',
+      );
+      expect(['VERSION_CONFLICT', 'PREVIEW_STALE']).toContain(
+        response.json().error.code,
+      );
+    },
+  );
+
+  it('P5E2 4A: suffix remains owner scoped across Query/Preview/Adopt/Undo', async () => {
+    const f = await suffixFixture();
+    const preview = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    for (const other of [userB, admin]) {
+      expect(
+        (
+          await query(other, f.first.trip, f.B.id, f.D.id, {
+            type: 'DEPART_AT',
+            instant: '2030-10-01T10:30:00Z',
+            timeZone: 'UTC',
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/trips/${f.first.trip.id}/previews/${preview.previewId}`,
+            headers: bearer(other),
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: `/trips/${f.first.trip.id}/previews`,
+            headers: bearer(other),
+            payload: {
+              basisVersion: f.first.trip.version,
+              candidateSnapshotId: preview.candidateSnapshotId,
+            },
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(
+        (
+          await adopt(
+            other,
+            f.first.trip,
+            preview.previewId,
+            'synthetic-private-suffix',
+          )
+        ).statusCode,
+      ).toBe(404);
+    }
+    const second = await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      preview.previewId,
+      'synthetic-private-suffix-owner',
+    );
+    for (const other of [userB, admin])
+      expect(
+        (
+          await undo(
+            other,
+            second.trip,
+            second.operationReceipt.id,
+            'synthetic-private-undo',
+          )
+        ).statusCode,
+      ).toBe(404);
+  });
+
   async function createPreview(
     identity: SyntheticIdentity,
     trip: TripView,
     fromNodeId: string,
     toNodeId: string,
+    hint: Record<string, unknown> = departHint(),
   ): Promise<RoutePreviewView> {
     const routeResponse = await query(
       identity,
       trip,
       fromNodeId,
       toNodeId,
-      departHint(),
+      hint,
     );
     expect(routeResponse.statusCode).toBe(200);
     const route = routeResponse.json() as RouteQueryResponse;
+    return previewFromSnapshot(
+      identity,
+      trip,
+      route.candidates[0]!.candidateSnapshotId,
+    );
+  }
+
+  async function previewFromSnapshot(
+    identity: SyntheticIdentity,
+    trip: TripView,
+    snapshotId: string,
+  ): Promise<RoutePreviewView> {
     const previewResponse = await app.inject({
       method: 'POST',
       url: `/trips/${trip.id}/previews`,
       headers: bearer(identity),
       payload: {
         basisVersion: trip.version,
-        candidateSnapshotId: route.candidates[0]!.candidateSnapshotId,
+        candidateSnapshotId: snapshotId,
       },
     });
     expect(previewResponse.statusCode).toBe(201);
@@ -5320,6 +7440,83 @@ function transferCandidate(): Extract<
   };
 }
 
+function suffixFoundationCandidate(
+  suffix: boolean,
+  departureInstant?: string,
+  arrivalInstant?: string,
+): Extract<RouteProviderResult, { status: 'SUCCESS' }> {
+  const base = transferCandidate().candidates[0]!;
+  const b = base.legs[0]!.to;
+  const c = {
+    ...b,
+    name: suffix ? 'SYNTHETIC X' : 'SYNTHETIC C',
+    providerPlaceRef: suffix ? 'synthetic-x' : 'synthetic-c',
+    providerHubRef: suffix ? 'hub-x' : 'hub-c',
+    latitude: 35.685,
+    longitude: 139.665,
+  };
+  const locations = suffix
+    ? [b, c, base.legs[1]!.to]
+    : [base.legs[0]!.from, b, c, base.legs[1]!.to];
+  const start = new Date(
+    departureInstant ??
+      (suffix ? '2030-10-01T10:30:00Z' : '2030-10-01T10:00:00Z'),
+  );
+  const duration =
+    arrivalInstant === undefined
+      ? suffix
+        ? 900
+        : 1200
+      : (new Date(arrivalInstant).getTime() - start.getTime()) /
+        1000 /
+        (locations.length - 1);
+  const legs = locations.slice(0, -1).map((from, index) => ({
+    ...base.legs[0]!,
+    from,
+    to: locations[index + 1]!,
+    departure: {
+      instant: new Date(start.getTime() + index * duration * 1000),
+      timeZone: 'UTC',
+    },
+    arrival: {
+      instant: new Date(start.getTime() + (index + 1) * duration * 1000),
+      timeZone: 'UTC',
+    },
+    durationSeconds: duration,
+    serviceLabel: `SYNTHETIC_4A_${index}`,
+    providerRef: `SYNTHETIC_4A_${index}`,
+    groundTransit: {
+      serviceClass: 'FIXED_SERVICE' as const,
+      serviceIdentityKey: `synthetic:4a:${suffix}:${index}`,
+      lineRef: 'synthetic-rail',
+      lineName: 'SYNTHETIC Rail',
+      directionRef: 'east',
+      directionLabel: 'SYNTHETIC East',
+      boardingHubRef: from.providerHubRef ?? from.providerPlaceRef,
+      alightingHubRef:
+        locations[index + 1]!.providerHubRef ??
+        locations[index + 1]!.providerPlaceRef,
+      headwayMinSeconds: null,
+      headwayMaxSeconds: null,
+      minimumTransferSeconds: 0,
+      boardingAccessMinimumSeconds: 0,
+    },
+  }));
+  return {
+    status: 'SUCCESS',
+    candidates: [
+      {
+        ...base,
+        candidateId: suffix ? 'synthetic-suffix' : 'synthetic-source',
+        legs,
+        departure: legs[0]!.departure,
+        arrival: legs.at(-1)!.arrival,
+        durationSeconds: duration * legs.length,
+      },
+    ],
+  };
+}
+
 function dateRollbackTransferCandidate(): Extract<
   RouteProviderResult,
   { status: 'SUCCESS' }
@@ -5421,8 +7618,11 @@ async function resetSyntheticData(managed: ManagedPrismaClient): Promise<void> {
   await managed.client.temporalValue.deleteMany();
   await managed.client.transportDayProjection.deleteMany();
   await managed.client.transportEdge.deleteMany();
-  await managed.client.itineraryNode.deleteMany({
+  // Synthetic-only cleanup: suffix anchors can be route-generated, forming
+  // a route/node FK cycle. Detach metadata atomically before deleting routes.
+  await managed.client.itineraryNode.updateMany({
     where: { source: 'ROUTE_GENERATED' },
+    data: { source: 'USER_PLANNED', adoptedRouteId: null },
   });
   await managed.client.adoptedRoute.deleteMany();
   await managed.client.itineraryNode.deleteMany();

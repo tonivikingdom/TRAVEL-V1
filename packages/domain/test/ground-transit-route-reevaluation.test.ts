@@ -36,6 +36,7 @@ describe('Ground Transit route re-evaluation handoff', () => {
   it('prepares the current full route corridor and DEPART_AT now before execution', () => {
     const decision = resolveGroundTransitRouteReevaluationHandoff(base);
     expect(decision.readiness).toBe('READY');
+    expect(decision.originBasis).toBe('PLANNED_ROUTE_ORIGIN');
     expect(decision.query).toEqual({
       basisVersion: 42,
       fromNodeId: 'from',
@@ -43,6 +44,37 @@ describe('Ground Transit route re-evaluation handoff', () => {
       hint: { type: 'DEPART_AT', instant: now, timeZone: 'Asia/Tokyo' },
     });
   });
+
+  it('uses a confirmed internal origin despite independent progress', () => {
+    expect(
+      resolveGroundTransitRouteReevaluationHandoff({
+        ...base,
+        independentExecutionProgress: true,
+        legExecutionState: 'COMPLETED',
+        executionOrigin: { status: 'CONFIRMED_NODE', nodeId: 'B' },
+      }),
+    ).toMatchObject({
+      readiness: 'READY',
+      originBasis: 'CONFIRMED_EXECUTION_NODE',
+      query: { fromNodeId: 'B', toNodeId: 'to' },
+    });
+  });
+
+  it.each(['UNRESOLVED', 'CONFLICT'] as const)(
+    'does not prepare a Query for %s origin',
+    (status) => {
+      expect(
+        resolveGroundTransitRouteReevaluationHandoff({
+          ...base,
+          executionOrigin: { status },
+        }),
+      ).toMatchObject({
+        readiness: 'ORIGIN_UNRESOLVED',
+        originBasis: null,
+        query: null,
+      });
+    },
+  );
 
   it('allows short-turn only while the existing corridor remains queryable', () => {
     expect(resolveGroundTransitRouteReevaluationHandoff(base).readiness).toBe(

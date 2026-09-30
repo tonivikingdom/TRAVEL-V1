@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { verifyExecutionChain } from './verify-execution-chain.mjs';
 import { verifyGroundTransitChain } from './verify-ground-transit-chain.mjs';
+import { verifyRouteSuffixChain } from './verify-route-suffix-chain.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -516,6 +517,18 @@ async function verifyCompose(compose, composeQuiet, env) {
       `P5E2 synthetic ground transit: ${JSON.stringify(ground)}\n`,
     );
   }
+
+  const suffix = await verifyRouteSuffixChain({
+    apiJson,
+    apiPort,
+    composeQuiet,
+    waitFor,
+    databaseUser,
+    databaseName,
+  });
+  process.stdout.write(
+    `P5E2 4A suffix Query/Preview/Adopt/Undo: ${JSON.stringify(suffix)}\n`,
+  );
 
   const storageOwnerEnvironment = `SYNTHETIC_STORAGE_OWNER_EMAIL=${adminEmail}`;
   const storageWrite = parseLastJsonLine(

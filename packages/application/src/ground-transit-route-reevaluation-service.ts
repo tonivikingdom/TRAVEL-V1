@@ -8,6 +8,7 @@ import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
 import type { GroundTransitRepository } from './ground-transit-ports.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
+import { resolveConfirmedRouteExecutionOriginForTrip } from './confirmed-route-execution-origin.js';
 import { orderedTripNodes } from './schedule-evaluation.js';
 import { validateIanaTimeZoneInput } from './time-input.js';
 import type {
@@ -115,6 +116,16 @@ export class GroundTransitRouteReevaluationService {
             corridorNodeIds: corridor!.nodes.map((node) => node.id),
           })
         : false;
+    const executionOrigin = resolveConfirmedRouteExecutionOriginForTrip(
+      trip,
+      route?.anchorFromNodeId ?? '',
+      route?.anchorToNodeId ?? '',
+      independentExecutionProgress,
+    );
+    const queryOriginNodeId =
+      executionOrigin.status === 'CONFIRMED_NODE'
+        ? executionOrigin.nodeId
+        : (route?.anchorFromNodeId ?? '');
     const decision = resolveGroundTransitRouteReevaluationHandoff({
       requiredAction: operational?.requiredAction ?? 'NONE',
       routeCurrent,
@@ -122,6 +133,7 @@ export class GroundTransitRouteReevaluationService {
       corridorResolved,
       legExecutionState: leg.state,
       independentExecutionProgress,
+      executionOrigin,
       basisVersion: trip.version,
       fromNodeId: route?.anchorFromNodeId ?? '',
       toNodeId: route?.anchorToNodeId ?? '',
@@ -129,7 +141,7 @@ export class GroundTransitRouteReevaluationService {
         corridor === null
           ? null
           : resolveRouteOriginTimeZone(
-              route!.anchorFromNodeId,
+              queryOriginNodeId,
               corridor.currentTransports,
               corridor.nodes,
             ),
@@ -140,6 +152,7 @@ export class GroundTransitRouteReevaluationService {
       sourceTransportEdgeId: transportEdgeId,
       adoptedRouteId: leg.adoptedRouteId,
       readiness: decision.readiness,
+      originBasis: decision.originBasis,
       reasonCodes: decision.reasonCodes,
       query:
         decision.query === null

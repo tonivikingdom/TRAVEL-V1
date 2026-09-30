@@ -69,6 +69,7 @@ export type {
   OperationReceiptView,
   RouteAdoptDeltaV2,
   RouteAdoptDeltaV3,
+  RouteAdoptDeltaV4,
   RouteUndoDeltaV1,
   RouteUndoDeltaV2,
   RouteAdoptDayOccurrenceSnapshot,

@@ -1,4 +1,8 @@
 export { AuthService, type AuthServiceConfig } from './auth-service.js';
+export {
+  generatedNodeDeletionProtectionReasons,
+  type GeneratedNodeDeletionReferenceFacts,
+} from './generated-node-deletion-protection.js';
 export { GroundTransitService } from './ground-transit-service.js';
 export {
   GroundTransitRouteReevaluationService,

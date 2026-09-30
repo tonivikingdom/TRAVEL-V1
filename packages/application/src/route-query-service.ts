@@ -36,6 +36,7 @@ import {
   orderedTripNodes,
 } from './schedule-evaluation.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
+import { resolveConfirmedRouteExecutionOriginForTrip } from './confirmed-route-execution-origin.js';
 import {
   parseAbsoluteInstantInput,
   validateIanaTimeZoneInput,
@@ -117,9 +118,32 @@ export class RouteQueryService {
     if (!isQueryableRouteCorridor(trip, nodes, fromIndex, toIndex)) {
       throw new ApplicationError(
         'ROUTE_QUERY_UNSUPPORTED',
-        '路线查询只能连接相邻节点或同一当前已采用路线的两个锚点。',
+        '路线查询只能连接合法相邻节点、当前已采用路线的完整锚点或内部地点到原终点的后缀。',
         422,
       );
+    }
+    const corridor = resolveCurrentRouteCorridor(
+      trip,
+      nodes,
+      fromIndex,
+      toIndex,
+    )!;
+    if (corridor.replacementScope === 'SUFFIX') {
+      const origin = resolveConfirmedRouteExecutionOriginForTrip(
+        trip,
+        corridor.sourceRouteAnchorFromNodeId!,
+        corridor.sourceRouteAnchorToNodeId!,
+      );
+      if (
+        origin.status !== 'CONFIRMED_NODE' ||
+        origin.nodeId !== input.fromNodeId
+      ) {
+        throw new ApplicationError(
+          'ROUTE_QUERY_UNSUPPORTED',
+          '后缀路线查询需要当前停留节点的持久确认到达记录。',
+          422,
+        );
+      }
     }
     const fromNode = nodes[fromIndex];
     const toNode = nodes[toIndex];

@@ -23,12 +23,95 @@ export function createDevelopmentSyntheticRouteProvider(
   now: () => Date = () => new Date(),
 ): SyntheticRouteProvider {
   return new SyntheticRouteProvider((input) =>
-    input.destination.name === 'SYNTHETIC_P5E2_GROUND_DESTINATION'
-      ? createDevelopmentSyntheticGroundTransitRouteProvider(now).queryRoutes(
-          input,
-        )
-      : { status: 'SUCCESS', candidates: [developmentCandidate(input, now())] },
+    input.destination.name === 'SYNTHETIC_P5E2_SUFFIX_DESTINATION'
+      ? {
+          status: 'SUCCESS',
+          candidates: [suffixFoundationCandidate(input, now())],
+        }
+      : input.destination.name === 'SYNTHETIC_P5E2_GROUND_DESTINATION'
+        ? createDevelopmentSyntheticGroundTransitRouteProvider(now).queryRoutes(
+            input,
+          )
+        : {
+            status: 'SUCCESS',
+            candidates: [developmentCandidate(input, now())],
+          },
   );
+}
+
+/** Explicit synthetic-only fixture for the suffix transaction acceptance chain. */
+function suffixFoundationCandidate(
+  input: RouteProviderQueryInput,
+  observedAt: Date,
+): NormalizedRouteCandidate {
+  const basis = developmentCandidate(input, observedAt);
+  const suffix = input.origin.name === 'SYNTHETIC SUFFIX B';
+  const legCount = suffix ? 2 : 3;
+  const locations = [
+    basis.legs[0]!.from,
+    ...Array.from({ length: legCount - 1 }, (_, index) => ({
+      name: suffix
+        ? 'SYNTHETIC SUFFIX X'
+        : index === 0
+          ? 'SYNTHETIC SUFFIX B'
+          : 'SYNTHETIC SUFFIX C',
+      latitude:
+        input.origin.latitude +
+        ((input.destination.latitude - input.origin.latitude) * (index + 1)) /
+          legCount,
+      longitude:
+        input.origin.longitude +
+        ((input.destination.longitude - input.origin.longitude) * (index + 1)) /
+          legCount,
+      providerPlaceRef: `synthetic-suffix:${input.origin.placeId}:${index}`,
+      providerHubRef: `synthetic-suffix:${input.origin.placeId}:${index}`,
+    })),
+    basis.legs[0]!.to,
+  ];
+  const duration =
+    basis.arrival.instant.getTime() - basis.departure.instant.getTime();
+  const times = Array.from({ length: legCount + 1 }, (_, index) => ({
+    instant:
+      index === legCount
+        ? basis.arrival.instant
+        : new Date(
+            basis.departure.instant.getTime() +
+              Math.floor((duration * index) / legCount / 1000) * 1000,
+          ),
+    timeZone: basis.departure.timeZone,
+  }));
+  return {
+    ...basis,
+    candidateId: `${basis.candidateId}:SUFFIX_FOUNDATION`,
+    legs: locations.slice(0, -1).map((from, index) => ({
+      mode: 'RAIL',
+      from,
+      to: locations[index + 1]!,
+      departure: times[index]!,
+      arrival: times[index + 1]!,
+      durationSeconds:
+        (times[index + 1]!.instant.getTime() -
+          times[index]!.instant.getTime()) /
+        1000,
+      fixedService: true,
+      serviceLabel: 'SYNTHETIC SUFFIX RAIL',
+      providerRef: `${basis.providerCandidateRef}:${index}`,
+      groundTransit: {
+        serviceClass: 'FIXED_SERVICE',
+        serviceIdentityKey: `synthetic-suffix:${input.origin.placeId}:${index}:${times[index]!.instant.toISOString()}`,
+        lineRef: 'synthetic-suffix',
+        lineName: 'SYNTHETIC SUFFIX RAIL',
+        directionRef: 'destination',
+        directionLabel: 'SYNTHETIC Destination',
+        boardingHubRef: from.providerPlaceRef,
+        alightingHubRef: locations[index + 1]!.providerPlaceRef,
+        headwayMinSeconds: null,
+        headwayMaxSeconds: null,
+        minimumTransferSeconds: 0,
+        boardingAccessMinimumSeconds: 0,
+      },
+    })),
+  };
 }
 
 /** Explicit Dev/Test-only two-leg corridor for P5E2 cross-layer verification. */

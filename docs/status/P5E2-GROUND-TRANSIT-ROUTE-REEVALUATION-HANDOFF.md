@@ -5,6 +5,8 @@
 - Status: Draft PR #32; the origin-timezone repair passed PostgreSQL, Compose, and P5B CI in [Run 36664978289](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/36664978289). Pending merge review.
 - Schema / migration: none.
 
+This document records Batch 3 acceptance. The authorized [Batch 4B follow-up](P5E2-CONFIRMED-LIVE-ORIGIN-AUTHORIZATION.md) adds a confirmed internal execution origin and additive `originBasis`; it preserves the read-only endpoint and origin-local timezone rules described here.
+
 Batch 1 established ground-transit identity, observations, boarding/transfer safety, execution state, and explicitly opted-in monitoring. Batch 2 added accepted operational changes, risk/notification reconciliation, recovery, and persistent attention lifecycle. Batch 3 adds only a read-only bridge back to the existing route-planning flow.
 
 `GET /trips/:tripId/execution/ground-transit/:transportEdgeId/route-reevaluation` is owner-scoped. It returns `NOT_REQUIRED` if the current route recovered or the leg is no longer part of the active adopted route; `READY` only when the active full adopted-route corridor resolves, independent user execution evidence has not advanced past the planned origin, and a valid existing IANA time zone is available; otherwise `ORIGIN_UNRESOLVED` with machine-readable reasons. Unknown legacy operational metadata is not misreported as recovery.

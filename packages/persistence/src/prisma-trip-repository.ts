@@ -16,8 +16,14 @@ import type {
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { stopTripAssistanceIfNaturallyComplete } from './trip-assistance-natural-end.js';
+import {
+  nodeDeletionReferenceInclude,
+  nodeDeletionReferenceFacts,
+} from './prisma-node-deletion-protection.js';
 
 const tripInclude = {
+  executionEvents: { where: { undoneAt: null } },
+  executionLocationState: true,
   dateOwnerships: { orderBy: { localDate: 'asc' } },
   dayOccurrences: {
     include: {
@@ -31,6 +37,8 @@ const tripInclude = {
       },
       nodes: {
         include: {
+          executionState: true,
+          ...nodeDeletionReferenceInclude,
           place: true,
           temporalValues: {
             orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }],
@@ -1392,6 +1400,8 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
       createdAt: occurrence.createdAt,
       updatedAt: occurrence.updatedAt,
       nodes: occurrence.nodes.map((node) => ({
+        executionStatus: node.executionState?.status ?? null,
+        deletionReferenceFacts: nodeDeletionReferenceFacts(node),
         id: node.id,
         tripId: node.tripId,
         dayOccurrenceId: node.dayOccurrenceId,
@@ -1430,6 +1440,9 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
     })),
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
     adoptedRoutes: trip.adoptedRoutes,
+    routeExecutionEvents: trip.executionEvents,
+    executionLocationCurrentNodeId:
+      trip.executionLocationState?.currentNodeId ?? null,
   };
 }
 

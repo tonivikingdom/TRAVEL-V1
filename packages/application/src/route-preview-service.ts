@@ -35,6 +35,7 @@ import {
   orderedTripNodes,
 } from './schedule-evaluation.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
+import { generatedNodeDeletionProtectionReasons } from './generated-node-deletion-protection.js';
 import { validateIanaTimeZoneInput } from './time-input.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
 
@@ -306,9 +307,9 @@ function buildChangeSummary(
   );
   assertEndpointDates(trip, corridor, candidate);
 
-  const currentGenerated = corridor.nodes.filter(
-    (node) => node.source === 'ROUTE_GENERATED',
-  );
+  const currentGenerated = corridor.nodes
+    .slice(1, -1)
+    .filter((node) => node.source === 'ROUTE_GENERATED');
   const usedNodeIds = new Set<string>();
   const nodePlans = groups.map((group) => {
     const reusable = currentGenerated.find(
@@ -343,7 +344,10 @@ function buildChangeSummary(
   const nodesToRemove = currentGenerated
     .filter((node) => !usedNodeIds.has(node.id))
     .map((node) => {
-      const protectionReasons = generatedNodeProtectionReasons(node);
+      const protectionReasons = [
+        ...generatedNodeProtectionReasons(node),
+        ...generatedNodeDeletionProtectionReasons(node.deletionReferenceFacts),
+      ];
       return {
         nodeId: node.id,
         dayOccurrenceId: node.dayOccurrenceId,
@@ -402,6 +406,14 @@ function buildChangeSummary(
     generatedTransferPoints: groups.map((group) => group.location),
     proposedSegments,
     routeCorridor: {
+      replacementScope: corridor.replacementScope,
+      sourceAdoptedRouteId: corridor.sourceAdoptedRouteId,
+      sourceRouteAnchorFromNodeId: corridor.sourceRouteAnchorFromNodeId,
+      sourceRouteAnchorToNodeId: corridor.sourceRouteAnchorToNodeId,
+      replacementAnchorFromNodeId: corridor.fromNode.id,
+      replacementAnchorToNodeId: corridor.toNode.id,
+      preservedPrefixNodeIds: corridor.preservedPrefixNodeIds,
+      preservedPrefixTransportEdgeIds: corridor.preservedPrefixTransportEdgeIds,
       anchorFromNodeId: corridor.fromNode.id,
       anchorToNodeId: corridor.toNode.id,
       currentNodeIds: corridor.nodes.map((node) => node.id),
@@ -410,7 +422,33 @@ function buildChangeSummary(
     nodesToCreate: nodePlans.filter((plan) => plan.action === 'CREATE'),
     nodesToReuse: nodePlans.filter((plan) => plan.action === 'REUSE'),
     nodesToRemove,
-    protectedBlockingNodes: nodesToRemove.filter((node) => node.protected),
+    protectedBlockingNodes:
+      corridor.replacementScope === 'SUFFIX'
+        ? currentGenerated.flatMap((node) => {
+            const reasons = usedNodeIds.has(node.id)
+              ? generatedNodeProtectionReasons(node)
+              : nodesToRemove.find((removed) => removed.nodeId === node.id)!
+                  .protectionReasons;
+            return reasons.length === 0
+              ? []
+              : [
+                  {
+                    nodeId: node.id,
+                    dayOccurrenceId: node.dayOccurrenceId,
+                    protected: true,
+                    protectionReasons: reasons,
+                  },
+                ];
+          })
+        : nodesToRemove.filter((node) => node.protected),
+    protectedBlockingTransportEdgeIds:
+      corridor.replacementScope === 'SUFFIX'
+        ? corridor.currentTransports
+            .filter((edge) =>
+              edge.timeValues.some((value) => value.layer === 'ACTUAL'),
+            )
+            .map((edge) => edge.id)
+        : [],
     internalTransferDetails: [...internalWalking.entries()].map(
       ([legIndex, evidence]) => {
         const leg = candidate.legs[legIndex]!;
@@ -920,6 +958,8 @@ function toPreviewView(
     preview.previewPayload.policyVersion !== ROUTE_PREVIEW_POLICY_VERSION;
   const expired = preview.expiresAt <= now;
   const blocked =
+    (preview.previewPayload.changeSummary.protectedBlockingTransportEdgeIds
+      ?.length ?? 0) > 0 ||
     (preview.previewPayload.changeSummary.protectedBlockingNodes?.length ?? 0) >
       0 ||
     preview.previewPayload.changeSummary.downstreamImpact?.status ===

@@ -224,6 +224,14 @@ export interface RoutePreviewView {
     readonly generatedTransferPoints: readonly RoutePreviewLocationView[];
     readonly proposedSegments: readonly RoutePreviewSegmentView[];
     readonly routeCorridor?: {
+      readonly replacementScope?: 'FULL_CORRIDOR' | 'SUFFIX';
+      readonly sourceAdoptedRouteId?: string | null;
+      readonly sourceRouteAnchorFromNodeId?: string;
+      readonly sourceRouteAnchorToNodeId?: string;
+      readonly replacementAnchorFromNodeId?: string;
+      readonly replacementAnchorToNodeId?: string;
+      readonly preservedPrefixNodeIds?: readonly string[];
+      readonly preservedPrefixTransportEdgeIds?: readonly string[];
       readonly anchorFromNodeId: string;
       readonly anchorToNodeId: string;
       readonly currentNodeIds: readonly string[];
@@ -232,6 +240,7 @@ export interface RoutePreviewView {
     readonly nodesToCreate?: readonly RoutePreviewGeneratedNodePlanView[];
     readonly nodesToReuse?: readonly RoutePreviewGeneratedNodePlanView[];
     readonly nodesToRemove?: readonly RoutePreviewRemovedNodeView[];
+    readonly protectedBlockingTransportEdgeIds?: readonly string[];
     readonly protectedBlockingNodes?: readonly RoutePreviewRemovedNodeView[];
     readonly internalTransferDetails?: readonly RoutePreviewInternalTransferView[];
     readonly proposedDayAssignments?: readonly {
@@ -342,6 +351,22 @@ export interface RouteAdoptDeltaV3 extends Omit<
   }[];
 }
 
+export interface RouteAdoptDeltaV4 extends Omit<
+  RouteAdoptDeltaV3,
+  'schemaVersion'
+> {
+  readonly schemaVersion: 'route-adopt-delta-v4';
+  readonly replacementScope: 'FULL_CORRIDOR' | 'SUFFIX';
+  readonly sourceRouteAnchorFromNodeId: string;
+  readonly sourceRouteAnchorToNodeId: string;
+  readonly replacementAnchorFromNodeId: string;
+  readonly replacementAnchorToNodeId: string;
+  readonly preservedPrefixNodeIds: readonly string[];
+  readonly preservedPrefixTransportEdgeIds: readonly string[];
+  readonly preservedPrefixHash: string;
+  readonly archivedTransportEdgeIds: readonly string[];
+}
+
 export interface RouteUndoDeltaV1 {
   readonly schemaVersion: 'route-undo-delta-v1';
   readonly targetOperationReceiptId: string;
@@ -383,6 +408,7 @@ export interface OperationReceiptView {
   readonly delta:
     | RouteAdoptDeltaV2
     | RouteAdoptDeltaV3
+    | RouteAdoptDeltaV4
     | RouteUndoDeltaV1
     | RouteUndoDeltaV2
     | Record<string, unknown>;

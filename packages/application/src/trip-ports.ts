@@ -39,6 +39,8 @@ export interface PlaceRecord {
 }
 
 export interface ItineraryNodeRecord {
+  readonly executionStatus?: 'POSSIBLY_SKIPPED' | 'SKIPPED' | null;
+  readonly deletionReferenceFacts?: import('./generated-node-deletion-protection.js').GeneratedNodeDeletionReferenceFacts;
   readonly id: string;
   readonly tripId: string;
   readonly dayOccurrenceId: string;
@@ -156,6 +158,8 @@ export interface TripAggregateRecord {
   readonly dayOccurrences: readonly DayOccurrenceRecord[];
   readonly transportEdges: readonly TransportEdgeRecord[];
   readonly adoptedRoutes?: readonly AdoptedRouteRecord[];
+  readonly routeExecutionEvents?: readonly import('@travel/domain').RouteExecutionOriginEvent[];
+  readonly executionLocationCurrentNodeId?: string | null;
 }
 
 export interface AdoptedRouteRecord {

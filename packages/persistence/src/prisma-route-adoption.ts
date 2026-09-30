@@ -1,4 +1,5 @@
 import {
+  generatedNodeDeletionProtectionReasons,
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
   compareCanonicalDwellAdjustments,
@@ -11,10 +12,19 @@ import type {
   RouteAdoptDayOccurrenceSnapshot,
   RouteAdoptDayProjectionSnapshot,
   RouteAdoptDeltaV3,
+  RouteAdoptDeltaV4,
   RouteAdoptGeneratedNodeSnapshot,
   RouteAdoptNodePlacementSnapshot,
   RoutePreviewGeneratedNodePlanView,
 } from '@travel/contracts';
+
+import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
+import { resolveLockedConfirmedRouteExecutionOrigin } from './prisma-confirmed-route-execution-origin.js';
+import { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
+import {
+  nodeDeletionReferenceInclude,
+  nodeDeletionReferenceFacts,
+} from './prisma-node-deletion-protection.js';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
@@ -220,7 +230,7 @@ async function executeAdoption(
     transaction.itineraryNode.findMany({
       where: {
         tripId: input.tripId,
-        id: { in: corridor.nodeIds },
+        id: { in: corridor.nodeIds.slice(1, -1) },
         source: 'ROUTE_GENERATED',
       },
       include: { temporalValues: true, timeIntents: true },
@@ -286,8 +296,16 @@ async function executeAdoption(
   const beforeGeneratedNodes = beforeGeneratedRows.map(toGeneratedNodeSnapshot);
 
   const removedNodes = await transaction.itineraryNode.findMany({
-    where: { id: { in: plan.nodesToRemove.map((node) => node.nodeId) } },
-    include: { temporalValues: true, timeIntents: true, place: true },
+    where: {
+      tripId: input.tripId,
+      id: { in: plan.nodesToRemove.map((node) => node.nodeId) },
+    },
+    include: {
+      ...nodeDeletionReferenceInclude,
+      temporalValues: true,
+      timeIntents: true,
+      place: true,
+    },
   });
   if (
     removedNodes.length !== plan.nodesToRemove.length ||
@@ -299,6 +317,8 @@ async function executeAdoption(
         node.userModifiedAt !== null ||
         (node.note !== null && node.note.trim() !== '') ||
         node.timeIntents.length > 0 ||
+        generatedNodeDeletionProtectionReasons(nodeDeletionReferenceFacts(node))
+          .length > 0 ||
         node.temporalValues.some((value) => value.layer === 'ACTUAL'),
     )
   ) {
@@ -324,13 +344,27 @@ async function executeAdoption(
       : { status: 'PREVIEW_STALE' };
   }
 
+  if (corridor.replacementScope === 'SUFFIX') {
+    const origin = await resolveLockedConfirmedRouteExecutionOrigin(
+      transaction,
+      input.tripId,
+      corridor.sourceRouteAnchorFromNodeId!,
+      corridor.sourceRouteAnchorToNodeId!,
+    );
+    if (
+      origin.status !== 'CONFIRMED_NODE' ||
+      origin.nodeId !== corridor.replacementAnchorFromNodeId
+    )
+      return { status: 'PREVIEW_STALE' };
+  }
+
   if (plan.currentAdoptedRouteId !== null) {
     const replacement = await transaction.adoptedRoute.updateMany({
       where: {
         id: plan.currentAdoptedRouteId,
         tripId: input.tripId,
-        anchorFromNodeId: plan.anchorFromNodeId,
-        anchorToNodeId: plan.anchorToNodeId,
+        anchorFromNodeId: corridor.sourceRouteAnchorFromNodeId,
+        anchorToNodeId: corridor.sourceRouteAnchorToNodeId,
         status: 'ACTIVE',
       },
       data: { status: 'REPLACED', replacedAt: input.now },
@@ -646,7 +680,29 @@ async function executeAdoption(
     plan.anchorToNodeId,
   ];
   delta.affectedDayOccurrenceIds = [...new Set(delta.affectedDayOccurrenceIds)];
-  const completeDelta: RouteAdoptDeltaV3 = delta;
+  const prefixHash = await hashPreservedRoutePrefix(
+    transaction,
+    input.tripId,
+    corridor.preservedPrefixNodeIds,
+    corridor.preservedPrefixTransportEdgeIds,
+  );
+  const completeDelta: RouteAdoptDeltaV3 | RouteAdoptDeltaV4 =
+    corridor.replacementScope === 'SUFFIX'
+      ? {
+          ...delta,
+          schemaVersion: 'route-adopt-delta-v4',
+          replacementScope: corridor.replacementScope,
+          sourceRouteAnchorFromNodeId: corridor.sourceRouteAnchorFromNodeId,
+          sourceRouteAnchorToNodeId: corridor.sourceRouteAnchorToNodeId,
+          replacementAnchorFromNodeId: plan.anchorFromNodeId,
+          replacementAnchorToNodeId: plan.anchorToNodeId,
+          preservedPrefixNodeIds: corridor.preservedPrefixNodeIds,
+          preservedPrefixTransportEdgeIds:
+            corridor.preservedPrefixTransportEdgeIds,
+          preservedPrefixHash: prefixHash,
+          archivedTransportEdgeIds: oldEdges.map((edge) => edge.id),
+        }
+      : delta;
   const finalReceipt = await transaction.operationReceipt.update({
     where: { id: receipt.id },
     data: { delta: completeDelta as unknown as Prisma.InputJsonValue },
@@ -688,6 +744,7 @@ function requireCurrentPlan(payload: StoredRoutePreviewPayload) {
     throw new AdoptionAbort('PREVIEW_STALE');
   }
   return {
+    routeCorridor: summary.routeCorridor,
     anchorFromNodeId: summary.routeCorridor.anchorFromNodeId,
     anchorToNodeId: summary.routeCorridor.anchorToNodeId,
     currentNodeIds: [...summary.routeCorridor.currentNodeIds],
@@ -709,108 +766,63 @@ async function validateCurrentCorridor(
   transaction: Transaction,
   tripId: string,
   plan: ReturnType<typeof requireCurrentPlan>,
-): Promise<{ readonly nodeIds: string[] } | null> {
-  const nodes = await transaction.itineraryNode.findMany({
-    where: { tripId },
-    select: { id: true, kind: true, source: true, adoptedRouteId: true },
-    orderBy: [
-      { dayOccurrence: { sequence: 'asc' } },
-      { position: 'asc' },
-      { id: 'asc' },
-    ],
-  });
-  const fromIndex = nodes.findIndex(
-    (node) => node.id === plan.anchorFromNodeId,
+) {
+  const corridor = await resolveLockedRouteCorridor(
+    transaction,
+    tripId,
+    plan.anchorFromNodeId,
+    plan.anchorToNodeId,
   );
-  const toIndex = nodes.findIndex((node) => node.id === plan.anchorToNodeId);
-  if (fromIndex < 0 || toIndex <= fromIndex) return null;
-  const corridor = nodes.slice(fromIndex, toIndex + 1);
   if (
-    corridor[0]?.kind !== 'PLACE_VISIT' ||
-    corridor.at(-1)?.kind !== 'PLACE_VISIT' ||
+    corridor === null ||
+    corridor.sourceAdoptedRouteId !== plan.currentAdoptedRouteId ||
+    !sameArray(corridor.replacementNodeIds, plan.currentNodeIds) ||
     !sameArray(
-      corridor.map((node) => node.id),
-      plan.currentNodeIds,
+      [...corridor.replacementTransportEdgeIds].sort(),
+      [...plan.willReplaceTransportEdgeIds].sort(),
     )
-  ) {
+  )
     return null;
-  }
+  const summary = plan.routeCorridor;
   if (
-    plan.currentAdoptedRouteId !== null &&
-    corridor
-      .slice(1, -1)
-      .some(
-        (node) =>
-          node.source !== 'ROUTE_GENERATED' ||
-          node.adoptedRouteId !== plan.currentAdoptedRouteId,
-      )
-  ) {
+    (summary.replacementScope ?? 'FULL_CORRIDOR') !==
+      corridor.replacementScope ||
+    (summary.sourceAdoptedRouteId !== undefined &&
+      summary.sourceAdoptedRouteId !== corridor.sourceAdoptedRouteId) ||
+    (summary.sourceRouteAnchorFromNodeId !== undefined &&
+      summary.sourceRouteAnchorFromNodeId !==
+        corridor.sourceRouteAnchorFromNodeId) ||
+    (summary.sourceRouteAnchorToNodeId !== undefined &&
+      summary.sourceRouteAnchorToNodeId !==
+        corridor.sourceRouteAnchorToNodeId) ||
+    (summary.replacementAnchorFromNodeId !== undefined &&
+      summary.replacementAnchorFromNodeId !== plan.anchorFromNodeId) ||
+    (summary.replacementAnchorToNodeId !== undefined &&
+      summary.replacementAnchorToNodeId !== plan.anchorToNodeId) ||
+    !sameArray(
+      summary.preservedPrefixNodeIds ?? [],
+      corridor.preservedPrefixNodeIds,
+    ) ||
+    !sameArray(
+      summary.preservedPrefixTransportEdgeIds ?? [],
+      corridor.preservedPrefixTransportEdgeIds,
+    )
+  )
     return null;
-  }
-  if (plan.currentAdoptedRouteId !== null) {
-    const [currentRoute, activeRouteCount] = await Promise.all([
-      transaction.adoptedRoute.findFirst({
-        where: {
-          id: plan.currentAdoptedRouteId,
-          tripId,
-          anchorFromNodeId: plan.anchorFromNodeId,
-          anchorToNodeId: plan.anchorToNodeId,
-          status: 'ACTIVE',
-        },
-        select: { id: true },
-      }),
-      transaction.adoptedRoute.count({
-        where: {
-          tripId,
-          anchorFromNodeId: plan.anchorFromNodeId,
-          anchorToNodeId: plan.anchorToNodeId,
-          status: 'ACTIVE',
-        },
-      }),
-    ]);
-    if (currentRoute === null || activeRouteCount !== 1) return null;
-  } else {
-    const activeRouteCount = await transaction.adoptedRoute.count({
-      where: {
-        tripId,
-        anchorFromNodeId: plan.anchorFromNodeId,
-        anchorToNodeId: plan.anchorToNodeId,
-        status: 'ACTIVE',
-      },
-    });
-    if (activeRouteCount !== 0) return null;
-  }
-  const expectedPairs = corridor.slice(0, -1).map((node, index) => ({
-    fromNodeId: node.id,
-    toNodeId: corridor[index + 1]!.id,
-  }));
-  const edges = await transaction.transportEdge.findMany({
-    where: { tripId, OR: expectedPairs },
-    select: {
-      id: true,
-      fromNodeId: true,
-      toNodeId: true,
-      source: true,
-      adoptedRouteId: true,
-    },
-    orderBy: { id: 'asc' },
-  });
+  const internal = corridor.replacementNodeIds.slice(1, -1);
+  const mutable = [
+    ...plan.nodesToRemove.map((node) => node.nodeId),
+    ...plan.nodePlans.flatMap((node) =>
+      node.nodeId === null ? [] : [node.nodeId],
+    ),
+  ];
   if (
-    plan.currentAdoptedRouteId !== null &&
-    (edges.length !== expectedPairs.length ||
-      edges.some(
-        (edge) =>
-          edge.source !== 'ADOPTED_ROUTE' ||
-          edge.adoptedRouteId !== plan.currentAdoptedRouteId,
-      ))
-  ) {
+    mutable.some((id) => !internal.includes(id)) ||
+    new Set(mutable).size !== mutable.length ||
+    !sameArray([...mutable].sort(), [...internal].sort())
+  )
     return null;
-  }
-  const edgeIds = edges.map((edge) => edge.id);
-  if (!sameArray(edgeIds, [...plan.willReplaceTransportEdgeIds].sort())) {
-    return null;
-  }
-  return { nodeIds: corridor.map((node) => node.id) };
+  return { ...corridor, nodeIds: [...corridor.replacementNodeIds] };
 }
 
 function sameAdjustments(

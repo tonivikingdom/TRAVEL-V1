@@ -14,6 +14,7 @@ import type {
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { adoptRoutePreview } from './prisma-route-adoption.js';
 import { undoRouteAdoption } from './prisma-route-undo.js';
+import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -41,7 +42,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       await lockOwner(transaction, input.ownerUserId);
       const tripStatus = await lockTrip(transaction, input);
       if (tripStatus !== 'SUCCESS') return { status: tripStatus };
-      if (!(await isAdjacentPlacePair(transaction, input))) {
+      if (!(await isCurrentRouteCorridor(transaction, input))) {
         return { status: 'NOT_ADJACENT' };
       }
       const snapshots: RouteCandidateSnapshotRecord[] = [];
@@ -123,7 +124,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       ) {
         return { status: 'PREVIEW_STALE' };
       }
-      if (!(await isAdjacentPlacePair(transaction, input))) {
+      if (!(await isCurrentRouteCorridor(transaction, input))) {
         return { status: 'NOT_ADJACENT' };
       }
       const preview = await transaction.routePreview.create({
@@ -224,7 +225,7 @@ async function lockTrip(
   return trip.version === input.basisVersion ? 'SUCCESS' : 'VERSION_CONFLICT';
 }
 
-async function isAdjacentPlacePair(
+async function isCurrentRouteCorridor(
   transaction: Transaction,
   input: {
     readonly tripId: string;
@@ -232,45 +233,13 @@ async function isAdjacentPlacePair(
     readonly toNodeId: string;
   },
 ): Promise<boolean> {
-  const nodes = await transaction.itineraryNode.findMany({
-    where: { tripId: input.tripId },
-    select: { id: true, kind: true, source: true, adoptedRouteId: true },
-    orderBy: [
-      { dayOccurrence: { sequence: 'asc' } },
-      { position: 'asc' },
-      { id: 'asc' },
-    ],
-  });
-  const fromIndex = nodes.findIndex((node) => node.id === input.fromNodeId);
-  const from = nodes[fromIndex];
-  const toIndex = nodes.findIndex((node) => node.id === input.toNodeId);
-  const to = nodes[toIndex];
-  const endpointsValid =
-    fromIndex >= 0 &&
-    from?.kind === 'PLACE_VISIT' &&
-    toIndex > fromIndex &&
-    to?.kind === 'PLACE_VISIT';
-  if (!endpointsValid) return false;
-  if (toIndex === fromIndex + 1) return true;
-  const route = await transaction.adoptedRoute.findFirst({
-    where: {
-      tripId: input.tripId,
-      anchorFromNodeId: input.fromNodeId,
-      anchorToNodeId: input.toNodeId,
-      status: 'ACTIVE',
-    },
-    select: { id: true },
-  });
   return (
-    route !== null &&
-    nodes
-      .slice(fromIndex + 1, toIndex)
-      .every(
-        (node) =>
-          node.kind === 'PLACE_VISIT' &&
-          node.source === 'ROUTE_GENERATED' &&
-          node.adoptedRouteId === route.id,
-      )
+    (await resolveLockedRouteCorridor(
+      transaction,
+      input.tripId,
+      input.fromNodeId,
+      input.toNodeId,
+    )) !== null
   );
 }
 

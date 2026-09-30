@@ -117,7 +117,7 @@ export class RouteQueryService {
     if (!isQueryableRouteCorridor(trip, nodes, fromIndex, toIndex)) {
       throw new ApplicationError(
         'ROUTE_QUERY_UNSUPPORTED',
-        '路线查询只能连接相邻节点或同一当前已采用路线的两个锚点。',
+        '路线查询只能连接合法相邻节点、当前已采用路线的完整锚点或内部地点到原终点的后缀。',
         422,
       );
     }

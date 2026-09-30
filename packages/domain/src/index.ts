@@ -154,3 +154,9 @@ export {
   type MonitorMovement,
   type MonitorSnapshot,
 } from './flight-monitoring.js';
+
+export {
+  resolveCurrentRouteReplacementCorridor,
+  type RouteReplacementScope,
+  type RouteReplacementCorridor,
+} from './route-replacement-corridor.js';

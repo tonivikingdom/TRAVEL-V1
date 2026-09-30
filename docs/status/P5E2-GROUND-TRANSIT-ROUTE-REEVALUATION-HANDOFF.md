@@ -2,7 +2,7 @@
 
 - Starting main: `1e25ec0340008a58b3bfed1c73db0660150e45ff`
 - Branch: `feature/p5e2-ground-transit-route-reevaluation-handoff`
-- Status: Draft PR #32; PostgreSQL, Compose, and P5B CI passed in [Run 36663979037](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/36663979037). Pending merge review.
+- Status: Draft PR #32; the origin-timezone repair passed PostgreSQL, Compose, and P5B CI in [Run 36664978289](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/36664978289). Pending merge review.
 - Schema / migration: none.
 
 Batch 1 established ground-transit identity, observations, boarding/transfer safety, execution state, and explicitly opted-in monitoring. Batch 2 added accepted operational changes, risk/notification reconciliation, recovery, and persistent attention lifecycle. Batch 3 adds only a read-only bridge back to the existing route-planning flow.
@@ -15,4 +15,4 @@ The endpoint itself does not call a route provider and does not write a Candidat
 
 Batch 3 does **not** automatically query, preview, choose, or adopt an alternative route. There is no real paid ground-transit provider, Push, formal Desktop/Mobile UI, staging or production deployment. F-05/F-06/F-07/F-08 remain open.
 
-Verification: new pure Domain tests and PostgreSQL HTTP integration scenarios cover cancellation, owner isolation, read-only counts, explicit Query→Preview→Adopt, recovery, progressed origin, and old-route fencing. The isolated synthetic Compose chain adds worker-observed cancellation → READY handoff → explicit replacement, with no automatic planning. CI verify passed 45 unit files / 532 tests and 26 PostgreSQL integration files / 297 tests; Compose verification and P5B acceptance also passed. Local environment has no Docker or isolated PostgreSQL; PR CI is the database/Compose evidence source. No Batch 3 migration was added; existing clean-deploy and migration regression checks remain green.
+Verification: new pure Domain tests and PostgreSQL HTTP integration scenarios cover cancellation, owner isolation, read-only counts, explicit Query→Preview→Adopt, recovery, progressed origin, and old-route fencing. Four focused origin-timezone regressions cover origin-node evidence versus downstream evidence, downstream-only evidence, origin-edge evidence, and invalid origin evidence. The isolated synthetic Compose chain adds worker-observed cancellation → READY handoff → explicit replacement, with no automatic planning. CI verify passed 46 unit files / 536 tests and 26 PostgreSQL integration files / 297 tests; Compose verification and P5B acceptance also passed. Local environment has no Docker or isolated PostgreSQL; PR CI is the database/Compose evidence source. No Batch 3 migration was added; existing clean-deploy and migration regression checks remain green.

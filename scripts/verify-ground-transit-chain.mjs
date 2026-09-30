@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 /** Synthetic-only P5E2 cross-layer check inside verify-compose's isolated project. */
 export async function verifyGroundTransitChain({
   apiJson,
+  apiPort,
   composeQuiet,
   waitFor,
   databaseUser,
@@ -321,7 +322,14 @@ export async function verifyGroundTransitChain({
   if (Number(historyCount) < 2)
     throw new Error('P5E2 initial state history was not retained');
   const handoffChain = expectOperationalDisruption
-    ? await verifyHandoffReplacement({ apiJson, sql, waitFor, date })
+    ? await verifyHandoffReplacement({
+        apiJson,
+        apiPort,
+        composeQuiet,
+        sql,
+        waitFor,
+        date,
+      })
     : null;
   return {
     tripId: trip.id,
@@ -337,15 +345,82 @@ export async function verifyGroundTransitChain({
   };
 }
 
-async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
-  // DateOwnership is per owner: the second isolated scenario cannot reuse the
-  // first scenario's day, even though both use the same synthetic session.
-  const handoffDate = new Date(Date.parse(`${date}T00:00:00.000Z`) + 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+async function verifyHandoffReplacement({
+  apiJson: adminApiJson,
+  apiPort,
+  composeQuiet,
+  sql,
+  waitFor,
+  date,
+}) {
+  const email = 'synthetic-compose-handoff@synthetic.example.test';
+  await adminApiJson('/admin/invitations', 'POST', { email });
+  const baseUrl = `http://127.0.0.1:${apiPort}`;
+  const requested = await fetch(`${baseUrl}/auth/magic-link/request`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (requested.status !== 202)
+    throw new Error('P5E2 handoff synthetic login request failed');
+  let token;
+  await waitFor(
+    'P5E2 handoff synthetic Magic Link',
+    async () => {
+      const captured = await composeQuiet(
+        'exec',
+        '--no-TTY',
+        'worker',
+        'cat',
+        '/tmp/travel-mail-capture/messages.ndjson',
+      );
+      const message = captured
+        .trim()
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .reverse()
+        .find((entry) => entry.recipient === email);
+      token =
+        message === undefined
+          ? undefined
+          : new URL(message.magicLink).hash.match(
+              /^#token=([A-Za-z0-9_-]{40,100})$/u,
+            )?.[1];
+      return token !== undefined;
+    },
+    30_000,
+  );
+  const consumed = await fetch(`${baseUrl}/auth/magic-link/consume`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  token = undefined;
+  if (!consumed.ok)
+    throw new Error('P5E2 handoff synthetic Magic Link consume failed');
+  const credential = (await consumed.json()).credential;
+  if (typeof credential !== 'string')
+    throw new Error('P5E2 handoff synthetic session missing');
+  const apiJson = async (pathname, method, body) => {
+    const response = await fetch(`${baseUrl}${pathname}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${credential}`,
+        'content-type': 'application/json',
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const payload = await response.json();
+    if (!response.ok)
+      throw new Error(
+        `P5E2 handoff ${method} ${pathname} failed: ${response.status} ${payload?.error?.code ?? 'UNKNOWN'}`,
+      );
+    return payload;
+  };
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 handoff replacement',
-    planningAnchorDate: handoffDate,
+    planningAnchorDate: date,
     defaultPeopleCount: 1,
   });
   for (const [index, name] of [
@@ -358,7 +433,7 @@ async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
         type: 'ADD_PLACE_VISIT',
         targetDay:
           index === 0
-            ? { type: 'NEW', localDate: handoffDate, sequence: 0 }
+            ? { type: 'NEW', localDate: date, sequence: 0 }
             : {
                 type: 'EXISTING',
                 dayOccurrenceId: trip.days[0].dayOccurrenceId,
@@ -380,7 +455,7 @@ async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
     toNodeId: to.id,
     hint: {
       type: 'DEPART_AT',
-      instant: new Date(Date.now() + 23 * 60 * 60_000).toISOString(),
+      instant: new Date(Date.now() + 8 * 60_000).toISOString(),
       timeZone: 'Asia/Tokyo',
     },
   });

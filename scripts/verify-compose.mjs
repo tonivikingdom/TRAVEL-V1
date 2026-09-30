@@ -503,6 +503,7 @@ async function verifyCompose(compose, composeQuiet, env) {
   ) {
     const ground = await verifyGroundTransitChain({
       apiJson,
+      apiPort,
       composeQuiet,
       waitFor,
       databaseUser,

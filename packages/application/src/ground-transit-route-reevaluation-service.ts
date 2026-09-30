@@ -6,6 +6,7 @@ import {
 
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
+import type { ExternalExecutionOriginService } from './external-execution-origin-service.js';
 import type { GroundTransitRepository } from './ground-transit-ports.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
 import { resolveConfirmedRouteExecutionOriginForTrip } from './confirmed-route-execution-origin.js';
@@ -37,6 +38,7 @@ export class GroundTransitRouteReevaluationService {
     private readonly groundTransit: GroundTransitRepository,
     private readonly progress: GroundTransitRouteProgressRepository,
     private readonly now: () => Date = () => new Date(),
+    private readonly externalOrigins?: ExternalExecutionOriginService,
   ) {}
 
   async getHandoff(
@@ -147,6 +149,32 @@ export class GroundTransitRouteReevaluationService {
             ),
       now: this.now(),
     });
+    if (this.externalOrigins !== undefined && routeCurrent) {
+      const external = await this.externalOrigins.get(
+        actor,
+        tripId,
+        transportEdgeId,
+      );
+      if (
+        external.candidate !== null ||
+        external.currentOrigin?.currentness === 'CURRENT' ||
+        external.availability === 'UNRESOLVED'
+      ) {
+        return {
+          tripId,
+          sourceTransportEdgeId: transportEdgeId,
+          adoptedRouteId: leg.adoptedRouteId,
+          readiness: 'ORIGIN_UNRESOLVED',
+          originBasis: null,
+          query: null,
+          reasonCodes: [
+            ...external.reasonCodes,
+            'EXTERNAL_ORIGIN_ROUTE_PLANNING_NOT_SUPPORTED',
+          ],
+          externalOriginStatus: external.availability,
+        };
+      }
+    }
     return {
       tripId,
       sourceTransportEdgeId: transportEdgeId,

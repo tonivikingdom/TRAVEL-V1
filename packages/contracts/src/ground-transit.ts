@@ -94,6 +94,8 @@ export interface GroundTransitRefreshResponse {
 }
 
 export interface GroundTransitRouteReevaluationHandoffView {
+  readonly externalOriginStatus?:
+    'NOT_AVAILABLE' | 'CONFIRMATION_REQUIRED' | 'CONFIRMED' | 'UNRESOLVED';
   readonly originBasis?:
     'PLANNED_ROUTE_ORIGIN' | 'CONFIRMED_EXECUTION_NODE' | null;
   readonly tripId: string;

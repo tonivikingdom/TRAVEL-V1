@@ -71,6 +71,12 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
           : this.scenario === 'EARLY_DEPARTURE'
             ? -7 * 60_000
             : 0;
+    // Only the explicitly named Dev/Test external-origin fixture changes the
+    // worker incident; existing cancellation fixtures retain their scenario.
+    const externalFixture = baseline.lineRef === 'synthetic:external-origin';
+    const shortTurn =
+      this.scenario === 'SHORT_TURN' ||
+      (externalFixture && this.scenario === 'FAIL_FIRST_THEN_CANCEL_FIXED');
     const delayed = (value: Date | null) =>
       value === null ? null : new Date(value.getTime() + delayMs);
     const observation: GroundTransitObservation = {
@@ -99,7 +105,7 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
       estimatedArrival: delayMs > 0 ? delayed(baseline.plannedArrival) : null,
       actualDeparture:
         this.scenario === 'ACTUAL_DEPARTURE' ? baseline.plannedDeparture : null,
-      actualArrival: null,
+      actualArrival: externalFixture && shortTurn ? fetchedAt : null,
       departurePlatform:
         this.scenario === 'PLATFORM_CHANGE'
           ? this.calls === 1
@@ -108,6 +114,7 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
           : null,
       arrivalPlatform: null,
       serviceStatus:
+        !shortTurn &&
         (this.scenario === 'CANCEL_FIXED' ||
           this.scenario === 'FAIL_FIRST_THEN_CANCEL_FIXED') &&
         baseline.serviceClass === 'FIXED_SERVICE'
@@ -116,19 +123,15 @@ export class SyntheticGroundTransitProvider implements GroundTransitProvider {
             ? 'DELAYED'
             : 'ON_TIME',
       boardingTargetServiceability: 'SERVED',
-      alightingTargetServiceability:
-        this.scenario === 'SHORT_TURN' ? 'NOT_SERVED' : 'SERVED',
-      currentTerminusRef:
-        this.scenario === 'SHORT_TURN'
-          ? 'synthetic:short-terminus'
-          : baseline.alightingHubRef,
-      currentTerminusLabel:
-        this.scenario === 'SHORT_TURN' ? 'Synthetic short terminus' : null,
+      alightingTargetServiceability: shortTurn ? 'NOT_SERVED' : 'SERVED',
+      currentTerminusRef: shortTurn
+        ? 'synthetic:short-terminus'
+        : baseline.alightingHubRef,
+      currentTerminusLabel: shortTurn ? 'Synthetic short terminus' : null,
       operatingFromHubRef: baseline.boardingHubRef,
-      operatingToHubRef:
-        this.scenario === 'SHORT_TURN'
-          ? 'synthetic:short-terminus'
-          : baseline.alightingHubRef,
+      operatingToHubRef: shortTurn
+        ? 'synthetic:short-terminus'
+        : baseline.alightingHubRef,
       headwayMinSeconds:
         this.scenario === 'HIGH_FREQUENCY_3_TO_5'
           ? 180

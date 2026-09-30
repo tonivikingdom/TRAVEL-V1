@@ -6,6 +6,7 @@ import {
   ExecutionRiskService,
   FlightMonitoringService,
   GroundTransitService,
+  ExternalExecutionOriginService,
   GroundTransitRouteReevaluationService,
   FlightService,
   NotificationService,
@@ -54,6 +55,7 @@ export interface ApiDependencies {
   readonly flightService?: FlightService;
   readonly flightMonitoringService?: FlightMonitoringService;
   readonly groundTransitService?: GroundTransitService;
+  readonly externalExecutionOriginService?: ExternalExecutionOriginService;
   readonly groundTransitRouteReevaluationService?: GroundTransitRouteReevaluationService;
   readonly routeQueryService?: RouteQueryService;
   readonly routePreviewService?: RoutePreviewService;
@@ -589,6 +591,86 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         authenticated.actor,
         request.params.tripId,
         request.params.transportEdgeId,
+      );
+    },
+  );
+
+  app.get<{ Params: { tripId: string; transportEdgeId: string } }>(
+    '/trips/:tripId/execution/ground-transit/:transportEdgeId/external-origin',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      return requireExternalOriginService(dependencies).get(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.transportEdgeId,
+      );
+    },
+  );
+  app.post<{ Params: { tripId: string; transportEdgeId: string } }>(
+    '/trips/:tripId/execution/ground-transit/:transportEdgeId/external-origin/confirm',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      if (
+        Object.keys(body).some(
+          (key) =>
+            !['baseTripVersion', 'candidateRef', 'idempotencyKey'].includes(
+              key,
+            ),
+        )
+      )
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '确认只接收版本、候选引用和幂等键。',
+          400,
+        );
+      return requireExternalOriginService(dependencies).confirm(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.transportEdgeId,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          candidateRef: requiredString(body, 'candidateRef'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      );
+    },
+  );
+  app.post<{ Params: { tripId: string; externalOriginId: string } }>(
+    '/trips/:tripId/execution/external-origins/:externalOriginId/depart',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      if (
+        Object.keys(body).some(
+          (key) => !['baseTripVersion', 'idempotencyKey'].includes(key),
+        )
+      )
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '离开只接收版本和幂等键。',
+          400,
+        );
+      return requireExternalOriginService(dependencies).depart(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.externalOriginId,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
       );
     },
   );
@@ -1430,4 +1512,16 @@ function normalizeError(error: unknown): ApplicationError {
     503,
     true,
   );
+}
+
+function requireExternalOriginService(
+  dependencies: ApiDependencies,
+): ExternalExecutionOriginService {
+  if (dependencies.externalExecutionOriginService === undefined)
+    throw new ApplicationError(
+      'SERVICE_UNAVAILABLE',
+      '外部执行事实服务不可用。',
+      503,
+    );
+  return dependencies.externalExecutionOriginService;
 }

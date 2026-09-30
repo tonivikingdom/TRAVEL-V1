@@ -159,6 +159,7 @@ export interface TripAggregateRecord {
   readonly transportEdges: readonly TransportEdgeRecord[];
   readonly adoptedRoutes?: readonly AdoptedRouteRecord[];
   readonly routeExecutionEvents?: readonly import('@travel/domain').RouteExecutionOriginEvent[];
+  readonly externalExecutionFacts?: readonly Date[];
   readonly executionLocationCurrentNodeId?: string | null;
 }
 

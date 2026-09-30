@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { verifyExecutionChain } from './verify-execution-chain.mjs';
 import { verifyGroundTransitChain } from './verify-ground-transit-chain.mjs';
+import { verifyExternalOriginChain } from './verify-external-origin-chain.mjs';
 import { verifyRouteSuffixChain } from './verify-route-suffix-chain.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -528,6 +529,18 @@ async function verifyCompose(compose, composeQuiet, env) {
   });
   process.stdout.write(
     `P5E2 4A suffix Query/Preview/Adopt/Undo: ${JSON.stringify(suffix)}\n`,
+  );
+
+  const externalOrigin = await verifyExternalOriginChain({
+    apiJson,
+    apiPort,
+    composeQuiet,
+    waitFor,
+    databaseUser,
+    databaseName,
+  });
+  process.stdout.write(
+    `P5E2 5A external origin: ${JSON.stringify(externalOrigin)}\n`,
   );
 
   const storageOwnerEnvironment = `SYNTHETIC_STORAGE_OWNER_EMAIL=${adminEmail}`;

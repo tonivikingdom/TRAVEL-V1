@@ -24,6 +24,7 @@ import {
 const tripInclude = {
   executionEvents: { where: { undoneAt: null } },
   executionLocationState: true,
+  externalExecutionOrigins: { select: { arrivedAt: true, departedAt: true } },
   dateOwnerships: { orderBy: { localDate: 'asc' } },
   dayOccurrences: {
     include: {
@@ -1441,6 +1442,10 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
     adoptedRoutes: trip.adoptedRoutes,
     routeExecutionEvents: trip.executionEvents,
+    externalExecutionFacts: trip.externalExecutionOrigins.flatMap((origin) => [
+      origin.arrivedAt,
+      ...(origin.departedAt === null ? [] : [origin.departedAt]),
+    ]),
     executionLocationCurrentNodeId:
       trip.executionLocationState?.currentNodeId ?? null,
   };

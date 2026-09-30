@@ -33,5 +33,6 @@ export function resolveConfirmedRouteExecutionOriginForTrip(
     events: trip.routeExecutionEvents ?? [],
     locationCurrentNodeId: trip.executionLocationCurrentNodeId ?? null,
     independentProgress,
+    externalExecutionFacts: trip.externalExecutionFacts ?? [],
   });
 }

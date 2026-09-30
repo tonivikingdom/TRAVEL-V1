@@ -7,6 +7,8 @@ import {
   ExecutionLocationService,
   type FlightMonitoringService,
   GroundTransitService,
+  ExternalExecutionOriginService,
+  type GroundTransitHubResolver,
   GroundTransitRouteReevaluationService,
   type GroundTransitProvider,
   hashRoutePreviewPayload,
@@ -23,6 +25,8 @@ import {
 } from '@travel/application';
 import type {
   GroundTransitExecutionResponse,
+  ExternalOriginResponse,
+  ExternalOriginMutationResponse,
   GroundTransitRouteReevaluationHandoffView,
   RoutePreviewView,
   RouteQueryResponse,
@@ -34,6 +38,7 @@ import {
   PrismaExecutionRiskRepository,
   PrismaExecutionLocationRepository,
   PrismaGroundTransitRepository,
+  PrismaExternalExecutionOriginRepository,
   PrismaGroundTransitRouteProgressRepository,
   PrismaRoutePlanningRepository,
   PrismaTripRepository,
@@ -43,6 +48,7 @@ import {
   GoogleConsumerExperimentalRouteProvider,
   SyntheticRouteProvider,
   SyntheticGroundTransitProvider,
+  SyntheticGroundTransitHubResolver,
   createDevelopmentSyntheticGroundTransitRouteProvider,
   UnconfiguredGroundTransitProvider,
 } from '@travel/providers';
@@ -78,6 +84,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   let currentNow: Date;
   let providerHook: (() => Promise<void>) | undefined;
   let tripRepository: PrismaTripRepository;
+  let hubResolver: GroundTransitHubResolver;
 
   beforeAll(() => {
     managed = createPrismaClient(databaseUrl);
@@ -90,6 +97,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       createIdentity(managed, 'p4a1-b@synthetic.example.test', 'USER'),
       createIdentity(managed, 'p4a1-admin@synthetic.example.test', 'ADMIN'),
     ]);
+    hubResolver = new SyntheticGroundTransitHubResolver();
     providerInputs = [];
     currentNow = NOW;
     providerHook = undefined;
@@ -125,7 +133,13 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       new PrismaExecutionRiskRepository(managed.client),
       { now: () => currentNow, groundTransitRepository },
     );
+    const externalOrigins = new ExternalExecutionOriginService(
+      new PrismaExternalExecutionOriginRepository(managed.client),
+      hubResolver,
+      () => currentNow,
+    );
     return buildApi({
+      externalExecutionOriginService: externalOrigins,
       readinessProbe: {
         async check() {
           return { name: 'postgresql', status: 'READY' };
@@ -175,6 +189,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           groundTransitRepository,
           new PrismaGroundTransitRouteProgressRepository(managed.client),
           () => currentNow,
+          externalOrigins,
         ),
       executionRiskService,
       executionLocationService: new ExecutionLocationService(
@@ -320,6 +335,582 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   afterAll(async () => {
     await resetSyntheticData(managed);
     await managed.close();
+  });
+
+  async function externalFixture(
+    changes: Parameters<typeof groundSequence>[0] = ['SHORT_TURN'],
+  ) {
+    const f = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(changes),
+    );
+    const base = `/trips/${f.trip.id}/execution/ground-transit/${f.leg.transportEdgeId}`;
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: `${base}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refreshed.statusCode, refreshed.body).toBe(200);
+    const trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    const view = (
+      await app.inject({
+        method: 'GET',
+        url: `${base}/external-origin`,
+        headers: bearer(userA),
+      })
+    ).json<ExternalOriginResponse>();
+    return { ...f, trip, base, view };
+  }
+  function confirmExternal(
+    f: Awaited<ReturnType<typeof externalFixture>>,
+    key = randomUUID(),
+    version = f.trip.version,
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: `${f.base}/external-origin/confirm`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: version,
+        candidateRef: f.view.candidate!.candidateRef,
+        idempotencyKey: key,
+      },
+    });
+  }
+  async function externalFootprint(tripId: string) {
+    return {
+      planning: await repairDurableState(tripId),
+      places: await managed.client.place.findMany({ orderBy: { id: 'asc' } }),
+    };
+  }
+  it('P5E2 5A: candidate is deterministic and read-only; confirmed/departed execution never mutates itinerary or planning', async () => {
+    const f = await externalFixture();
+    expect(f.view).toMatchObject({
+      availability: 'CONFIRMATION_REQUIRED',
+      candidate: {
+        provider: 'SYNTHETIC',
+        providerHubRef: 'synthetic:short-terminus',
+        canonicalHubRef: 'synthetic:hub:short-terminus',
+        latitude: 35.705,
+        longitude: 139.705,
+        timeZone: 'Asia/Tokyo',
+      },
+      currentOrigin: null,
+    });
+    const before = await externalFootprint(f.trip.id);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toEqual(f.view);
+    expect(await externalFootprint(f.trip.id)).toEqual(before);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      readiness: 'ORIGIN_UNRESOLVED',
+      query: null,
+      reasonCodes: expect.arrayContaining([
+        'EXTERNAL_EXECUTION_ORIGIN_CONFIRMATION_REQUIRED',
+      ]),
+    });
+    const response = await confirmExternal(f);
+    expect(response.statusCode, response.body).toBe(200);
+    const result = response.json<ExternalOriginMutationResponse>();
+    expect(result).toMatchObject({
+      resultingTripVersion: f.trip.version + 1,
+      origin: {
+        status: 'ARRIVED',
+        currentness: 'CURRENT',
+        confirmationSource: 'MANUAL',
+        arrivedAt: currentNow.toISOString(),
+        sourceAdoptedRouteId: f.leg.adoptedRouteId,
+        sourceGroundTransitLegExecutionId: f.leg.id,
+      },
+    });
+    const after = await externalFootprint(f.trip.id);
+    expect({
+      ...after,
+      planning: {
+        ...after.planning,
+        version: before.planning.version,
+        updatedAt: before.planning.updatedAt,
+      },
+    }).toEqual(before);
+    expect(
+      await managed.client.externalExecutionOriginReceipt.count({
+        where: { tripId: f.trip.id },
+      }),
+    ).toBe(1);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      readiness: 'ORIGIN_UNRESOLVED',
+      query: null,
+      reasonCodes: expect.arrayContaining([
+        'EXTERNAL_ORIGIN_ROUTE_PLANNING_NOT_SUPPORTED',
+      ]),
+    });
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    const key = randomUUID();
+    const request = {
+      baseTripVersion: result.resultingTripVersion,
+      idempotencyKey: key,
+    };
+    const departed = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/execution/external-origins/${result.origin.id}/depart`,
+      headers: bearer(userA),
+      payload: request,
+    });
+    expect(departed.statusCode, departed.body).toBe(200);
+    expect(departed.json()).toMatchObject({
+      resultingTripVersion: f.trip.version + 2,
+      origin: {
+        status: 'DEPARTED',
+        currentness: 'DEPARTED',
+        departedAt: currentNow.toISOString(),
+      },
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/execution/external-origins/${result.origin.id}/depart`,
+      headers: bearer(userA),
+      payload: request,
+    });
+    expect(replay.json()).toEqual(departed.json());
+    const end = await externalFootprint(f.trip.id);
+    expect({
+      ...end,
+      planning: {
+        ...end.planning,
+        version: before.planning.version,
+        updatedAt: before.planning.updatedAt,
+      },
+    }).toEqual(before);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      currentOrigin: { status: 'DEPARTED', currentness: 'DEPARTED' },
+    });
+  });
+  it('P5E2 5A: confirm idempotency replays a stable receipt and rejects changed payload', async () => {
+    const f = await externalFixture();
+    const key = randomUUID();
+    const first = await confirmExternal(f, key);
+    expect(first.statusCode).toBe(200);
+    expect((await confirmExternal(f, key)).json()).toEqual(first.json());
+    const conflict = await confirmExternal(f, key, f.trip.version + 1);
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({
+      error: { code: 'IDEMPOTENCY_CONFLICT' },
+    });
+    expect(await managed.client.externalExecutionOrigin.count()).toBe(1);
+  });
+  it('P5E2 5A: durable external origin cannot be used as an itinerary RouteQuery endpoint', async () => {
+    const f = await externalFixture();
+    const confirmed = await confirmExternal(f);
+    expect(confirmed.statusCode).toBe(200);
+    const result = confirmed.json<ExternalOriginMutationResponse>();
+    const before = await externalFootprint(f.trip.id);
+    const query = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/routes/query`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: result.resultingTripVersion,
+        fromNodeId: result.origin.id,
+        toNodeId: f.trip.days[0]!.nodes.at(-1)!.id,
+        hint: {
+          type: 'DEPART_AT',
+          instant: currentNow.toISOString(),
+          timeZone: result.origin.timeZone,
+        },
+      },
+    });
+    expect(query.statusCode, query.body).toBe(404);
+    expect(query.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    expect(await externalFootprint(f.trip.id)).toEqual(before);
+  });
+  it.each(['different-keys', 'same-key'] as const)(
+    'P5E2 5A: concurrent confirmations maintain one ARRIVED origin (%s)',
+    async (mode) => {
+      const f = await externalFixture();
+      const key = randomUUID();
+      const responses = await Promise.all([
+        confirmExternal(f, key),
+        confirmExternal(f, mode === 'same-key' ? key : randomUUID()),
+      ]);
+      expect(responses.map((r) => r.statusCode).sort()).toEqual(
+        mode === 'same-key' ? [200, 200] : [200, 409],
+      );
+      if (mode === 'same-key')
+        expect(responses[0]!.json()).toEqual(responses[1]!.json());
+      expect(
+        await managed.client.externalExecutionOrigin.count({
+          where: { tripId: f.trip.id, status: 'ARRIVED' },
+        }),
+      ).toBe(1);
+      expect(await managed.client.externalExecutionOriginReceipt.count()).toBe(
+        1,
+      );
+      const view = (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json<ExternalOriginResponse>();
+      f.view = view;
+      f.trip = { ...f.trip, version: f.trip.version + 1 };
+      expect((await confirmExternal(f)).json()).toMatchObject({
+        error: { code: 'EXTERNAL_ORIGIN_CONFLICT' },
+      });
+    },
+  );
+  it.each(['recovery', 'resolver-change', 'version'] as const)(
+    'P5E2 5A: stale confirmation %s writes nothing',
+    async (kind) => {
+      const f = await externalFixture(['SHORT_TURN', 'RECOVERY']);
+      if (kind === 'recovery') {
+        currentNow = new Date(currentNow.getTime() + 60_000);
+        await app.inject({
+          method: 'POST',
+          url: `${f.base}/refresh`,
+          headers: bearer(userA),
+        });
+      }
+      if (kind === 'resolver-change')
+        hubResolver.resolveHub = async (input) => {
+          const result =
+            await new SyntheticGroundTransitHubResolver().resolveHub(input);
+          return result.status === 'RESOLVED'
+            ? {
+                ...result,
+                hub: { ...result.hub, canonicalHubRef: 'synthetic:changed' },
+              }
+            : result;
+        };
+      if (kind === 'version')
+        await managed.client.trip.update({
+          where: { id: f.trip.id },
+          data: { version: { increment: 1 } },
+        });
+      const before = await externalFootprint(f.trip.id);
+      const response = await confirmExternal(f);
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: {
+          code:
+            kind === 'version'
+              ? 'VERSION_CONFLICT'
+              : 'EXTERNAL_ORIGIN_CANDIDATE_STALE',
+        },
+      });
+      expect(await externalFootprint(f.trip.id)).toEqual(before);
+      expect(await managed.client.externalExecutionOrigin.count()).toBe(0);
+      expect(await managed.client.externalExecutionOriginReceipt.count()).toBe(
+        0,
+      );
+    },
+  );
+  it.each([
+    'UNAVAILABLE',
+    'AMBIGUOUS',
+    'NOT_FOUND',
+    'invalid-zone',
+    'invalid-coordinate',
+    'blank-name',
+    'wrong-provider-ref',
+  ] as const)(
+    'P5E2 5A: unsafe resolver %s cannot create an origin',
+    async (kind) => {
+      hubResolver = {
+        resolveHub: async (input) => {
+          if (['UNAVAILABLE', 'AMBIGUOUS', 'NOT_FOUND'].includes(kind))
+            return {
+              status: kind as 'UNAVAILABLE' | 'AMBIGUOUS' | 'NOT_FOUND',
+            };
+          const resolved =
+            await new SyntheticGroundTransitHubResolver().resolveHub(input);
+          if (resolved.status !== 'RESOLVED') return resolved;
+          return {
+            ...resolved,
+            hub: {
+              ...resolved.hub,
+              ...(kind === 'invalid-zone'
+                ? { timeZone: 'Invalid/Zone' }
+                : kind === 'invalid-coordinate'
+                  ? { latitude: 91 }
+                  : kind === 'blank-name'
+                    ? { name: '' }
+                    : { providerHubRef: 'different' }),
+            },
+          };
+        },
+      };
+      const f = await externalFixture();
+      expect(f.view).toMatchObject({
+        availability: 'UNRESOLVED',
+        candidate: null,
+      });
+      expect(await managed.client.externalExecutionOrigin.count()).toBe(0);
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: `${f.base}/route-reevaluation`,
+            headers: bearer(userA),
+          })
+        ).json(),
+      ).toMatchObject({ readiness: 'ORIGIN_UNRESOLVED', query: null });
+    },
+  );
+  it('P5E2 5A: provider vehicle ACTUAL and reliable GPS do not create user external execution', async () => {
+    const f = await externalFixture();
+    await managed.client.temporalValue.createMany({
+      data: ['ARRIVAL', 'DEPARTURE'].map((pointKind) => ({
+        transportEdgeId: f.leg.transportEdgeId,
+        layer: 'ACTUAL',
+        pointKind: pointKind as 'ARRIVAL' | 'DEPARTURE',
+        instant: currentNow,
+        timeZone: 'UTC',
+        sourceKind: 'PROVIDER_OBSERVATION',
+      })),
+    });
+    await managed.client.executionLocationState.create({
+      data: {
+        tripId: f.trip.id,
+        currentNodeId: f.from.id,
+        lastObservedAt: currentNow,
+        outsideTargetConsecutiveCount: 0,
+        locationStatus: 'RELIABLE',
+      },
+    });
+    const view = (
+      await app.inject({
+        method: 'GET',
+        url: `${f.base}/external-origin`,
+        headers: bearer(userA),
+      })
+    ).json();
+    expect(view).toMatchObject({ currentOrigin: null });
+    expect(await managed.client.externalExecutionOrigin.count()).toBe(0);
+  });
+  it('P5E2 5A: later valid itinerary ExecutionEvent supersedes E without rewriting its history', async () => {
+    const f = await externalFixture();
+    const confirmed = (
+      await confirmExternal(f)
+    ).json<ExternalOriginMutationResponse>();
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    const trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    await manualExecution(
+      trip,
+      f.from.id,
+      'MANUAL_ARRIVAL',
+      currentNow.toISOString(),
+    );
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      currentOrigin: {
+        id: confirmed.origin.id,
+        status: 'ARRIVED',
+        currentness: 'SUPERSEDED',
+      },
+    });
+    expect(
+      (
+        await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+          where: { id: confirmed.origin.id },
+        })
+      ).status,
+    ).toBe('ARRIVED');
+  });
+  it('P5E2 5A: provider recovery preserves confirmed user ARRIVAL and does not enable external routing', async () => {
+    const f = await externalFixture(['SHORT_TURN', 'RECOVERY']);
+    const result = (
+      await confirmExternal(f)
+    ).json<ExternalOriginMutationResponse>();
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    await app.inject({
+      method: 'POST',
+      url: `${f.base}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      availability: 'CONFIRMED',
+      candidate: null,
+      currentOrigin: {
+        id: result.origin.id,
+        currentness: 'CURRENT',
+        status: 'ARRIVED',
+      },
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({ readiness: 'ORIGIN_UNRESOLVED', query: null });
+  });
+  it('P5E2 5A: owner isolation covers candidate, confirm and departure including administrators', async () => {
+    const f = await externalFixture();
+    const origin = (
+      await confirmExternal(f)
+    ).json<ExternalOriginMutationResponse>();
+    for (const identity of [userB, admin]) {
+      for (const [method, url, payload] of [
+        ['GET', `${f.base}/external-origin`, undefined],
+        [
+          'POST',
+          `${f.base}/external-origin/confirm`,
+          {
+            baseTripVersion: origin.resultingTripVersion,
+            candidateRef: f.view.candidate!.candidateRef,
+            idempotencyKey: randomUUID(),
+          },
+        ],
+        [
+          'POST',
+          `/trips/${f.trip.id}/execution/external-origins/${origin.origin.id}/depart`,
+          {
+            baseTripVersion: origin.resultingTripVersion,
+            idempotencyKey: randomUUID(),
+          },
+        ],
+      ] as const) {
+        const response = await app.inject({
+          method,
+          url,
+          headers: bearer(identity),
+          ...(payload === undefined ? {} : { payload }),
+        });
+        expect(response.statusCode).toBe(404);
+      }
+    }
+    expect(await managed.client.externalExecutionOrigin.count()).toBe(1);
+  });
+  it('P5E2 5A: client metadata cannot be submitted as external confirmation', async () => {
+    const f = await externalFixture();
+    const response = await app.inject({
+      method: 'POST',
+      url: `${f.base}/external-origin/confirm`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: f.trip.version,
+        candidateRef: f.view.candidate!.candidateRef,
+        idempotencyKey: randomUUID(),
+        latitude: 0,
+        arrivedAt: currentNow.toISOString(),
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(await managed.client.externalExecutionOrigin.count()).toBe(0);
+  });
+  it('P5E2 5A: external ARRIVAL fences an old confirmed itinerary suffix origin', async () => {
+    const f = await suffixFixture(false);
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['SHORT_TURN']),
+    );
+    const edge = f.suffixEdges[0]!;
+    const base = `/trips/${f.first.trip.id}/execution/ground-transit/${edge.id}`;
+    await app.inject({
+      method: 'POST',
+      url: `${base}/refresh`,
+      headers: bearer(userA),
+    });
+    currentNow = new Date(currentNow.getTime() + 60_000);
+    const view = (
+      await app.inject({
+        method: 'GET',
+        url: `${base}/external-origin`,
+        headers: bearer(userA),
+      })
+    ).json<ExternalOriginResponse>();
+    const response = await app.inject({
+      method: 'POST',
+      url: `${base}/external-origin/confirm`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: f.first.trip.version,
+        candidateRef: view.candidate!.candidateRef,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    f.first.trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.first.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    const count = await managed.client.routeCandidateSnapshot.count();
+    expect(
+      (
+        await query(userA, f.first.trip, f.B.id, f.D.id, {
+          type: 'DEPART_AT',
+          instant: '2030-10-01T10:30:00Z',
+          timeZone: 'UTC',
+        })
+      ).json(),
+    ).toMatchObject({ error: { code: 'ROUTE_QUERY_UNSUPPORTED' } });
+    expect(await managed.client.routeCandidateSnapshot.count()).toBe(count);
   });
 
   it('persists a candidate snapshot without mutating official Trip facts', async () => {

@@ -8,7 +8,7 @@ export async function resolveLockedConfirmedRouteExecutionOrigin(
   anchorFromNodeId: string,
   anchorToNodeId: string,
 ) {
-  const [nodes, events] = await Promise.all([
+  const [nodes, events, origins] = await Promise.all([
     transaction.itineraryNode.findMany({
       where: { tripId },
       orderBy: [
@@ -24,6 +24,10 @@ export async function resolveLockedConfirmedRouteExecutionOrigin(
       },
     }),
     transaction.executionEvent.findMany({ where: { tripId, undoneAt: null } }),
+    transaction.externalExecutionOrigin.findMany({
+      where: { tripId },
+      select: { arrivedAt: true, departedAt: true },
+    }),
   ]);
   const from = nodes.findIndex((node) => node.id === anchorFromNodeId);
   const to = nodes.findIndex((node) => node.id === anchorToNodeId);
@@ -44,5 +48,9 @@ export async function resolveLockedConfirmedRouteExecutionOrigin(
         ? []
         : nodes.slice(from, to + 1).map((node) => node.id),
     events,
+    externalExecutionFacts: origins.flatMap((origin) => [
+      origin.arrivedAt,
+      ...(origin.departedAt === null ? [] : [origin.departedAt]),
+    ]),
   });
 }

@@ -350,7 +350,7 @@ async function verifyHandoffReplacement({ apiJson, sql, waitFor, date }) {
   });
   for (const [index, name] of [
     'SYNTHETIC_HANDOFF_FROM',
-    'SYNTHETIC_HANDOFF_TO',
+    'SYNTHETIC_P5E2_GROUND_DESTINATION',
   ].entries()) {
     trip = await apiJson(`/trips/${trip.id}/commands`, 'POST', {
       baseTripVersion: trip.version,

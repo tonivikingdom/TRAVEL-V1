@@ -40,7 +40,13 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
     readonly desiredRisks: readonly DesiredExecutionRisk[];
     readonly correlationGroupKey?: string | undefined;
     readonly correlationSourceTransportEdgeId?: string | undefined;
+    readonly correlationRequireSourceMatch?: boolean | undefined;
     readonly expectedGroundTransitCapabilityRevision?: number | undefined;
+    readonly expectedGroundTransitObservation?: {
+      readonly transportEdgeId: string;
+      readonly identity: string;
+      readonly fetchedAt: Date;
+    };
   }): Promise<ReconcileExecutionRisksResult> {
     return this.client.$transaction(async (transaction) => {
       await lockOwner(transaction, input.ownerUserId);
@@ -65,6 +71,66 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
           capability.revision !== input.expectedGroundTransitCapabilityRevision
         ) {
           return { status: 'CAPABILITY_CHANGED' };
+        }
+      }
+      let decisionFacts: Record<string, unknown> | null = null;
+      if (input.expectedGroundTransitObservation !== undefined) {
+        const expected = input.expectedGroundTransitObservation;
+        const leg = await transaction.groundTransitLegExecution.findUnique({
+          where: { transportEdgeId: expected.transportEdgeId },
+          select: {
+            tripId: true,
+            adoptedRouteId: true,
+            latestObservationId: true,
+            latestFetchedAt: true,
+            latestObservation: true,
+          },
+        });
+        const currentEdge =
+          leg === null
+            ? null
+            : await transaction.transportEdge.findFirst({
+                where: {
+                  id: expected.transportEdgeId,
+                  tripId: input.tripId,
+                  adoptedRouteId: leg.adoptedRouteId,
+                  source: 'ADOPTED_ROUTE',
+                  adoptedRoute: { status: 'ACTIVE' },
+                },
+                select: { id: true },
+              });
+        if (
+          leg?.tripId !== input.tripId ||
+          currentEdge === null ||
+          leg.latestObservationId !== expected.identity ||
+          leg.latestFetchedAt?.getTime() !== expected.fetchedAt.getTime()
+        ) {
+          return { status: 'OBSERVATION_OBSOLETE' };
+        }
+        if (
+          leg.latestObservation === null ||
+          typeof leg.latestObservation !== 'object' ||
+          Array.isArray(leg.latestObservation)
+        )
+          return { status: 'OBSERVATION_OBSOLETE' };
+        decisionFacts = leg.latestObservation as Record<string, unknown>;
+        if (
+          decisionFacts.__groundTransitRiskDecision ===
+          `${expected.identity}:${expected.fetchedAt.toISOString()}`
+        ) {
+          const active = await transaction.executionRisk.findMany({
+            where: {
+              ownerUserId: input.ownerUserId,
+              tripId: input.tripId,
+              resolvedAt: null,
+            },
+          });
+          return {
+            status: 'SUCCESS',
+            activeRisks: orderRiskRecords(active.map(toRecord)),
+            resolvedRisks: [],
+            notificationsCreated: [],
+          };
         }
       }
 
@@ -128,6 +194,8 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
               correlationGroupKey: input.correlationGroupKey,
               correlationSourceTransportEdgeId:
                 input.correlationSourceTransportEdgeId,
+              correlationRequireSourceMatch:
+                input.correlationRequireSourceMatch,
             }),
           );
           continue;
@@ -175,6 +243,8 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
               correlationGroupKey: input.correlationGroupKey,
               correlationSourceTransportEdgeId:
                 input.correlationSourceTransportEdgeId,
+              correlationRequireSourceMatch:
+                input.correlationRequireSourceMatch,
             }),
           );
         }
@@ -204,6 +274,24 @@ export class PrismaExecutionRiskRepository implements ExecutionRiskRepository {
         },
         orderBy: [{ severity: 'desc' }, { firstSeenAt: 'asc' }, { id: 'asc' }],
       });
+      if (
+        decisionFacts !== null &&
+        input.expectedGroundTransitObservation !== undefined
+      ) {
+        const expected = input.expectedGroundTransitObservation;
+        await transaction.groundTransitLegExecution.update({
+          where: { transportEdgeId: expected.transportEdgeId },
+          data: {
+            // latestObservation is a denormalized current snapshot plus an
+            // internal decision watermark. This marker is never included in
+            // GroundTransitObservation.facts, its provider hash, or API output.
+            latestObservation: {
+              ...decisionFacts,
+              __groundTransitRiskDecision: `${expected.identity}:${expected.fetchedAt.toISOString()}`,
+            } as Prisma.InputJsonValue,
+          },
+        });
+      }
       return {
         status: 'SUCCESS',
         activeRisks: orderRiskRecords(activeRisks.map(toRecord)),
@@ -309,13 +397,15 @@ async function createNotification(
     readonly now: Date;
     readonly correlationGroupKey?: string | undefined;
     readonly correlationSourceTransportEdgeId?: string | undefined;
+    readonly correlationRequireSourceMatch?: boolean | undefined;
   },
 ): Promise<NotificationRecord> {
   const groupKey =
     input.correlationGroupKey !== undefined &&
     (input.risk.sourceTransportEdgeId ===
       input.correlationSourceTransportEdgeId ||
-      (input.correlationSourceTransportEdgeId !== undefined &&
+      (!input.correlationRequireSourceMatch &&
+        input.correlationSourceTransportEdgeId !== undefined &&
         input.desired.evidenceRefs.includes(
           `transport:${input.correlationSourceTransportEdgeId}`,
         )))

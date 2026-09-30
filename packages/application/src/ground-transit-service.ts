@@ -4,6 +4,7 @@ import type {
   GroundTransitRefreshResponse,
 } from '@travel/contracts';
 import {
+  assessGroundTransitOperational,
   assessGroundTransitSafety,
   GROUND_TRANSIT_POLICY,
   validGroundTransitObservation,
@@ -142,14 +143,17 @@ export class GroundTransitService {
       if (failure === 'CAPABILITY_CHANGED') {
         return { status: 'STALE_IGNORED', leg: toView(leg, now) };
       }
+      let relatedRiskActive = false;
+      let hasDownstreamImpact = false;
       if (failure === 'CURRENT' && this.executionRiskService !== undefined) {
         try {
-          await this.executionRiskService.evaluateTripRisks(
+          const evaluated = await this.executionRiskService.evaluateTripRisks(
             { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
             tripId,
             {
               groupKey: `ground-transit-provider-unavailable:${leg.id}:${Math.floor(now.getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
               sourceTransportEdgeId: leg.transportEdgeId,
+              requireSourceMatch: true,
               ...(expectedCapabilityRevision === undefined
                 ? {}
                 : {
@@ -157,6 +161,16 @@ export class GroundTransitService {
                       expectedCapabilityRevision,
                   }),
             },
+          );
+          const related = evaluated.risks.filter(
+            (risk) => risk.sourceTransportEdgeId === leg.transportEdgeId,
+          );
+          relatedRiskActive = related.length > 0;
+          hasDownstreamImpact = related.some(
+            (risk) =>
+              (risk.protectedTransportEdgeId !== null &&
+                risk.protectedTransportEdgeId !== leg.transportEdgeId) ||
+              risk.protectedNodeId !== null,
           );
         } catch (error) {
           if (
@@ -167,6 +181,38 @@ export class GroundTransitService {
           }
           throw error;
         }
+      }
+      if (
+        failure === 'CURRENT' &&
+        leg.latestObservation !== null &&
+        leg.baseline !== null
+      ) {
+        await this.repository.recordOperationalPresentation({
+          ownerUserId,
+          tripId,
+          transportEdgeId: leg.transportEdgeId,
+          observationIdentity: leg.latestObservation.observationIdentity,
+          fetchedAt: leg.latestObservation.fetchedAt,
+          assessment: assessGroundTransitOperational({
+            baseline: leg.baseline,
+            previousObservation: leg.previousObservation ?? null,
+            latestObservation: leg.latestObservation,
+            attentionState: leg.attentionState ?? null,
+            now,
+            state: leg.state,
+            current: leg.current,
+            availableAtBoarding: leg.availableAtBoarding ?? null,
+            actualServiceDeparture: leg.actualServiceDeparture ?? null,
+            downstreamProtectedDeparture:
+              leg.downstreamProtectedDeparture ?? null,
+          }),
+          hasDownstreamImpact,
+          relatedRiskActive,
+          now,
+          ...(expectedCapabilityRevision === undefined
+            ? {}
+            : { expectedCapabilityRevision }),
+        });
       }
       throw new ApplicationError(
         'GROUND_TRANSIT_PROVIDER_UNAVAILABLE',
@@ -202,18 +248,22 @@ export class GroundTransitService {
         leg: toView(committed.leg, this.now()),
       };
     }
-    if (this.executionRiskService !== undefined) {
+    let relatedRiskActive = false;
+    let hasDownstreamImpact = false;
+    if (
+      this.executionRiskService !== undefined &&
+      (committed.status === 'APPLIED' || committed.status === 'IDEMPOTENT')
+    ) {
       try {
-        await this.executionRiskService.evaluateTripRisks(
+        const evaluated = await this.executionRiskService.evaluateTripRisks(
           { userId: ownerUserId, email: '', role: 'USER', status: 'ACTIVE' },
           tripId,
           {
-            groupKey:
-              committed.status === 'APPLIED' ||
-              committed.status === 'IDEMPOTENT'
-                ? `ground-transit-observation:${committed.leg.id}:${result.observation.fetchedAt.toISOString()}`
-                : `ground-transit-recheck:${committed.leg.id}:${Math.floor(this.now().getTime() / GROUND_TRANSIT_POLICY.monitorIntervalMs)}`,
+            groupKey: `ground-transit-observation:${committed.leg.id}:${result.observation.fetchedAt.toISOString()}`,
             sourceTransportEdgeId: leg.transportEdgeId,
+            requireSourceMatch: true,
+            observationIdentity: result.observation.observationIdentity,
+            observationFetchedAt: result.observation.fetchedAt,
             ...(expectedCapabilityRevision === undefined
               ? {}
               : {
@@ -222,15 +272,58 @@ export class GroundTransitService {
                 }),
           },
         );
+        const related = evaluated.risks.filter(
+          (risk) => risk.sourceTransportEdgeId === leg.transportEdgeId,
+        );
+        relatedRiskActive = related.length > 0;
+        hasDownstreamImpact = related.some(
+          (risk) =>
+            (risk.protectedTransportEdgeId !== null &&
+              risk.protectedTransportEdgeId !== leg.transportEdgeId) ||
+            risk.protectedNodeId !== null,
+        );
       } catch (error) {
         if (!(
           error instanceof ApplicationError &&
-          error.code === 'CAPABILITY_CHANGED'
+          (error.code === 'CAPABILITY_CHANGED' ||
+            error.code === 'GROUND_TRANSIT_OBSERVATION_OBSOLETE')
         )) {
           throw error;
         }
         // The observation committed before pause; no later risk/notification may cross it.
       }
+    }
+    if (
+      (committed.status === 'APPLIED' || committed.status === 'IDEMPOTENT') &&
+      committed.leg.baseline !== null
+    ) {
+      const assessment = assessGroundTransitOperational({
+        baseline: committed.leg.baseline,
+        previousObservation: committed.leg.previousObservation ?? null,
+        latestObservation: committed.leg.latestObservation,
+        attentionState: committed.leg.attentionState ?? null,
+        now: this.now(),
+        state: committed.leg.state,
+        current: committed.leg.current,
+        availableAtBoarding: committed.leg.availableAtBoarding ?? null,
+        actualServiceDeparture: committed.leg.actualServiceDeparture ?? null,
+        downstreamProtectedDeparture:
+          committed.leg.downstreamProtectedDeparture ?? null,
+      });
+      await this.repository.recordOperationalPresentation({
+        ownerUserId,
+        tripId,
+        transportEdgeId: leg.transportEdgeId,
+        observationIdentity: result.observation.observationIdentity,
+        fetchedAt: result.observation.fetchedAt,
+        assessment,
+        hasDownstreamImpact,
+        relatedRiskActive,
+        now: this.now(),
+        ...(expectedCapabilityRevision === undefined
+          ? {}
+          : { expectedCapabilityRevision }),
+      });
     }
     return { status: committed.status, leg: toView(committed.leg, this.now()) };
   }
@@ -274,6 +367,52 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
           downstreamLatestAt: null,
           boundary: 'TRANSFER_TO_NEXT',
         });
+  const operational =
+    leg.baseline === null
+      ? {
+          policyVersion: 'ground-transit-operational-v1',
+          disposition: 'CONTINUE_CURRENT_PLAN' as const,
+          requiredAction: 'NONE' as const,
+          changeKinds: [],
+          reasonCodes: ['LEG_METADATA_UNKNOWN'],
+          targetServiceability: {
+            boarding: 'UNKNOWN' as const,
+            alighting: 'UNKNOWN' as const,
+          },
+          requiresUserAttention: false,
+          notificationPriority: null,
+          attentionActivationKinds: [],
+          factChangeKinds: [],
+          persistentAttentionActive: false,
+          materialDelayBand: 0,
+          observationEvidenceRef: null,
+          irreversibleActualMiss: false,
+        }
+      : assessGroundTransitOperational({
+          baseline: leg.baseline,
+          previousObservation: leg.previousObservation ?? null,
+          latestObservation: leg.latestObservation,
+          attentionState: leg.attentionState ?? null,
+          now,
+          state: leg.state,
+          current: leg.current,
+          availableAtBoarding: leg.availableAtBoarding ?? null,
+          actualServiceDeparture: leg.actualServiceDeparture ?? null,
+          downstreamProtectedDeparture:
+            leg.downstreamProtectedDeparture ?? null,
+        });
+  const publicOperational = {
+    policyVersion: operational.policyVersion,
+    disposition: operational.disposition,
+    requiredAction: operational.requiredAction,
+    changeKinds: operational.changeKinds,
+    reasonCodes: operational.reasonCodes,
+    targetServiceability: operational.targetServiceability,
+    requiresUserAttention: operational.requiresUserAttention,
+    notificationPriority: operational.notificationPriority,
+    observationEvidenceRef: operational.observationEvidenceRef,
+    irreversibleActualMiss: operational.irreversibleActualMiss,
+  };
   return {
     id: leg.id,
     transportEdgeId: leg.transportEdgeId,
@@ -303,6 +442,7 @@ function toView(leg: GroundTransitLegRecord, now: Date): GroundTransitLegView {
     latestFetchedAt: leg.latestFetchedAt?.toISOString() ?? null,
     observationCount: leg.observationCount,
     current: leg.current,
+    operational: publicOperational,
     deviationConsecutiveObservations: leg.deviationCount,
     deviationStartedAt: leg.deviationStartedAt?.toISOString() ?? null,
     safety: {

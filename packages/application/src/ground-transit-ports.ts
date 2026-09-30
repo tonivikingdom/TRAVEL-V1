@@ -1,6 +1,8 @@
 import type {
   GroundTransitBaseline,
   GroundTransitObservation,
+  GroundTransitOperationalAssessment,
+  GroundTransitAttentionState,
 } from '@travel/domain';
 
 export interface GroundTransitLegRecord {
@@ -22,11 +24,16 @@ export interface GroundTransitLegRecord {
     | 'NO_LONGER_FEASIBLE'
     | 'UNKNOWN';
   readonly latestObservation: GroundTransitObservation | null;
+  readonly attentionState?: GroundTransitAttentionState | null;
   readonly latestFetchedAt: Date | null;
   readonly observationCount: number;
   readonly deviationCount: number;
   readonly deviationStartedAt: Date | null;
   readonly current: boolean;
+  readonly previousObservation?: GroundTransitObservation | null;
+  readonly availableAtBoarding?: Date | null;
+  readonly actualServiceDeparture?: Date | null;
+  readonly downstreamProtectedDeparture?: Date | null;
 }
 
 export type GroundTransitCommitStatus =
@@ -70,6 +77,18 @@ export interface GroundTransitRepository {
     readonly expectedCapabilityRevision?: number;
     readonly now: Date;
   }): Promise<'CURRENT' | 'CAPABILITY_CHANGED' | 'NOT_FOUND'>;
+  recordOperationalPresentation(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly transportEdgeId: string;
+    readonly observationIdentity: string;
+    readonly fetchedAt: Date;
+    readonly assessment: GroundTransitOperationalAssessment;
+    readonly hasDownstreamImpact: boolean;
+    readonly relatedRiskActive: boolean;
+    readonly expectedCapabilityRevision?: number;
+    readonly now: Date;
+  }): Promise<'CURRENT' | 'OBSOLETE' | 'CAPABILITY_CHANGED'>;
   ensureEligibleMonitoring(now: Date): Promise<number>;
   listJobLegs(input: {
     readonly adoptedRouteId: string;

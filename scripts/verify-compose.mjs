@@ -489,13 +489,20 @@ async function verifyCompose(compose, composeQuiet, env) {
       'Synthetic P4B3 receipt/outbox/lifecycle evidence is missing',
     );
   }
-  if (env.GROUND_TRANSIT_WORKER_SYNTHETIC_SCENARIO === 'FAIL_FIRST') {
+  if (
+    ['FAIL_FIRST', 'FAIL_FIRST_THEN_CANCEL_FIXED'].includes(
+      env.GROUND_TRANSIT_WORKER_SYNTHETIC_SCENARIO,
+    )
+  ) {
     const ground = await verifyGroundTransitChain({
       apiJson,
       composeQuiet,
       waitFor,
       databaseUser,
       databaseName,
+      expectOperationalDisruption:
+        env.GROUND_TRANSIT_WORKER_SYNTHETIC_SCENARIO ===
+        'FAIL_FIRST_THEN_CANCEL_FIXED',
     });
     process.stdout.write(
       `P5E2 synthetic ground transit: ${JSON.stringify(ground)}\n`,

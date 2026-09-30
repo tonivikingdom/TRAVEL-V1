@@ -62,6 +62,13 @@ export interface GroundTransitObservation {
   readonly departurePlatform: string | null;
   readonly arrivalPlatform: string | null;
   readonly serviceStatus: 'ON_TIME' | 'DELAYED' | 'CANCELLED' | 'UNKNOWN';
+  /** Missing on legacy observations means UNKNOWN, never an inferred stop call. */
+  readonly boardingTargetServiceability?: GroundTransitTargetServiceability;
+  readonly alightingTargetServiceability?: GroundTransitTargetServiceability;
+  readonly currentTerminusRef?: string | null;
+  readonly currentTerminusLabel?: string | null;
+  readonly operatingFromHubRef?: string | null;
+  readonly operatingToHubRef?: string | null;
   readonly headwayMinSeconds: number | null;
   readonly headwayMaxSeconds: number | null;
   readonly nextDepartureInSeconds: number | null;
@@ -92,6 +99,10 @@ export function validGroundTransitObservation(
     value.serviceIdentityKey,
     value.departurePlatform,
     value.arrivalPlatform,
+    value.currentTerminusRef ?? null,
+    value.currentTerminusLabel ?? null,
+    value.operatingFromHubRef ?? null,
+    value.operatingToHubRef ?? null,
   ];
   const numbers = [
     value.headwayMinSeconds,
@@ -112,6 +123,14 @@ export function validGroundTransitObservation(
     ['ON_TIME', 'DELAYED', 'CANCELLED', 'UNKNOWN'].includes(
       value.serviceStatus,
     ) &&
+    [
+      value.boardingTargetServiceability,
+      value.alightingTargetServiceability,
+    ].every(
+      (item) =>
+        item === undefined ||
+        ['SERVED', 'NOT_SERVED', 'UNKNOWN'].includes(item),
+    ) &&
     dates.every(
       (date) =>
         date === null ||
@@ -130,6 +149,441 @@ export function validGroundTransitObservation(
       value.headwayMaxSeconds === null ||
       value.headwayMinSeconds <= value.headwayMaxSeconds)
   );
+}
+
+export type GroundTransitTargetServiceability =
+  'SERVED' | 'NOT_SERVED' | 'UNKNOWN';
+
+export const GROUND_TRANSIT_OPERATIONAL_POLICY = {
+  version: 'ground-transit-operational-v1',
+  executionWindowMs: 60 * 60_000,
+  shortFixedServiceDelaySeconds: 8 * 60,
+  longFixedServiceDelaySeconds: 15 * 60,
+  longLegSeconds: 45 * 60,
+  farAwayDelayMultiplier: 2,
+  highFrequencyHeadwayMultiplier: 2,
+} as const;
+
+export type GroundTransitChangeKind =
+  | 'SERVICE_CANCELLED'
+  | 'EARLY_DEPARTURE'
+  | 'MATERIAL_DELAY'
+  | 'DEPARTURE_PLATFORM_CHANGED'
+  | 'ARRIVAL_PLATFORM_CHANGED'
+  | 'BOARDING_TARGET_NO_LONGER_SERVED'
+  | 'ALIGHTING_TARGET_NO_LONGER_SERVED'
+  | 'SERVICE_SHORT_TURNED'
+  | 'TERMINUS_CHANGED'
+  | 'DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK'
+  | 'SERVICE_RESTORED';
+
+/** Internal, durable presentation watermark; never part of provider facts. */
+export interface GroundTransitAttentionState {
+  readonly departurePlatformReference: string | null;
+  readonly arrivalPlatformReference: string | null;
+  readonly presentedDeparturePlatform: string | null;
+  readonly presentedArrivalPlatform: string | null;
+  readonly presentedEarlyDeparture: boolean;
+  readonly presentedDelayBand: number;
+}
+
+export function advanceGroundTransitAttentionState(input: {
+  readonly previous: GroundTransitAttentionState | null;
+  readonly previousObservation: GroundTransitObservation | null;
+  readonly observation: GroundTransitObservation;
+  readonly baseline: GroundTransitBaseline;
+}): GroundTransitAttentionState {
+  const previous = input.previous;
+  const observation = input.observation;
+  const prior = input.previousObservation;
+  const departurePlatformReference =
+    previous?.departurePlatformReference ??
+    prior?.departurePlatform ??
+    observation.departurePlatform;
+  const arrivalPlatformReference =
+    previous?.arrivalPlatformReference ??
+    prior?.arrivalPlatform ??
+    observation.arrivalPlatform;
+  const departure =
+    observation.actualDeparture ?? observation.estimatedDeparture;
+  const early =
+    departure !== null &&
+    input.baseline.plannedDeparture !== null &&
+    departure.getTime() < input.baseline.plannedDeparture.getTime();
+  const arrival = observation.actualArrival ?? observation.estimatedArrival;
+  const delayed =
+    arrival !== null &&
+    input.baseline.plannedArrival !== null &&
+    arrival.getTime() - input.baseline.plannedArrival.getTime() >=
+      baseDelayThresholdSeconds(input.baseline) * 1000;
+  return {
+    departurePlatformReference,
+    arrivalPlatformReference,
+    presentedDeparturePlatform:
+      observation.departurePlatform === prior?.departurePlatform
+        ? (previous?.presentedDeparturePlatform ?? null)
+        : null,
+    presentedArrivalPlatform:
+      observation.arrivalPlatform === prior?.arrivalPlatform
+        ? (previous?.presentedArrivalPlatform ?? null)
+        : null,
+    presentedEarlyDeparture: early
+      ? (previous?.presentedEarlyDeparture ?? false)
+      : false,
+    presentedDelayBand: delayed ? (previous?.presentedDelayBand ?? 0) : 0,
+  };
+}
+
+export interface GroundTransitOperationalAssessment {
+  readonly policyVersion: typeof GROUND_TRANSIT_OPERATIONAL_POLICY.version;
+  readonly disposition:
+    | 'CONTINUE_CURRENT_PLAN'
+    | 'CURRENT_PLAN_AT_RISK'
+    | 'CURRENT_PLAN_NO_LONGER_FEASIBLE';
+  readonly requiredAction: 'NONE' | 'ROUTE_REEVALUATION_REQUIRED';
+  readonly changeKinds: readonly GroundTransitChangeKind[];
+  readonly factChangeKinds: readonly GroundTransitChangeKind[];
+  /** A persisted incident became actionable, even without a new provider delta. */
+  readonly attentionActivationKinds: readonly GroundTransitChangeKind[];
+  readonly persistentAttentionActive: boolean;
+  readonly materialDelayBand: number;
+  readonly reasonCodes: readonly string[];
+  readonly targetServiceability: {
+    readonly boarding: GroundTransitTargetServiceability;
+    readonly alighting: GroundTransitTargetServiceability;
+  };
+  readonly requiresUserAttention: boolean;
+  readonly notificationPriority: 'NORMAL' | 'STRONG' | null;
+  readonly observationEvidenceRef: string | null;
+  readonly irreversibleActualMiss: boolean;
+}
+
+/** Provider facts have no GPS-style hysteresis after identity and ordering acceptance. */
+export function assessGroundTransitOperational(input: {
+  readonly baseline: GroundTransitBaseline;
+  readonly previousObservation: GroundTransitObservation | null;
+  readonly latestObservation: GroundTransitObservation | null;
+  readonly now: Date;
+  readonly state: GroundTransitLegState;
+  readonly current: boolean;
+  readonly availableAtBoarding: Date | null;
+  readonly actualServiceDeparture?: Date | null;
+  readonly downstreamProtectedDeparture: Date | null;
+  readonly attentionState?: GroundTransitAttentionState | null;
+}): GroundTransitOperationalAssessment {
+  const { baseline, now } = input;
+  const latest = input.latestObservation;
+  const fresh =
+    latest !== null &&
+    latest.fetchedAt.getTime() <= now.getTime() &&
+    now.getTime() - latest.fetchedAt.getTime() <=
+      GROUND_TRANSIT_POLICY.realtimeFreshnessMs &&
+    matchGroundTransitIdentity(baseline, latest) === 'MATCHED';
+  // A confirmed destination arrival (or completed handoff) outranks later
+  // operational reports about the vehicle's ability to serve that destination.
+  const current =
+    input.current &&
+    input.state !== 'COMPLETED' &&
+    input.state !== 'ARRIVED_PENDING_HANDOFF';
+  const fact = fresh && current ? latest : null;
+  const prior = input.previousObservation;
+  const boarding = fact?.boardingTargetServiceability ?? 'UNKNOWN';
+  const alighting = fact?.alightingTargetServiceability ?? 'UNKNOWN';
+  const departure =
+    fact?.actualDeparture ??
+    fact?.estimatedDeparture ??
+    baseline.plannedDeparture;
+  const arrival =
+    fact?.actualArrival ?? fact?.estimatedArrival ?? baseline.plannedArrival;
+  const baselineDeparture = baseline.plannedDeparture?.getTime() ?? null;
+  const baselineArrival = baseline.plannedArrival?.getTime() ?? null;
+  const departureDelta =
+    departure !== null && baselineDeparture !== null
+      ? departure.getTime() - baselineDeparture
+      : null;
+  const arrivalDelta =
+    arrival !== null && baselineArrival !== null
+      ? arrival.getTime() - baselineArrival
+      : null;
+  const executionWindow =
+    input.state === 'IN_PROGRESS' ||
+    input.state === 'ARRIVED_PENDING_HANDOFF' ||
+    (baselineDeparture !== null &&
+      Math.abs(baselineDeparture - now.getTime()) <=
+        GROUND_TRANSIT_OPERATIONAL_POLICY.executionWindowMs);
+  const actualDeparture =
+    input.actualServiceDeparture ?? fact?.actualDeparture ?? null;
+  const latestArrivalMiss =
+    actualDeparture !== null &&
+    input.availableAtBoarding !== null &&
+    input.availableAtBoarding.getTime() > actualDeparture.getTime();
+  const earlyInfeasible =
+    departureDelta !== null &&
+    departureDelta < 0 &&
+    departure !== null &&
+    input.availableAtBoarding !== null &&
+    input.availableAtBoarding.getTime() +
+      (baseline.boardingAccessMinimumSeconds ?? 0) * 1000 >
+      departure.getTime();
+  const targetLost = boarding === 'NOT_SERVED' || alighting === 'NOT_SERVED';
+  // HIGH_FREQUENCY adoption identifies a corridor, not one vehicle. A generic
+  // cancellation report cannot invalidate the entire corridor.
+  const cancelled =
+    baseline.serviceClass === 'FIXED_SERVICE' &&
+    fact?.serviceStatus === 'CANCELLED';
+  const priorFailureUnrebutted =
+    input.state === 'NO_LONGER_FEASIBLE' &&
+    !(
+      fact !== null &&
+      !cancelled &&
+      boarding === 'SERVED' &&
+      alighting === 'SERVED'
+    );
+  const downstreamImpact =
+    arrival !== null &&
+    input.downstreamProtectedDeparture !== null &&
+    (arrival.getTime() > input.downstreamProtectedDeparture.getTime() ||
+      (baseline.minimumTransferSeconds !== null &&
+        arrival.getTime() + baseline.minimumTransferSeconds * 1000 >
+          input.downstreamProtectedDeparture.getTime()));
+  const priorArrival =
+    prior?.actualArrival ?? prior?.estimatedArrival ?? baseline.plannedArrival;
+  const priorDownstreamImpact =
+    priorArrival !== null &&
+    input.downstreamProtectedDeparture !== null &&
+    (priorArrival.getTime() > input.downstreamProtectedDeparture.getTime() ||
+      (baseline.minimumTransferSeconds !== null &&
+        priorArrival.getTime() + baseline.minimumTransferSeconds * 1000 >
+          input.downstreamProtectedDeparture.getTime()));
+  const newDownstreamImpact = downstreamImpact && !priorDownstreamImpact;
+  const baseDelayThreshold = baseDelayThresholdSeconds(baseline);
+  const threshold = executionWindow
+    ? baseDelayThreshold
+    : baseDelayThreshold *
+      GROUND_TRANSIT_OPERATIONAL_POLICY.farAwayDelayMultiplier;
+  const delayThresholdMs = threshold * 1000;
+  const materialDelay =
+    arrivalDelta !== null && arrivalDelta >= delayThresholdMs;
+  const previousArrivalDelta =
+    priorArrival !== null && baselineArrival !== null
+      ? priorArrival.getTime() - baselineArrival
+      : null;
+  // Context determines when delay first becomes actionable. Escalation bands
+  // use the stable base threshold, so entering the near window does not
+  // re-alert an incident already presented for a downstream consequence.
+  const currentDelayBand =
+    materialDelay && arrivalDelta !== null
+      ? Math.floor(arrivalDelta / (baseDelayThreshold * 1000))
+      : 0;
+  const previousDelayBand =
+    previousArrivalDelta !== null && previousArrivalDelta >= delayThresholdMs
+      ? Math.floor(previousArrivalDelta / (baseDelayThreshold * 1000))
+      : 0;
+  const materialDelayEscalated = currentDelayBand > previousDelayBand;
+  const attentionState = input.attentionState;
+  const departurePlatformReference =
+    attentionState?.departurePlatformReference ?? prior?.departurePlatform;
+  const arrivalPlatformReference =
+    attentionState?.arrivalPlatformReference ?? prior?.arrivalPlatform;
+  const departurePlatformIncident =
+    fact?.departurePlatform !== null &&
+    fact?.departurePlatform !== undefined &&
+    departurePlatformReference !== null &&
+    departurePlatformReference !== undefined &&
+    fact.departurePlatform !== departurePlatformReference;
+  const arrivalPlatformIncident =
+    fact?.arrivalPlatform !== null &&
+    fact?.arrivalPlatform !== undefined &&
+    arrivalPlatformReference !== null &&
+    arrivalPlatformReference !== undefined &&
+    fact.arrivalPlatform !== arrivalPlatformReference;
+  const presentedDelayBand =
+    attentionState?.presentedDelayBand ?? previousDelayBand;
+  const attentionActivationKinds: GroundTransitChangeKind[] = [];
+  if (
+    executionWindow &&
+    departurePlatformIncident &&
+    fact!.departurePlatform !== attentionState?.presentedDeparturePlatform
+  )
+    attentionActivationKinds.push('DEPARTURE_PLATFORM_CHANGED');
+  if (
+    executionWindow &&
+    arrivalPlatformIncident &&
+    fact!.arrivalPlatform !== attentionState?.presentedArrivalPlatform
+  )
+    attentionActivationKinds.push('ARRIVAL_PLATFORM_CHANGED');
+  if (
+    executionWindow &&
+    departureDelta !== null &&
+    departureDelta < 0 &&
+    !attentionState?.presentedEarlyDeparture
+  )
+    attentionActivationKinds.push('EARLY_DEPARTURE');
+  if (
+    materialDelay &&
+    (executionWindow || downstreamImpact) &&
+    currentDelayBand > presentedDelayBand
+  )
+    attentionActivationKinds.push('MATERIAL_DELAY');
+  const changes: GroundTransitChangeKind[] = [];
+  if (fact !== null) {
+    if (cancelled && prior?.serviceStatus !== 'CANCELLED')
+      changes.push('SERVICE_CANCELLED');
+    if (
+      departureDelta !== null &&
+      departureDelta < 0 &&
+      (prior?.estimatedDeparture?.getTime() ?? baselineDeparture) !==
+        departure?.getTime()
+    )
+      changes.push('EARLY_DEPARTURE');
+    if (materialDelayEscalated) changes.push('MATERIAL_DELAY');
+    if (newDownstreamImpact)
+      changes.push('DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK');
+    if (
+      fact.departurePlatform !== null &&
+      prior?.departurePlatform !== null &&
+      prior?.departurePlatform !== undefined &&
+      fact.departurePlatform !== prior.departurePlatform
+    )
+      changes.push('DEPARTURE_PLATFORM_CHANGED');
+    if (
+      fact.arrivalPlatform !== null &&
+      prior?.arrivalPlatform !== null &&
+      prior?.arrivalPlatform !== undefined &&
+      fact.arrivalPlatform !== prior.arrivalPlatform
+    )
+      changes.push('ARRIVAL_PLATFORM_CHANGED');
+    if (
+      boarding === 'NOT_SERVED' &&
+      prior?.boardingTargetServiceability !== 'NOT_SERVED'
+    )
+      changes.push('BOARDING_TARGET_NO_LONGER_SERVED');
+    if (
+      alighting === 'NOT_SERVED' &&
+      prior?.alightingTargetServiceability !== 'NOT_SERVED'
+    )
+      changes.push('ALIGHTING_TARGET_NO_LONGER_SERVED');
+    const terminusChanged =
+      fact.currentTerminusRef !== null &&
+      fact.currentTerminusRef !== undefined &&
+      prior?.currentTerminusRef !== null &&
+      prior?.currentTerminusRef !== undefined &&
+      fact.currentTerminusRef !== prior.currentTerminusRef;
+    if (
+      targetLost &&
+      fact.currentTerminusRef !== null &&
+      fact.currentTerminusRef !== undefined &&
+      (changes.includes('BOARDING_TARGET_NO_LONGER_SERVED') ||
+        changes.includes('ALIGHTING_TARGET_NO_LONGER_SERVED') ||
+        terminusChanged)
+    )
+      changes.push('SERVICE_SHORT_TURNED');
+    if (terminusChanged) changes.push('TERMINUS_CHANGED');
+    if (
+      !latestArrivalMiss &&
+      !earlyInfeasible &&
+      ((baseline.serviceClass === 'FIXED_SERVICE' &&
+        prior?.serviceStatus === 'CANCELLED' &&
+        !cancelled &&
+        boarding === 'SERVED' &&
+        alighting === 'SERVED') ||
+        ((prior?.boardingTargetServiceability === 'NOT_SERVED' ||
+          prior?.alightingTargetServiceability === 'NOT_SERVED') &&
+          boarding === 'SERVED' &&
+          alighting === 'SERVED' &&
+          !cancelled))
+    )
+      changes.push('SERVICE_RESTORED');
+  }
+  const infeasible =
+    current &&
+    (cancelled ||
+      targetLost ||
+      latestArrivalMiss ||
+      earlyInfeasible ||
+      priorFailureUnrebutted);
+  const atRisk =
+    current &&
+    !infeasible &&
+    (downstreamImpact ||
+      (departureDelta !== null && departureDelta < 0 && executionWindow) ||
+      (materialDelay && executionWindow));
+  const persistentAttentionActive =
+    (departurePlatformIncident &&
+      fact?.departurePlatform === attentionState?.presentedDeparturePlatform) ||
+    (arrivalPlatformIncident &&
+      fact?.arrivalPlatform === attentionState?.presentedArrivalPlatform) ||
+    (departureDelta !== null &&
+      departureDelta < 0 &&
+      attentionState?.presentedEarlyDeparture === true) ||
+    (materialDelay &&
+      currentDelayBand <= (attentionState?.presentedDelayBand ?? 0) &&
+      (attentionState?.presentedDelayBand ?? 0) > 0);
+  const attention =
+    current &&
+    ((infeasible && changes.length > 0) ||
+      changes.includes('SERVICE_RESTORED') ||
+      attentionActivationKinds.length > 0 ||
+      newDownstreamImpact);
+  const factChangeKinds = [...changes];
+  for (const kind of attentionActivationKinds) {
+    if (!changes.includes(kind)) changes.push(kind);
+  }
+  return {
+    policyVersion: GROUND_TRANSIT_OPERATIONAL_POLICY.version,
+    disposition: infeasible
+      ? 'CURRENT_PLAN_NO_LONGER_FEASIBLE'
+      : atRisk
+        ? 'CURRENT_PLAN_AT_RISK'
+        : 'CONTINUE_CURRENT_PLAN',
+    requiredAction:
+      infeasible || downstreamImpact ? 'ROUTE_REEVALUATION_REQUIRED' : 'NONE',
+    changeKinds: changes,
+    factChangeKinds,
+    attentionActivationKinds,
+    persistentAttentionActive,
+    materialDelayBand: currentDelayBand,
+    reasonCodes: [
+      ...(cancelled ? ['SERVICE_CANCELLED'] : []),
+      ...(boarding === 'NOT_SERVED' ? ['BOARDING_TARGET_NOT_SERVED'] : []),
+      ...(alighting === 'NOT_SERVED' ? ['ALIGHTING_TARGET_NOT_SERVED'] : []),
+      ...(latestArrivalMiss ? ['IRREVERSIBLE_ACTUAL_MISS'] : []),
+      ...(priorFailureUnrebutted ? ['PRIOR_FAILURE_NOT_YET_REBUTTED'] : []),
+      ...(earlyInfeasible ? ['EARLY_DEPARTURE_MISSED'] : []),
+      ...(downstreamImpact ? ['DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK'] : []),
+    ],
+    targetServiceability: { boarding, alighting },
+    requiresUserAttention: attention,
+    notificationPriority: attention
+      ? infeasible || changes.includes('SERVICE_RESTORED')
+        ? 'STRONG'
+        : 'NORMAL'
+      : null,
+    observationEvidenceRef:
+      fact === null
+        ? null
+        : `ground-transit-observation:${fact.observationIdentity}`,
+    irreversibleActualMiss: latestArrivalMiss,
+  };
+}
+
+function baseDelayThresholdSeconds(baseline: GroundTransitBaseline): number {
+  const durationSeconds =
+    baseline.plannedDeparture !== null && baseline.plannedArrival !== null
+      ? Math.max(
+          0,
+          (baseline.plannedArrival.getTime() -
+            baseline.plannedDeparture.getTime()) /
+            1000,
+        )
+      : 0;
+  return baseline.serviceClass === 'HIGH_FREQUENCY'
+    ? (baseline.headwayMaxSeconds ??
+        GROUND_TRANSIT_OPERATIONAL_POLICY.longFixedServiceDelaySeconds) *
+        GROUND_TRANSIT_OPERATIONAL_POLICY.highFrequencyHeadwayMultiplier
+    : durationSeconds <= GROUND_TRANSIT_OPERATIONAL_POLICY.longLegSeconds
+      ? GROUND_TRANSIT_OPERATIONAL_POLICY.shortFixedServiceDelaySeconds
+      : GROUND_TRANSIT_OPERATIONAL_POLICY.longFixedServiceDelaySeconds;
 }
 
 export type GroundTransitObservationAcceptance =
@@ -328,7 +782,8 @@ export function assessGroundTransitSafety(input: {
       ? null
       : arrival.getTime() <= input.downstreamLatestAt.getTime();
   const feasibility =
-    realtime?.serviceStatus === 'CANCELLED' ||
+    (baseline.serviceClass === 'FIXED_SERVICE' &&
+      realtime?.serviceStatus === 'CANCELLED') ||
     departureFeasible === false ||
     arrivalFeasible === false
       ? 'INFEASIBLE'
@@ -342,7 +797,10 @@ export function assessGroundTransitSafety(input: {
       ? 'IDENTITY_UNKNOWN'
       : null,
     identity === 'DIFFERENT_SERVICE' ? 'DIFFERENT_SERVICE' : null,
-    realtime?.serviceStatus === 'CANCELLED' ? 'SERVICE_CANCELLED' : null,
+    baseline.serviceClass === 'FIXED_SERVICE' &&
+    realtime?.serviceStatus === 'CANCELLED'
+      ? 'SERVICE_CANCELLED'
+      : null,
     input.boundary === 'BOARDING' &&
     baseline.serviceClass === 'HIGH_FREQUENCY' &&
     headwayWaitReserveSeconds === null
@@ -416,6 +874,28 @@ export function resolveGroundTransitLegState(input: {
   if (input.fixedServiceNoLongerFeasible) return 'NO_LONGER_FEASIBLE';
   if (input.reliableMovementOnCorridor) return 'IN_PROGRESS';
   return input.previous;
+}
+
+/** Provider reports may invalidate a pending trip, but cannot manufacture
+ * ridership or rewind independently confirmed destination arrival. */
+export function resolveGroundTransitProviderState(input: {
+  readonly previous: GroundTransitLegState;
+  readonly noLongerFeasible: boolean;
+  /** fromState of the latest transition into NO_LONGER_FEASIBLE. */
+  readonly beforeFailureState: GroundTransitLegState | null;
+}): GroundTransitLegState {
+  if (
+    input.previous === 'COMPLETED' ||
+    input.previous === 'ARRIVED_PENDING_HANDOFF'
+  )
+    return input.previous;
+  if (input.noLongerFeasible) return 'NO_LONGER_FEASIBLE';
+  if (input.previous !== 'NO_LONGER_FEASIBLE') return input.previous;
+  return input.beforeFailureState === 'IN_PROGRESS'
+    ? 'IN_PROGRESS'
+    : input.beforeFailureState === 'UNKNOWN'
+      ? 'UNKNOWN'
+      : 'PENDING';
 }
 
 export function isSustainedGroundTransitDeviation(input: {

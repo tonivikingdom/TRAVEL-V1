@@ -5,11 +5,17 @@ import type {
   GroundTransitRepository,
 } from '@travel/application';
 import {
+  assessGroundTransitOperational,
+  advanceGroundTransitAttentionState,
   decideGroundTransitObservationOrdering,
   GROUND_TRANSIT_POLICY,
   matchGroundTransitIdentity,
+  resolveGroundTransitProviderState,
   type GroundTransitBaseline,
   type GroundTransitObservation,
+  type GroundTransitChangeKind,
+  type GroundTransitAttentionState,
+  type GroundTransitOperationalAssessment,
 } from '@travel/domain';
 
 import {
@@ -51,12 +57,19 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
     });
     const currentIds = new Set(currentEdges.map((edge) => edge.id));
     const persistedIds = new Set(rows.map((row) => row.transportEdgeId));
+    const hydrated = await Promise.all(
+      rows.map(async (row) =>
+        toRecord(
+          row,
+          currentIds.has(row.transportEdgeId),
+          await operationalContext(this.client, row),
+        ),
+      ),
+    );
     return {
       tripVersion: trip.version,
       legs: [
-        ...rows.map((row) =>
-          toRecord(row, currentIds.has(row.transportEdgeId)),
-        ),
+        ...hydrated,
         ...currentEdges
           .filter((edge) => !persistedIds.has(edge.id))
           .map((edge) => unknownLegacyRecord(input.tripId, edge)),
@@ -92,7 +105,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
     if (edge === null) return null;
     return row === null
       ? unknownLegacyRecord(input.tripId, edge)
-      : toRecord(row, true);
+      : toRecord(row, true, await operationalContext(this.client, row));
   }
 
   async commitObservation(
@@ -167,7 +180,10 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         incomingFactsHash: factsHash,
       });
       if (ordering !== 'APPLIED') {
-        return { status: ordering, leg: toRecord(row, true) };
+        return {
+          status: ordering,
+          leg: toRecord(row, true, await operationalContext(transaction, row)),
+        };
       }
       const duplicateIdentity =
         await transaction.groundTransitObservation.findFirst({
@@ -185,7 +201,7 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
               input.observation.fetchedAt.getTime()
               ? ('IDEMPOTENT' as const)
               : ('OBSERVATION_CONFLICT' as const),
-          leg: toRecord(row, true),
+          leg: toRecord(row, true, await operationalContext(transaction, row)),
         };
       }
       const savedObservation =
@@ -222,13 +238,14 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         },
         select: { instant: true },
       });
-      const noLongerFeasible =
-        row.serviceClass === 'FIXED_SERVICE' &&
-        (input.observation.serviceStatus === 'CANCELLED' ||
-          (input.observation.actualDeparture !== null &&
-            boardingArrival !== null &&
-            boardingArrival.instant.getTime() >
-              input.observation.actualDeparture.getTime()));
+      const actualServiceDeparture = await transaction.temporalValue.findFirst({
+        where: {
+          transportEdgeId: edge.id,
+          layer: 'ACTUAL',
+          pointKind: 'DEPARTURE',
+        },
+        select: { instant: true },
+      });
       const downstream = await transaction.transportEdge.findFirst({
         where: {
           tripId: input.tripId,
@@ -263,16 +280,53 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         (minimumTransfer === null ||
           estimatedArrival.getTime() + minimumTransfer * 1_000 >
             fixedDeparture.getTime());
+      const previousObservation = parseObservation(row.latestObservation);
+      const operational = assessGroundTransitOperational({
+        baseline,
+        previousObservation,
+        latestObservation: input.observation,
+        now: input.now,
+        state: row.state,
+        current: true,
+        availableAtBoarding: boardingArrival?.instant ?? null,
+        actualServiceDeparture: actualServiceDeparture?.instant ?? null,
+        downstreamProtectedDeparture: fixedDeparture,
+      });
+      const entryIntoFailure =
+        row.state === 'NO_LONGER_FEASIBLE'
+          ? await transaction.groundTransitStateTransition.findFirst({
+              where: {
+                legExecutionId: row.id,
+                toState: 'NO_LONGER_FEASIBLE',
+              },
+              orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+              select: { fromState: true },
+            })
+          : null;
+      const providerState = resolveGroundTransitProviderState({
+        previous: row.state,
+        noLongerFeasible:
+          operational.disposition === 'CURRENT_PLAN_NO_LONGER_FEASIBLE',
+        beforeFailureState: entryIntoFailure?.fromState ?? null,
+      });
       const updated = await transaction.groundTransitLegExecution.update({
         where: { id: row.id },
         data: {
           latestFetchedAt: input.observation.fetchedAt,
           latestObservationId: input.observation.observationIdentity,
           latestObservationHash: factsHash,
-          latestObservation: facts as unknown as Prisma.InputJsonValue,
-          ...(noLongerFeasible && row.state !== 'COMPLETED'
-            ? { state: 'NO_LONGER_FEASIBLE' as const }
-            : {}),
+          // Denormalized current snapshot also carries an internal presentation
+          // watermark. Canonical provider facts/history/hash remain untouched.
+          latestObservation: {
+            ...facts,
+            __groundTransitAttention: advanceGroundTransitAttentionState({
+              previous: parseAttentionState(row.latestObservation),
+              previousObservation,
+              observation: input.observation,
+              baseline,
+            }),
+          } as unknown as Prisma.InputJsonValue,
+          state: providerState,
           deviationCount: consequentialDeviation ? row.deviationCount + 1 : 0,
           deviationStartedAt: consequentialDeviation
             ? (row.deviationStartedAt ?? input.observation.fetchedAt)
@@ -299,7 +353,15 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
           },
         });
       }
-      return { status: 'APPLIED' as const, leg: toRecord(updated, true) };
+      return {
+        status: 'APPLIED' as const,
+        leg: toRecord(updated, true, {
+          previousObservation,
+          availableAtBoarding: boardingArrival?.instant ?? null,
+          actualServiceDeparture: actualServiceDeparture?.instant ?? null,
+          downstreamProtectedDeparture: fixedDeparture,
+        }),
+      };
     });
   }
 
@@ -345,6 +407,167 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
         )
           return 'CAPABILITY_CHANGED';
       }
+      return 'CURRENT';
+    });
+  }
+
+  async recordOperationalPresentation(
+    input: Parameters<
+      GroundTransitRepository['recordOperationalPresentation']
+    >[0],
+  ): Promise<'CURRENT' | 'OBSOLETE' | 'CAPABILITY_CHANGED'> {
+    return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const trip = await transaction.$queryRaw<readonly { id: string }[]>`
+        SELECT "id" FROM "Trip" WHERE "id"=${input.tripId}::uuid
+          AND "ownerUserId"=${input.ownerUserId}::uuid FOR UPDATE`;
+      if (trip.length === 0) return 'OBSOLETE';
+      if (input.expectedCapabilityRevision !== undefined) {
+        const capability =
+          await transaction.tripAssistanceCapability.findUnique({
+            where: {
+              tripId_kind: {
+                tripId: input.tripId,
+                kind: 'GROUND_TRANSIT_MONITORING',
+              },
+            },
+            select: { state: true, revision: true },
+          });
+        if (
+          capability?.state !== 'ENABLED' ||
+          capability.revision !== input.expectedCapabilityRevision
+        )
+          return 'CAPABILITY_CHANGED';
+      }
+      const leg = await transaction.groundTransitLegExecution.findUnique({
+        where: { transportEdgeId: input.transportEdgeId },
+        select: {
+          id: true,
+          tripId: true,
+          adoptedRouteId: true,
+          latestObservationId: true,
+          latestFetchedAt: true,
+          latestObservation: true,
+        },
+      });
+      if (
+        leg === null ||
+        leg.tripId !== input.tripId ||
+        leg.latestObservationId !== input.observationIdentity ||
+        leg.latestFetchedAt?.getTime() !== input.fetchedAt.getTime()
+      )
+        return 'OBSOLETE';
+      const edge = await transaction.transportEdge.findFirst({
+        where: {
+          id: input.transportEdgeId,
+          tripId: input.tripId,
+          adoptedRouteId: leg.adoptedRouteId,
+          source: 'ADOPTED_ROUTE',
+          adoptedRoute: { status: 'ACTIVE' },
+        },
+        select: { id: true },
+      });
+      if (edge === null) return 'OBSOLETE';
+      const prefix = `ground-transit-observation:${leg.id}:`;
+      const groupKey = `${prefix}${input.fetchedAt.toISOString()}`;
+      const current = await transaction.notificationEvent.findFirst({
+        where: {
+          ownerUserId: input.ownerUserId,
+          presentationGroupKey: groupKey,
+          presentationActive: true,
+        },
+      });
+      const shouldPresent = input.assessment.requiresUserAttention;
+      const quietCurrent =
+        !shouldPresent &&
+        !input.assessment.persistentAttentionActive &&
+        !input.relatedRiskActive &&
+        input.assessment.disposition === 'CONTINUE_CURRENT_PLAN';
+      if (current !== null || shouldPresent || quietCurrent) {
+        await transaction.notificationEvent.updateMany({
+          where: {
+            ownerUserId: input.ownerUserId,
+            presentationGroupKey: {
+              startsWith: prefix,
+              ...(quietCurrent ? {} : { not: groupKey }),
+            },
+            presentationActive: true,
+          },
+          data: { presentationActive: false },
+        });
+      }
+      if (!shouldPresent) return 'CURRENT';
+      const summary = operationalSummary(
+        input.assessment.changeKinds,
+        input.assessment.requiredAction,
+        input.hasDownstreamImpact,
+        parseObservation(leg.latestObservation),
+      );
+      if (summary.length === 0)
+        throw new Error(
+          'Ground transit attention requires a non-empty summary',
+        );
+      if (current !== null) {
+        const priorKinds = Array.isArray(current.changeKinds)
+          ? current.changeKinds.filter(
+              (value): value is string => typeof value === 'string',
+            )
+          : [];
+        const kinds = [
+          ...new Set([...priorKinds, ...input.assessment.changeKinds]),
+        ].sort(compareText);
+        const priorSummary = current.summary ?? current.body;
+        const joined = (
+          priorSummary.includes(summary)
+            ? priorSummary
+            : `${priorSummary}；${summary}`
+        ).slice(0, 500);
+        await transaction.notificationEvent.update({
+          where: { id: current.id },
+          data: {
+            changeKinds: kinds,
+            summary: joined,
+            body: joined,
+            priority:
+              current.priority === 'STRONG' ||
+              input.assessment.notificationPriority === 'STRONG'
+                ? 'STRONG'
+                : 'NORMAL',
+            hasDownstreamImpact:
+              current.hasDownstreamImpact || input.hasDownstreamImpact,
+          },
+        });
+        await markAttentionPresented(transaction, leg, input.assessment);
+        return 'CURRENT';
+      }
+      await transaction.notificationEvent.upsert({
+        where: {
+          ownerUserId_dedupeKey: {
+            ownerUserId: input.ownerUserId,
+            dedupeKey: groupKey,
+          },
+        },
+        create: {
+          ownerUserId: input.ownerUserId,
+          tripId: input.tripId,
+          kind: 'GROUND_TRANSIT_IMPORTANT_CHANGE',
+          dedupeKey: groupKey,
+          title:
+            input.assessment.notificationPriority === 'STRONG'
+              ? '地面交通重要运行变化'
+              : '地面交通运行信息更新',
+          body: summary,
+          summary,
+          changeKinds: [...input.assessment.changeKinds],
+          hasDownstreamImpact: input.hasDownstreamImpact,
+          priority: input.assessment.notificationPriority ?? 'NORMAL',
+          occurredAt: input.now,
+          presentationGroupKey: groupKey,
+          presentationActive: true,
+        },
+        update: {},
+      });
+      await markAttentionPresented(transaction, leg, input.assessment);
       return 'CURRENT';
     });
   }
@@ -571,7 +794,86 @@ export class PrismaGroundTransitRepository implements GroundTransitRepository {
   }
 }
 
-function toRecord(row: LegRow, current: boolean): GroundTransitLegRecord {
+interface OperationalContext {
+  readonly previousObservation: GroundTransitObservation | null;
+  readonly availableAtBoarding: Date | null;
+  readonly actualServiceDeparture: Date | null;
+  readonly downstreamProtectedDeparture: Date | null;
+}
+
+async function operationalContext(
+  client: PrismaClient | Transaction,
+  row: LegRow,
+): Promise<OperationalContext> {
+  const previous =
+    row.latestFetchedAt === null
+      ? null
+      : await client.groundTransitObservation.findFirst({
+          where: {
+            legExecutionId: row.id,
+            fetchedAt: { lt: row.latestFetchedAt },
+          },
+          orderBy: [{ fetchedAt: 'desc' }, { id: 'desc' }],
+          select: { facts: true },
+        });
+  const edge = await client.transportEdge.findUnique({
+    where: { id: row.transportEdgeId },
+    select: { fromNodeId: true, toNodeId: true },
+  });
+  if (edge === null)
+    return {
+      previousObservation: parseObservation(previous?.facts ?? null),
+      availableAtBoarding: null,
+      actualServiceDeparture: null,
+      downstreamProtectedDeparture: null,
+    };
+  const [boarding, departure, downstream] = await Promise.all([
+    client.temporalValue.findFirst({
+      where: { nodeId: edge.fromNodeId, pointKind: 'ARRIVAL', layer: 'ACTUAL' },
+      select: { instant: true },
+    }),
+    client.temporalValue.findFirst({
+      where: {
+        transportEdgeId: row.transportEdgeId,
+        pointKind: 'DEPARTURE',
+        layer: 'ACTUAL',
+      },
+      select: { instant: true },
+    }),
+    client.transportEdge.findFirst({
+      where: {
+        tripId: row.tripId,
+        fromNodeId: edge.toNodeId,
+        fixedService: true,
+      },
+      include: { temporalValues: true },
+    }),
+  ]);
+  const protectedDeparture =
+    downstream === null
+      ? null
+      : ((['ACTUAL', 'ESTIMATED', 'PLANNED'] as const)
+          .map(
+            (layer) =>
+              downstream.temporalValues.find(
+                (value) =>
+                  value.layer === layer && value.pointKind === 'DEPARTURE',
+              )?.instant ?? null,
+          )
+          .find((value) => value !== null) ?? null);
+  return {
+    previousObservation: parseObservation(previous?.facts ?? null),
+    availableAtBoarding: boarding?.instant ?? null,
+    actualServiceDeparture: departure?.instant ?? null,
+    downstreamProtectedDeparture: protectedDeparture,
+  };
+}
+
+function toRecord(
+  row: LegRow,
+  current: boolean,
+  context?: OperationalContext,
+): GroundTransitLegRecord {
   return {
     id: row.id,
     tripId: row.tripId,
@@ -585,9 +887,14 @@ function toRecord(row: LegRow, current: boolean): GroundTransitLegRecord {
     baseline: parseBaseline(row),
     state: row.state,
     latestObservation: parseObservation(row.latestObservation),
+    attentionState: parseAttentionState(row.latestObservation),
     latestFetchedAt: row.latestFetchedAt,
     observationCount: row._count.observations,
     current,
+    previousObservation: context?.previousObservation ?? null,
+    availableAtBoarding: context?.availableAtBoarding ?? null,
+    actualServiceDeparture: context?.actualServiceDeparture ?? null,
+    downstreamProtectedDeparture: context?.downstreamProtectedDeparture ?? null,
     deviationCount: row.deviationCount,
     deviationStartedAt: row.deviationStartedAt,
   };
@@ -679,11 +986,82 @@ function parseObservation(
     arrivalPlatform: stringOrNull(item.arrivalPlatform),
     serviceStatus:
       item.serviceStatus as GroundTransitObservation['serviceStatus'],
+    boardingTargetServiceability: targetServiceability(
+      item.boardingTargetServiceability,
+    ),
+    alightingTargetServiceability: targetServiceability(
+      item.alightingTargetServiceability,
+    ),
+    currentTerminusRef: stringOrNull(item.currentTerminusRef),
+    currentTerminusLabel: stringOrNull(item.currentTerminusLabel),
+    operatingFromHubRef: stringOrNull(item.operatingFromHubRef),
+    operatingToHubRef: stringOrNull(item.operatingToHubRef),
     headwayMinSeconds: numberOrNull(item.headwayMinSeconds),
     headwayMaxSeconds: numberOrNull(item.headwayMaxSeconds),
     nextDepartureInSeconds: numberOrNull(item.nextDepartureInSeconds),
     minimumTransferSeconds: numberOrNull(item.minimumTransferSeconds),
   };
+}
+
+function parseAttentionState(
+  value: Prisma.JsonValue | null,
+): GroundTransitAttentionState | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return null;
+  const marker = (value as Record<string, unknown>).__groundTransitAttention;
+  if (marker === null || typeof marker !== 'object' || Array.isArray(marker))
+    return null;
+  const item = marker as Record<string, unknown>;
+  const platform = (value: unknown): value is string | null =>
+    value === null || typeof value === 'string';
+  if (
+    !platform(item.departurePlatformReference) ||
+    !platform(item.arrivalPlatformReference) ||
+    !platform(item.presentedDeparturePlatform) ||
+    !platform(item.presentedArrivalPlatform) ||
+    typeof item.presentedEarlyDeparture !== 'boolean' ||
+    !Number.isSafeInteger(item.presentedDelayBand) ||
+    (item.presentedDelayBand as number) < 0
+  )
+    return null;
+  return item as unknown as GroundTransitAttentionState;
+}
+
+async function markAttentionPresented(
+  transaction: Transaction,
+  leg: { readonly id: string; readonly latestObservation: Prisma.JsonValue },
+  assessment: GroundTransitOperationalAssessment,
+): Promise<void> {
+  if (assessment.attentionActivationKinds.length === 0) return;
+  const state = parseAttentionState(leg.latestObservation);
+  const observation = parseObservation(leg.latestObservation);
+  if (state === null || observation === null)
+    throw new Error('Ground transit attention watermark is unavailable');
+  const kinds = assessment.attentionActivationKinds;
+  const raw = leg.latestObservation as Record<string, unknown>;
+  const next: GroundTransitAttentionState = {
+    ...state,
+    presentedDeparturePlatform: kinds.includes('DEPARTURE_PLATFORM_CHANGED')
+      ? observation.departurePlatform
+      : state.presentedDeparturePlatform,
+    presentedArrivalPlatform: kinds.includes('ARRIVAL_PLATFORM_CHANGED')
+      ? observation.arrivalPlatform
+      : state.presentedArrivalPlatform,
+    presentedEarlyDeparture:
+      kinds.includes('EARLY_DEPARTURE') || state.presentedEarlyDeparture,
+    presentedDelayBand: kinds.includes('MATERIAL_DELAY')
+      ? Math.max(state.presentedDelayBand, assessment.materialDelayBand)
+      : state.presentedDelayBand,
+  };
+  await transaction.groundTransitLegExecution.update({
+    where: { id: leg.id },
+    data: {
+      latestObservation: {
+        ...raw,
+        __groundTransitAttention: next,
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
 }
 
 function serializableObservation(value: GroundTransitObservation) {
@@ -709,6 +1087,32 @@ function serializableObservation(value: GroundTransitObservation) {
     departurePlatform: value.departurePlatform,
     arrivalPlatform: value.arrivalPlatform,
     serviceStatus: value.serviceStatus,
+    // Keep the canonical hash of legacy observations unchanged. An absent
+    // field and an explicit UNKNOWN/null convey the same normalized fact.
+    ...(value.boardingTargetServiceability === 'SERVED' ||
+    value.boardingTargetServiceability === 'NOT_SERVED'
+      ? { boardingTargetServiceability: value.boardingTargetServiceability }
+      : {}),
+    ...(value.alightingTargetServiceability === 'SERVED' ||
+    value.alightingTargetServiceability === 'NOT_SERVED'
+      ? { alightingTargetServiceability: value.alightingTargetServiceability }
+      : {}),
+    ...(value.currentTerminusRef === null ||
+    value.currentTerminusRef === undefined
+      ? {}
+      : { currentTerminusRef: value.currentTerminusRef }),
+    ...(value.currentTerminusLabel === null ||
+    value.currentTerminusLabel === undefined
+      ? {}
+      : { currentTerminusLabel: value.currentTerminusLabel }),
+    ...(value.operatingFromHubRef === null ||
+    value.operatingFromHubRef === undefined
+      ? {}
+      : { operatingFromHubRef: value.operatingFromHubRef }),
+    ...(value.operatingToHubRef === null ||
+    value.operatingToHubRef === undefined
+      ? {}
+      : { operatingToHubRef: value.operatingToHubRef }),
     headwayMinSeconds: value.headwayMinSeconds,
     headwayMaxSeconds: value.headwayMaxSeconds,
     nextDepartureInSeconds: value.nextDepartureInSeconds,
@@ -730,7 +1134,18 @@ async function writeFixedServiceTimes(
       pointKind === 'DEPARTURE'
         ? (observation.actualDeparture ?? observation.estimatedDeparture)
         : (observation.actualArrival ?? observation.estimatedArrival);
-    if (instant === null) continue;
+    if (instant === null) {
+      const removed = await transaction.temporalValue.deleteMany({
+        where: {
+          transportEdgeId,
+          pointKind,
+          layer: 'ESTIMATED',
+          sourceKind: 'PROVIDER_OBSERVATION',
+        },
+      });
+      changed ||= removed.count > 0;
+      continue;
+    }
     const existingActual = await transaction.temporalValue.findUnique({
       where: {
         transportEdgeId_pointKind_layer: {
@@ -798,6 +1213,50 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function targetServiceability(
+  value: unknown,
+): 'SERVED' | 'NOT_SERVED' | 'UNKNOWN' {
+  return value === 'SERVED' || value === 'NOT_SERVED' ? value : 'UNKNOWN';
+}
+
+function operationalSummary(
+  kinds: readonly GroundTransitChangeKind[],
+  action: 'NONE' | 'ROUTE_REEVALUATION_REQUIRED',
+  downstream: boolean,
+  observation: GroundTransitObservation | null,
+): string {
+  const labels: Partial<Record<GroundTransitChangeKind, string>> = {
+    SERVICE_CANCELLED: '班次已取消',
+    EARLY_DEPARTURE: '发车时间提前',
+    MATERIAL_DELAY: '预计到达明显延后',
+    DEPARTURE_PLATFORM_CHANGED: observation?.departurePlatform
+      ? `当前上车站台已变更为 ${observation.departurePlatform.slice(0, 80)}`
+      : '上车站台已变化',
+    ARRIVAL_PLATFORM_CHANGED: observation?.arrivalPlatform
+      ? `当前到站站台已变更为 ${observation.arrivalPlatform.slice(0, 80)}`
+      : '到站站台已变化',
+    BOARDING_TARGET_NO_LONGER_SERVED: '原上车站不再停靠',
+    ALIGHTING_TARGET_NO_LONGER_SERVED: '原下车站不再停靠',
+    SERVICE_SHORT_TURNED: '班次运行区间缩短',
+    TERMINUS_CHANGED: '班次终点已变化',
+    DOWNSTREAM_PROTECTED_CONNECTION_AT_RISK: '后续固定衔接出现风险',
+    SERVICE_RESTORED: '原班次已恢复运行',
+  };
+  return [
+    ...kinds.map((kind) => labels[kind] ?? kind),
+    ...(downstream ? ['可能影响后续已安排项目'] : []),
+    ...(action === 'ROUTE_REEVALUATION_REQUIRED'
+      ? ['当前路线需要重新规划']
+      : []),
+  ]
+    .join('；')
+    .slice(0, 500);
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);

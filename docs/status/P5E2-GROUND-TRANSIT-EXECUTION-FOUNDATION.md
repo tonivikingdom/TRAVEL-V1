@@ -1,6 +1,6 @@
 # P5E2 Batch 1 — Ground Transit Execution Foundation
 
-Status: implementation on `feature/p5e2-ground-transit-execution-foundation`; not a main baseline until Draft PR review and CI pass. Starting main: `78cea5c481eea594943a30f0285b2e47698558be`.
+Status: P5E2 Batch 1 merged through PR #30; main baseline `e4685c5f729e27b2f1a8cab65c8c76393a01178d` (verify, Compose verification, and P5B acceptance successful). Starting main: `78cea5c481eea594943a30f0285b2e47698558be`.
 
 This batch binds adopted RAIL/BUS legs to an immutable, provider-neutral execution baseline at Route Adopt. The baseline retains the selected service class, exact fixed-service identity when available, or high-frequency line/direction/boarding/alighting identity and the adopted execution window. Existing routes are not guessed into a new identity: missing P5E2 metadata is shown as `UNKNOWN`. The leg record has no TransportEdge FK, so replacement and Undo do not erase its historical observations or state transitions. Trip deletion still cascades private data.
 
@@ -14,4 +14,4 @@ The existing ExecutionRisk reconciliation handles system-minimum headway/transfe
 
 API: `GET /trips/:tripId/execution/ground-transit` and `POST /trips/:tripId/execution/ground-transit/:transportEdgeId/refresh`. Each leg exposes separate `safety.boarding` and `safety.transferToNext` assessments; the latter is null without an onward connection. Their minimums, feasibility, reason codes, and reevaluation flags are never merged into one total. Existing `/trips/:tripId/assistance/GROUND_TRANSIT_MONITORING` handles opt-in and lifecycle. Migration: `20260929100000_p5e2_ground_transit_execution_foundation`. Clean and populated migration tests explicitly preserve legacy ACTUAL, Trip version, and opt-in state without backfill.
 
-Still open: F-05/F-06/F-07/F-08. Not included: real Ground Transit Provider entitlement/integration, exact ridership inference, automatic route change/Adopt, P5E2 Batch 2, Push, native background location, official UI, Staging, or Production.
+Still open: F-05/F-06/F-07/F-08. Batch 1 does not classify operational cancellation, early departure, material delay, platform changes, skipped adopted stops, or later service recovery; these are the separate Batch 2 scope. Not included: real Ground Transit Provider entitlement/integration, exact ridership inference, automatic route change/Adopt, Push, native background location, official UI, Staging, or Production.

@@ -449,16 +449,23 @@ async function verifyHandoffReplacement({
     });
   }
   const [from, to] = trip.days[0].nodes;
-  const initialQuery = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
-    basisVersion: trip.version,
-    fromNodeId: from.id,
-    toNodeId: to.id,
-    hint: {
-      type: 'DEPART_AT',
-      instant: new Date(Date.now() + 8 * 60_000).toISOString(),
-      timeZone: 'Asia/Tokyo',
-    },
-  });
+  let initialQuery;
+  try {
+    initialQuery = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
+      basisVersion: trip.version,
+      fromNodeId: from.id,
+      toNodeId: to.id,
+      hint: {
+        type: 'DEPART_AT',
+        instant: new Date(Date.now() + 8 * 60_000).toISOString(),
+        timeZone: 'Asia/Tokyo',
+      },
+    });
+  } catch (error) {
+    throw new Error(`P5E2 initial handoff route query: ${error.message}`, {
+      cause: error,
+    });
+  }
   const firstPreview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
     basisVersion: trip.version,
     candidateSnapshotId: initialQuery.candidates[0].candidateSnapshotId,
@@ -524,11 +531,18 @@ async function verifyHandoffReplacement({
     throw new Error(
       'P5E2 handoff automatically queried, previewed, or adopted',
     );
-  const alternatives = await apiJson(
-    `/trips/${trip.id}/routes/query`,
-    'POST',
-    handoff.query,
-  );
+  let alternatives;
+  try {
+    alternatives = await apiJson(
+      `/trips/${trip.id}/routes/query`,
+      'POST',
+      handoff.query,
+    );
+  } catch (error) {
+    throw new Error(`P5E2 explicit handoff route query: ${error.message}`, {
+      cause: error,
+    });
+  }
   if (alternatives.candidates.length === 0)
     throw new Error('P5E2 explicit handoff Query returned no candidates');
   const nextPreview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {

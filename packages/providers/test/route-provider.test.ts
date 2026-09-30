@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { validateRouteCandidate } from '@travel/domain';
 
 import {
+  createDevelopmentSyntheticGroundTransitRouteProvider,
   createDevelopmentSyntheticRouteProvider,
   SyntheticRouteProvider,
   UnconfiguredRouteProvider,
@@ -46,6 +48,32 @@ describe('route providers', () => {
         },
       ],
     });
+  });
+
+  it('keeps a bounded synthetic replacement candidate valid across millisecond offsets', async () => {
+    const earliestDeparture = new Date('2030-10-01T10:00:00.603Z');
+    const latestArrival = new Date('2030-10-01T10:40:00.300Z');
+    const result = await createDevelopmentSyntheticGroundTransitRouteProvider(
+      () => new Date('2030-10-01T09:59:00Z'),
+    ).queryRoutes({
+      ...input,
+      earliestDeparture,
+      latestArrival,
+      preference: {
+        type: 'DEPART_AT',
+        instant: earliestDeparture,
+        timeZone: 'Asia/Tokyo',
+      },
+    });
+    expect(result.status).toBe('SUCCESS');
+    if (result.status !== 'SUCCESS') return;
+    expect(
+      validateRouteCandidate(result.candidates[0]!, {
+        earliestDeparture,
+        latestArrival,
+      }),
+    ).toEqual({ accepted: true });
+    expect(Number.isInteger(result.candidates[0]!.durationSeconds)).toBe(true);
   });
 
   it('supports configurable success, no-result, unavailable, and unsupported fixtures', async () => {

@@ -128,7 +128,11 @@ export class GroundTransitRouteReevaluationService {
       timeZone:
         corridor === null
           ? null
-          : corridorTimeZone(corridor.currentTransports, corridor.nodes),
+          : resolveRouteOriginTimeZone(
+              route!.anchorFromNodeId,
+              corridor.currentTransports,
+              corridor.nodes,
+            ),
       now: this.now(),
     });
     return {
@@ -153,22 +157,31 @@ export class GroundTransitRouteReevaluationService {
   }
 }
 
-function corridorTimeZone(
-  edges: readonly TransportEdgeRecord[],
-  nodes: readonly ItineraryNodeRecord[],
+/** A query hint's zone must be evidenced at its from-node, never downstream. */
+export function resolveRouteOriginTimeZone(
+  anchorFromNodeId: string,
+  edges: readonly Pick<TransportEdgeRecord, 'fromNodeId' | 'timeValues'>[],
+  nodes: readonly Pick<
+    ItineraryNodeRecord,
+    'id' | 'timeValues' | 'timeIntents'
+  >[],
 ): string | null {
+  const originNode = nodes.find((node) => node.id === anchorFromNodeId);
   const zoneCandidates = [
-    ...edges.flatMap((edge) =>
-      (['PLANNED', 'ESTIMATED'] as const).flatMap((layer) =>
-        edge.timeValues
-          .filter(
-            (value) => value.pointKind === 'DEPARTURE' && value.layer === layer,
-          )
-          .map((value) => value.timeZone),
+    ...edges
+      .filter((edge) => edge.fromNodeId === anchorFromNodeId)
+      .flatMap((edge) =>
+        (['PLANNED', 'ESTIMATED'] as const).flatMap((layer) =>
+          edge.timeValues
+            .filter(
+              (value) =>
+                value.pointKind === 'DEPARTURE' && value.layer === layer,
+            )
+            .map((value) => value.timeZone),
+        ),
       ),
-    ),
-    ...nodes[0]!.timeIntents.map((intent) => intent.timeZone),
-    ...nodes[0]!.timeValues.map((value) => value.timeZone),
+    ...(originNode?.timeIntents.map((intent) => intent.timeZone) ?? []),
+    ...(originNode?.timeValues.map((value) => value.timeZone) ?? []),
   ];
   for (const zone of zoneCandidates) {
     if (zone === null) continue;

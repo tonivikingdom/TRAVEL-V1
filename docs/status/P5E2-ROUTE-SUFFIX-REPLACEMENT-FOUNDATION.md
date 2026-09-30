@@ -3,7 +3,8 @@
 - Recommended model: GPT-6 Astra / High. Backup: GPT-6.1 Sol / High. Query, Preview, adoption and deterministic Undo share topology and transactional fact protection, which merits the recommended reasoning level. Escalate to Extra High if a concurrency/history invariant remains unresolved. The task does not claim to change the client's actual model configuration; it is unconfirmed.
 - Starting main: `c03272eb24862367df5be747f7077c9bfe95c6d4`.
 - Branch: `feature/p5e2-route-suffix-replacement-foundation`.
-- Status: cloud acceptance PASS; Draft PR and independent GitHub CI follow the completed cloud gate. Keep Draft and wait for merge review.
+- Implementation HEAD (cloud/CI validated): `aef15e5d35df51e93d9ce3229538de87625720f0`. Documentation-only follow-ups are identified by the current PR head.
+- Status: cloud acceptance PASS; [Draft PR #33](https://github.com/tonivikingdom/TRAVEL-V1/pull/33) and independent [CI Run 36680289025](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/36680289025) PASS. Keep Draft and wait for merge review.
 - Schema / migrations: unchanged; `route-adopt-delta-v4` evolves the receipt JSON contract.
 
 Batch 4A establishes safe suffix Query / Preview / Adopt / Undo infrastructure. Given an ACTIVE route R1 `A → B → C → D`, explicit queries `B → D` and `C → D` can replace only the future suffix. `A → D` retains FULL_CORRIDOR behavior. A replacement query reuses `{ basisVersion, fromNodeId, toNodeId, hint }` and existing CandidateSnapshot/time algorithms.
@@ -50,7 +51,7 @@ The cloud is the first complete acceptance environment: Node 24.19.0, pnpm 11.19
 - Docker Compose verification: PASS, exit 0; live/ready, durable Job delivery, Adopt/Undo receipts/outbox, lease recovery, database outage/recovery, Worker SIGTERM, PostgreSQL persistence and private object-volume write/restart/delete all passed. Existing F-09 and P5E2 Batch 1/2/3 chains also passed.
 - Compose explicit suffix Adopt and Undo chains: PASS, including unchanged prefix ACTUAL/execution and Undo replay.
 - P5B: PASS, exit 0; 5 synthetic users / 200 requests / 200 success / 0 isolation failures / 0 unexpected 5xx / 0 network failures. Median 356.36 ms, p95 516.34 ms, maximum 533.9 ms; existing P5C flow PASS.
-- Independent GitHub `verify`, `Compose verification`, and `P5B acceptance`: pending Draft PR.
+- Independent [GitHub CI Run 36680289025](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/36680289025) on implementation HEAD `aef15e5d35df51e93d9ce3229538de87625720f0`: `verify`, `Compose verification`, and `P5B acceptance` all SUCCESS. Final documentation-only HEAD is checked again before the completion report.
 
 The Compose runner imports `scripts/verify-route-suffix-chain.mjs`. Its synthetic-only HTTP chain explicitly queries `A → D`, previews and adopts R1, records user prefix/B ACTUAL and a test-only completed ground-leg fixture, explicitly queries `B → D`, previews SUFFIX and adopts R2. It checks source lifecycle, retained prefix identity/facts/execution, archived suffix and current replacement; then explicitly undoes R2 and checks original IDs, placements, history consumption, unchanged prefix ACTUAL and Undo replay. The same runner is already invoked by the CI Compose job, so CI executes the added chain independently.
 
@@ -61,8 +62,8 @@ Cloud Compose builds use the verified mirrored base images and platform CA/proxy
 | Item                        | Result                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | 1 Branch                    | `feature/p5e2-route-suffix-replacement-foundation`                                                                        |
-| 2 HEAD                      | Exact feature HEAD is reported with the final Draft PR/CI result; use PR head as authoritative.                           |
-| 3 Draft PR                  | Created after cloud acceptance; keep Draft, do not Ready/Merge.                                                           |
+| 2 HEAD                      | Implementation/cloud/CI HEAD `aef15e5d35df51e93d9ce3229538de87625720f0`; use PR head for documentation-only follow-ups.   |
+| 3 Draft PR                  | [#33](https://github.com/tonivikingdom/TRAVEL-V1/pull/33), OPEN/Draft; do not Ready/Merge.                                |
 | 4 Starting main             | `c03272eb24862367df5be747f7077c9bfe95c6d4`                                                                                |
 | 5 replacementScope contract | FULL_CORRIDOR / SUFFIX; additive Preview metadata and V4 suffix receipt.                                                  |
 | 6 FULL_CORRIDOR behavior    | Existing behavior and v3 emission retained; regression passes.                                                            |
@@ -91,16 +92,16 @@ Cloud Compose builds use the verified mirrored base images and platform CA/proxy
 | 29 Compose Undo chain       | PASS: R1 ACTIVE/R2 UNDONE, original IDs/placements/history restored, prefix ACTUAL unchanged.                             |
 | 30 P5B                      | PASS: 5 users, 200 requests, zero isolation/5xx/network failures.                                                         |
 | 31 Cloud validation         | PASS: locked install, Prisma, format/lint/typecheck, Unit, clean migrations/integration, build, API/Worker, Compose, P5B. |
-| 32 GitHub CI Run            | Reported with final PR checks.                                                                                            |
-| 33 verify                   | Pending independent CI.                                                                                                   |
-| 34 Compose verification     | Pending independent CI.                                                                                                   |
-| 35 P5B CI                   | Pending independent CI.                                                                                                   |
+| 32 GitHub CI Run            | [36680289025](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/36680289025), implementation SHA verified.          |
+| 33 verify                   | SUCCESS in independent GitHub CI; final documentation-only HEAD checked before completion report.                         |
+| 34 Compose verification     | SUCCESS in independent GitHub CI, including suffix Adopt and Undo.                                                        |
+| 35 P5B CI                   | SUCCESS: 5 users / 200 requests / zero isolation/5xx/network failures.                                                    |
 | 36 Automatic Query          | No.                                                                                                                       |
 | 37 Automatic Preview        | No.                                                                                                                       |
 | 38 Automatic Adopt          | No.                                                                                                                       |
 | 39 Real paid Provider       | No.                                                                                                                       |
 | 40 Batch 3 live-origin      | Still disabled; progressed execution remains ORIGIN_UNRESOLVED.                                                           |
 | 41 F-05/F-06/F-07/F-08      | Remain open.                                                                                                              |
-| 42 Blocker                  | No implementation/cloud blocker; independent CI must complete before the final task report.                               |
+| 42 Blocker                  | None. Cloud and independent CI PASS; stop at Draft PR pending review.                                                     |
 
 No arbitrary middle/prefix/subcorridor or GPS origin, mid-edge/onboard replanning, automatic next train, real Ground Transit Provider, Push, formal Desktop/Mobile UI, staging or production work is implemented. Stop at a green Draft PR and wait for review.

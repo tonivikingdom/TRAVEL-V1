@@ -16,6 +16,10 @@ import type {
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 import { stopTripAssistanceIfNaturallyComplete } from './trip-assistance-natural-end.js';
+import {
+  nodeDeletionReferenceInclude,
+  nodeDeletionReferenceFacts,
+} from './prisma-node-deletion-protection.js';
 
 const tripInclude = {
   dateOwnerships: { orderBy: { localDate: 'asc' } },
@@ -31,6 +35,7 @@ const tripInclude = {
       },
       nodes: {
         include: {
+          ...nodeDeletionReferenceInclude,
           place: true,
           temporalValues: {
             orderBy: [{ pointKind: 'asc' }, { layer: 'asc' }],
@@ -1392,6 +1397,7 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
       createdAt: occurrence.createdAt,
       updatedAt: occurrence.updatedAt,
       nodes: occurrence.nodes.map((node) => ({
+        deletionReferenceFacts: nodeDeletionReferenceFacts(node),
         id: node.id,
         tripId: node.tripId,
         dayOccurrenceId: node.dayOccurrenceId,

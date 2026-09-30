@@ -1,4 +1,5 @@
 import {
+  generatedNodeDeletionProtectionReasons,
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
   compareCanonicalDwellAdjustments,
@@ -19,6 +20,10 @@ import type {
 
 import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
 import { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
+import {
+  nodeDeletionReferenceInclude,
+  nodeDeletionReferenceFacts,
+} from './prisma-node-deletion-protection.js';
 
 import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
@@ -290,8 +295,16 @@ async function executeAdoption(
   const beforeGeneratedNodes = beforeGeneratedRows.map(toGeneratedNodeSnapshot);
 
   const removedNodes = await transaction.itineraryNode.findMany({
-    where: { id: { in: plan.nodesToRemove.map((node) => node.nodeId) } },
-    include: { temporalValues: true, timeIntents: true, place: true },
+    where: {
+      tripId: input.tripId,
+      id: { in: plan.nodesToRemove.map((node) => node.nodeId) },
+    },
+    include: {
+      ...nodeDeletionReferenceInclude,
+      temporalValues: true,
+      timeIntents: true,
+      place: true,
+    },
   });
   if (
     removedNodes.length !== plan.nodesToRemove.length ||
@@ -303,6 +316,8 @@ async function executeAdoption(
         node.userModifiedAt !== null ||
         (node.note !== null && node.note.trim() !== '') ||
         node.timeIntents.length > 0 ||
+        generatedNodeDeletionProtectionReasons(nodeDeletionReferenceFacts(node))
+          .length > 0 ||
         node.temporalValues.some((value) => value.layer === 'ACTUAL'),
     )
   ) {

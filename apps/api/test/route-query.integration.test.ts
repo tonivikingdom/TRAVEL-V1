@@ -4968,6 +4968,344 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     };
   }
 
+  async function repairRestoredFixture(origin: 'B' | 'C' = 'B') {
+    const f = await suffixFixture(false);
+    if (origin === 'C') {
+      providerResult = {
+        status: 'SUCCESS',
+        candidates: [
+          candidate(
+            '2030-10-01T10:45:00Z',
+            '2030-10-01T11:00:00Z',
+            'UTC',
+            'UTC',
+          ),
+        ],
+      };
+    }
+    const suffix = await createPreview(
+      userA,
+      f.first.trip,
+      f[origin].id,
+      f.D.id,
+      {
+        type: 'DEPART_AT',
+        instant:
+          origin === 'B' ? '2030-10-01T10:30:00Z' : '2030-10-01T10:45:00Z',
+        timeZone: 'UTC',
+      },
+    );
+    const second = await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      suffix.previewId,
+      'repair-suffix',
+    );
+    const restored = await undoSuccessfully(
+      userA,
+      second.trip,
+      second.operationReceipt.id,
+      'repair-undo',
+    );
+    return { ...f, second, restored };
+  }
+
+  async function repairDurableState(tripId: string) {
+    return managed.client.trip.findUniqueOrThrow({
+      where: { id: tripId },
+      include: {
+        dayOccurrences: {
+          orderBy: { id: 'asc' },
+          include: {
+            nodes: {
+              orderBy: { id: 'asc' },
+              include: {
+                place: true,
+                temporalValues: { orderBy: { id: 'asc' } },
+                timeIntents: true,
+                systemDwellSuggestion: true,
+              },
+            },
+            transportProjections: { orderBy: { transportEdgeId: 'asc' } },
+          },
+        },
+        adoptedRoutes: { orderBy: { id: 'asc' } },
+        routeCandidateSnapshots: { orderBy: { id: 'asc' } },
+        routePreviews: { orderBy: { id: 'asc' } },
+        transportEdges: {
+          orderBy: { id: 'asc' },
+          include: { temporalValues: { orderBy: { id: 'asc' } } },
+        },
+        transportHistory: {
+          orderBy: { id: 'asc' },
+          include: { temporalValues: { orderBy: { id: 'asc' } } },
+        },
+        operationReceipts: { orderBy: { id: 'asc' } },
+        outboxEvents: { orderBy: { id: 'asc' } },
+        groundTransitLegs: {
+          orderBy: { id: 'asc' },
+          include: {
+            observations: { orderBy: { id: 'asc' } },
+            stateTransitions: { orderBy: { id: 'asc' } },
+          },
+        },
+      },
+    });
+  }
+
+  it.each(['B', 'C'] as const)(
+    'P5E2 repair A/B: suffix Undo at %s protects deletion by full/earlier suffix replacement',
+    async (origin) => {
+      const f = await repairRestoredFixture(origin);
+      providerResult = suffixFoundationCandidate(
+        true,
+        origin === 'B' ? '2030-10-01T10:00:00Z' : '2030-10-01T10:30:00Z',
+        '2030-10-01T11:00:00Z',
+      );
+      const preview = await createPreview(
+        userA,
+        f.restored.trip,
+        origin === 'B' ? f.A.id : f.B.id,
+        f.D.id,
+        origin === 'B'
+          ? departHint()
+          : {
+              type: 'DEPART_AT',
+              instant: '2030-10-01T10:30:00Z',
+              timeZone: 'UTC',
+            },
+      );
+      expect(preview).toMatchObject({
+        adoptable: false,
+        status: 'BLOCKED',
+      });
+      expect(preview.changeSummary.routeCorridor?.replacementScope).toBe(
+        origin === 'B' ? 'FULL_CORRIDOR' : 'SUFFIX',
+      );
+      expect(preview.changeSummary.protectedBlockingNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: f[origin].id,
+            protectionReasons: expect.arrayContaining([
+              'REFERENCED_BY_ADOPTED_ROUTE',
+            ]),
+          }),
+        ]),
+      );
+      const before = await repairDurableState(f.restored.trip.id);
+      const response = await adopt(
+        userA,
+        f.restored.trip,
+        preview.previewId,
+        'repair-blocked',
+      );
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PREVIEW_BLOCKED' },
+      });
+      expect(await repairDurableState(f.restored.trip.id)).toEqual(before);
+      expect(before.adoptedRoutes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: f.first.operationReceipt.adoptedRouteId,
+            status: 'ACTIVE',
+          }),
+          expect.objectContaining({
+            id: f.second.operationReceipt.adoptedRouteId,
+            status: 'UNDONE',
+            anchorFromNodeId: f[origin].id,
+          }),
+        ]),
+      );
+      expect(before.operationReceipts).toHaveLength(3);
+    },
+  );
+
+  it('P5E2 repair C: referenced generated anchor can be reused with its original ID', async () => {
+    const f = await repairRestoredFixture();
+    const source = suffixFoundationCandidate(false).candidates[0]!;
+    const first = source.legs[0]!;
+    const last = source.legs.at(-1)!;
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...source,
+          legs: [
+            first,
+            {
+              ...last,
+              from: first.to,
+              departure: first.arrival,
+              durationSeconds: 2400,
+              groundTransit: {
+                ...last.groundTransit!,
+                boardingHubRef:
+                  first.to.providerHubRef ?? first.to.providerPlaceRef,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const preview = await createPreview(userA, f.restored.trip, f.A.id, f.D.id);
+    expect(preview.adoptable).toBe(true);
+    expect(preview.changeSummary.nodesToReuse).toEqual(
+      expect.arrayContaining([expect.objectContaining({ nodeId: f.B.id })]),
+    );
+    expect(
+      preview.changeSummary.nodesToRemove?.map((node) => node.nodeId),
+    ).toEqual([f.C.id]);
+    const adopted = await adoptSuccessfully(
+      userA,
+      f.restored.trip,
+      preview.previewId,
+      'repair-reuse',
+    );
+    expect(
+      adopted.trip.days.flatMap((day) => day.nodes).map((node) => node.id),
+    ).toEqual([f.A.id, f.B.id, f.D.id]);
+    expect(
+      await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: f.second.operationReceipt.adoptedRouteId },
+      }),
+    ).toMatchObject({ status: 'UNDONE', anchorFromNodeId: f.B.id });
+  });
+
+  it('P5E2 repair D: unadopted suffix Query/Preview does not permanently protect nodes', async () => {
+    const f = await suffixFixture(false);
+    const temporary = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:30:00Z',
+      timeZone: 'UTC',
+    });
+    providerResult = suffixFoundationCandidate(
+      true,
+      '2030-10-01T10:00:00Z',
+      '2030-10-01T11:00:00Z',
+    );
+    const full = await createPreview(userA, f.first.trip, f.A.id, f.D.id);
+    expect(full.adoptable).toBe(true);
+    await adoptSuccessfully(
+      userA,
+      f.first.trip,
+      full.previewId,
+      'repair-temporary',
+    );
+    expect(
+      await managed.client.itineraryNode.findUnique({ where: { id: f.B.id } }),
+    ).toBeNull();
+    expect(
+      await managed.client.routePreview.findUnique({
+        where: { id: temporary.previewId },
+      }),
+    ).toBeNull();
+    expect(
+      await managed.client.adoptedRoute.count({
+        where: { tripId: f.first.trip.id },
+      }),
+    ).toBe(2);
+  });
+
+  it.each(['anchorFrom', 'anchorTo', 'snapshot', 'receipt'] as const)(
+    'P5E2 repair E: locked Adopt rechecks new persistent %s reference after Preview',
+    async (reference) => {
+      const f = await suffixFixture(false);
+      const temporary = await createPreview(
+        userA,
+        f.first.trip,
+        f.B.id,
+        f.D.id,
+        { type: 'DEPART_AT', instant: '2030-10-01T10:30:00Z', timeZone: 'UTC' },
+      );
+      const evidence = await managed.client.routePreview.findUniqueOrThrow({
+        where: { id: temporary.previewId },
+      });
+      providerResult = suffixFoundationCandidate(
+        true,
+        '2030-10-01T10:00:00Z',
+        '2030-10-01T11:00:00Z',
+      );
+      const full = await createPreview(userA, f.first.trip, f.A.id, f.D.id);
+      expect(full.adoptable).toBe(true);
+      const sourceRoute = await managed.client.adoptedRoute.findUniqueOrThrow({
+        where: { id: f.first.operationReceipt.adoptedRouteId },
+      });
+      if (reference === 'receipt') {
+        const receipt = await managed.client.operationReceipt.findUniqueOrThrow(
+          { where: { id: f.first.operationReceipt.id } },
+        );
+        await managed.client.operationReceipt.create({
+          data: {
+            ...receipt,
+            id: randomUUID(),
+            idempotencyKey: 'repair-retained-evidence',
+            delta: { synthetic: true },
+            previewId: evidence.id,
+          },
+        });
+      } else {
+        // Persistence-only fixture keeps Trip.version unchanged to isolate the
+        // locked reference recheck from the ordinary version fence.
+        await managed.client.adoptedRoute.create({
+          data: {
+            ...sourceRoute,
+            id: randomUUID(),
+            status: reference === 'anchorTo' ? 'REPLACED' : 'UNDONE',
+            sourcePreviewId: evidence.id,
+            candidateSnapshotId: evidence.candidateSnapshotId,
+            anchorFromNodeId: reference === 'anchorFrom' ? f.B.id : f.A.id,
+            anchorToNodeId: reference === 'anchorTo' ? f.C.id : f.D.id,
+          },
+        });
+      }
+      const before = await repairDurableState(f.first.trip.id);
+      const repository = new PrismaRoutePlanningRepository(managed.client);
+      expect(
+        await repository.adoptPreview({
+          ownerUserId: userA.actor.userId,
+          tripId: f.first.trip.id,
+          previewId: full.previewId,
+          baseTripVersion: f.first.trip.version,
+          idempotencyKey: 'repair-lock-recheck',
+          requestHash: 'a'.repeat(64),
+          acceptedUserAdjustments: [],
+          now: NOW,
+          undoExpiresAt: new Date(NOW.getTime() + 600_000),
+        }),
+      ).toEqual({ status: 'PREVIEW_BLOCKED' });
+      expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+      const refreshed = await createPreview(
+        userA,
+        f.first.trip,
+        f.A.id,
+        f.D.id,
+      );
+      expect(refreshed.adoptable).toBe(false);
+      expect(refreshed.changeSummary.protectedBlockingNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: reference === 'anchorTo' ? f.C.id : f.B.id,
+            protectionReasons: expect.arrayContaining([
+              reference.startsWith('anchor')
+                ? 'REFERENCED_BY_ADOPTED_ROUTE'
+                : 'REFERENCED_BY_RETAINED_PLANNING_DATA',
+            ]),
+          }),
+        ]),
+      );
+      await managed.client.trip.update({
+        where: { id: f.first.trip.id },
+        data: { version: { increment: 1 } },
+      });
+      expect(
+        (
+          await adopt(userA, f.first.trip, full.previewId, 'repair-version')
+        ).json(),
+      ).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    },
+  );
+
   it.each([false, true])(
     'P5E2 4A: suffix Query/Preview/Adopt/Undo preserves prefix identity and facts (ACTUAL=%s)',
     async (actual) => {

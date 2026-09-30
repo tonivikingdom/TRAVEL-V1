@@ -35,6 +35,7 @@ import {
   orderedTripNodes,
 } from './schedule-evaluation.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
+import { generatedNodeDeletionProtectionReasons } from './generated-node-deletion-protection.js';
 import { validateIanaTimeZoneInput } from './time-input.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
 
@@ -343,7 +344,10 @@ function buildChangeSummary(
   const nodesToRemove = currentGenerated
     .filter((node) => !usedNodeIds.has(node.id))
     .map((node) => {
-      const protectionReasons = generatedNodeProtectionReasons(node);
+      const protectionReasons = [
+        ...generatedNodeProtectionReasons(node),
+        ...generatedNodeDeletionProtectionReasons(node.deletionReferenceFacts),
+      ];
       return {
         nodeId: node.id,
         dayOccurrenceId: node.dayOccurrenceId,
@@ -421,7 +425,10 @@ function buildChangeSummary(
     protectedBlockingNodes:
       corridor.replacementScope === 'SUFFIX'
         ? currentGenerated.flatMap((node) => {
-            const reasons = generatedNodeProtectionReasons(node);
+            const reasons = usedNodeIds.has(node.id)
+              ? generatedNodeProtectionReasons(node)
+              : nodesToRemove.find((removed) => removed.nodeId === node.id)!
+                  .protectionReasons;
             return reasons.length === 0
               ? []
               : [

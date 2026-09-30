@@ -39,6 +39,7 @@ export interface PlaceRecord {
 }
 
 export interface ItineraryNodeRecord {
+  readonly deletionReferenceFacts?: import('./generated-node-deletion-protection.js').GeneratedNodeDeletionReferenceFacts;
   readonly id: string;
   readonly tripId: string;
   readonly dayOccurrenceId: string;

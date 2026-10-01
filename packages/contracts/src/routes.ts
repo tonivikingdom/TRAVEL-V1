@@ -434,6 +434,44 @@ export interface RouteAdoptDeltaV4 extends Omit<
   readonly archivedTransportEdgeIds: readonly string[];
 }
 
+export interface ExternalAdoptedRouteAnchorSnapshot {
+  readonly schemaVersion: 'external-adopted-route-anchor-v1';
+  readonly externalOrigin: ExternalRouteOriginSnapshot;
+  readonly materializedNodeId: string;
+  readonly materializedPlaceId: string;
+  readonly materializedDayOccurrenceId: string;
+  readonly localDate: string;
+}
+
+export interface RouteAdoptDeltaV5 extends Omit<
+  RouteAdoptDeltaV3,
+  'schemaVersion'
+> {
+  readonly schemaVersion: 'route-adopt-delta-v5';
+  readonly replacementScope: 'EXTERNAL_ORIGIN';
+  readonly externalOriginId: string;
+  readonly sourceGroundTransitLegExecutionId: string;
+  readonly sourceAdoptedRouteId: string;
+  readonly sourceTransportEdgeId: string;
+  readonly sourceRouteAnchorFromNodeId: string;
+  readonly sourceRouteAnchorToNodeId: string;
+  readonly sourceDivergenceNodeId: string;
+  readonly destinationNodeId: string;
+  readonly materializedOriginNodeId: string;
+  readonly materializedOriginPlaceId: string;
+  readonly materializedOriginDayOccurrenceId: string;
+  readonly materializedOriginAnchorSnapshot: ExternalAdoptedRouteAnchorSnapshot;
+  readonly preservedPrefixNodeIds: readonly string[];
+  readonly preservedPrefixTransportEdgeIds: readonly string[];
+  readonly preservedPrefixHash: string;
+  readonly replacementNodeIds: readonly string[];
+  readonly archivedTransportEdgeIds: readonly string[];
+  readonly archivableProviderActualTransportEdgeIds: readonly string[];
+  /** Exact adopted generated-node/Place/placement facts for defensive Undo. */
+  readonly afterGeneratedNodeFacts: readonly Record<string, unknown>[];
+  readonly archivedSuffixHash: string;
+}
+
 export interface RouteUndoDeltaV1 {
   readonly schemaVersion: 'route-undo-delta-v1';
   readonly targetOperationReceiptId: string;
@@ -456,6 +494,16 @@ export interface RouteUndoDeltaV2 extends Omit<
   readonly restoredUserTimeIntentIds: readonly string[];
 }
 
+export interface RouteUndoDeltaV3 extends Omit<
+  RouteUndoDeltaV2,
+  'schemaVersion'
+> {
+  readonly schemaVersion: 'route-undo-delta-v3';
+  readonly dematerializedExternalOriginNodeId: string;
+  readonly dematerializedExternalOriginPlaceId: string;
+  readonly retainedExternalOriginId: string;
+}
+
 export interface UndoRouteAdoptionRequest {
   readonly baseTripVersion: number;
   readonly idempotencyKey: string;
@@ -476,8 +524,10 @@ export interface OperationReceiptView {
     | RouteAdoptDeltaV2
     | RouteAdoptDeltaV3
     | RouteAdoptDeltaV4
+    | RouteAdoptDeltaV5
     | RouteUndoDeltaV1
     | RouteUndoDeltaV2
+    | RouteUndoDeltaV3
     | Record<string, unknown>;
   readonly createdAt: string;
 }

@@ -398,7 +398,7 @@ async function isCurrentRouteCorridor(
   );
 }
 
-function toSnapshotRecord(snapshot: {
+export function toSnapshotRecord(snapshot: {
   readonly id: string;
   readonly ownerUserId: string;
   readonly tripId: string;

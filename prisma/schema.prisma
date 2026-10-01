@@ -129,6 +129,11 @@ enum TransportSource {
   ADOPTED_ROUTE
 }
 
+enum AdoptedRouteAnchorOriginKind {
+  ITINERARY_NODE
+  EXTERNAL_EXECUTION_ORIGIN
+}
+
 enum AdoptedRouteStatus {
   ACTIVE
   REPLACED
@@ -873,27 +878,30 @@ model TransportEdgeHistory {
 }
 
 model AdoptedRoute {
-  id                  String                 @id @default(uuid()) @db.Uuid
-  tripId              String                 @db.Uuid
-  anchorFromNodeId    String                 @db.Uuid
-  anchorToNodeId      String                 @db.Uuid
-  sourcePreviewId     String                 @unique @db.Uuid
-  candidateSnapshotId String                 @db.Uuid
-  candidateHash       String                 @db.VarChar(64)
-  policyVersion       String                 @db.VarChar(100)
-  status              AdoptedRouteStatus     @default(ACTIVE)
-  createdAt           DateTime               @default(now()) @db.Timestamptz(3)
-  replacedAt          DateTime?              @db.Timestamptz(3)
-  undoneAt            DateTime?              @db.Timestamptz(3)
-  trip                Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  anchorFrom          ItineraryNode          @relation("AdoptedRouteFromAnchor", fields: [anchorFromNodeId, tripId], references: [id, tripId], onDelete: Restrict)
-  anchorTo            ItineraryNode          @relation("AdoptedRouteToAnchor", fields: [anchorToNodeId, tripId], references: [id, tripId], onDelete: Restrict)
-  sourcePreview       RoutePreview           @relation(fields: [sourcePreviewId], references: [id], onDelete: Restrict)
-  candidateSnapshot   RouteCandidateSnapshot @relation(fields: [candidateSnapshotId], references: [id], onDelete: Restrict)
-  generatedNodes      ItineraryNode[]        @relation("GeneratedRouteNodes")
-  transportEdges      TransportEdge[]
-  operationReceipts   OperationReceipt[]
-  groundTransitLegs   GroundTransitLegExecution[]
+  id                         String                       @id @default(uuid()) @db.Uuid
+  tripId                     String                       @db.Uuid
+  anchorFromNodeId           String?                      @db.Uuid
+  anchorOriginKind           AdoptedRouteAnchorOriginKind @default(ITINERARY_NODE)
+  anchorFromExternalOriginId String?                      @db.Uuid
+  anchorFromSnapshot         Json?
+  anchorToNodeId             String                       @db.Uuid
+  sourcePreviewId            String                       @unique @db.Uuid
+  candidateSnapshotId        String                       @db.Uuid
+  candidateHash              String                       @db.VarChar(64)
+  policyVersion              String                       @db.VarChar(100)
+  status                     AdoptedRouteStatus           @default(ACTIVE)
+  createdAt                  DateTime                     @default(now()) @db.Timestamptz(3)
+  replacedAt                 DateTime?                    @db.Timestamptz(3)
+  undoneAt                   DateTime?                    @db.Timestamptz(3)
+  trip                       Trip                         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  anchorFrom                 ItineraryNode?               @relation("AdoptedRouteFromAnchor", fields: [anchorFromNodeId, tripId], references: [id, tripId], onDelete: Restrict)
+  anchorTo                   ItineraryNode                @relation("AdoptedRouteToAnchor", fields: [anchorToNodeId, tripId], references: [id, tripId], onDelete: Restrict)
+  sourcePreview              RoutePreview                 @relation(fields: [sourcePreviewId], references: [id], onDelete: Restrict)
+  candidateSnapshot          RouteCandidateSnapshot       @relation(fields: [candidateSnapshotId], references: [id], onDelete: Restrict)
+  generatedNodes             ItineraryNode[]              @relation("GeneratedRouteNodes")
+  transportEdges             TransportEdge[]
+  operationReceipts          OperationReceipt[]
+  groundTransitLegs          GroundTransitLegExecution[]
 
   @@unique([id, tripId])
   @@index([tripId, status, anchorFromNodeId, anchorToNodeId])

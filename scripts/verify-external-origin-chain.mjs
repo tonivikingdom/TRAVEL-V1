@@ -282,9 +282,10 @@ export async function verifyExternalOriginChain({
   });
   const plan = externalPreview.changeSummary.externalOriginReplacement;
   assert(
-    externalPreview.status === 'ADOPT_UNSUPPORTED' &&
-      externalPreview.adoptable === false,
-    'external Preview must remain non-adoptable',
+    externalPreview.status === 'ACTIVE' &&
+      externalPreview.adoptable === true &&
+      externalPreview.policyVersion === 'route-external-origin-preview-v2',
+    'new external v2 Preview must be adoptable',
   );
   assert(
     plan?.replacementScope === 'EXTERNAL_ORIGIN' &&
@@ -345,33 +346,184 @@ export async function verifyExternalOriginChain({
     'GET',
   );
   assert(
-    fetchedPreview.status === 'ADOPT_UNSUPPORTED',
+    fetchedPreview.status === 'ACTIVE',
     'external GET was superseded by node policy',
   );
-  const beforeAdopt = await footprint();
-  const rejection = await fetch(
-    `http://127.0.0.1:${apiPort}/trips/${trip.id}/previews/${externalPreview.previewId}/adopt`,
+  // This is the immediate Undo acceptance chain, before R2 receives any new
+  // execution/provider facts. Quiesce only the synthetic test Worker; the API
+  // still uses the normal monitoring cancellation and generation lifecycle.
+  // R2 facts blocking Undo are covered independently by PostgreSQL regressions.
+  await composeQuiet('stop', '--timeout', '15', 'worker');
+  const beforeExternal = await sql(
+    `SELECT to_jsonb(e) FROM "ExternalExecutionOrigin" e WHERE "id"='${result.origin.id}';`,
+  );
+  const beforeActual = await sql(
+    `SELECT jsonb_agg(to_jsonb(v)-'id'-'transportEdgeId' ORDER BY "pointKind","layer") FROM "TemporalValue" v WHERE "transportEdgeId"='${edgeId}';`,
+  );
+  const beforeGround = await sql(
+    `SELECT jsonb_build_object('leg',(SELECT to_jsonb(l) FROM "GroundTransitLegExecution" l WHERE "id"='${result.origin.sourceGroundTransitLegExecutionId}'),'observations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY "id") FROM "GroundTransitObservation" o WHERE "legExecutionId"='${result.origin.sourceGroundTransitLegExecutionId}'),'transitions',(SELECT jsonb_agg(to_jsonb(t) ORDER BY "id") FROM "GroundTransitStateTransition" t WHERE "legExecutionId"='${result.origin.sourceGroundTransitLegExecutionId}'));`,
+  );
+  const adoptedExternal = await apiJson(
+    `/trips/${trip.id}/previews/${externalPreview.previewId}/adopt`,
+    'POST',
     {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${session.credential}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        baseTripVersion: result.resultingTripVersion,
-        idempotencyKey: randomUUID(),
-      }),
+      baseTripVersion: result.resultingTripVersion,
+      idempotencyKey: randomUUID(),
+    },
+  );
+  const delta = adoptedExternal.operationReceipt.delta;
+  const eNode = delta.materializedOriginNodeId;
+  assert(
+    delta.schemaVersion === 'route-adopt-delta-v5' &&
+      delta.replacementScope === 'EXTERNAL_ORIGIN' &&
+      delta.externalOriginId === result.origin.id,
+    'external Adopt receipt is not v5',
+  );
+  assert(
+    adoptedExternal.trip.version === result.resultingTripVersion + 1,
+    'external Adopt version increment not exactly one',
+  );
+  assert(
+    JSON.stringify(
+      adoptedExternal.trip.days
+        .flatMap((day) => day.nodes)
+        .map((node) => node.id),
+    ) === JSON.stringify([a.id, eNode, d.id]),
+    'first-edge formal external itinerary wrong',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "TransportEdge" WHERE "fromNodeId"='${a.id}' AND "toNodeId"='${eNode}';`,
+    )) === '0',
+    'fake divergence-to-E transport was created',
+  );
+  assert(
+    adoptedExternal.trip.connections.find(
+      (connection) =>
+        connection.fromNodeId === a.id && connection.toNodeId === eNode,
+    )?.state === 'MISSING',
+    'execution history gap must have no planned TransportEdge',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "AdoptedRoute" WHERE "id"='${adoptedExternal.operationReceipt.adoptedRouteId}' AND "status"='ACTIVE' AND "anchorOriginKind"='EXTERNAL_EXECUTION_ORIGIN' AND "anchorFromNodeId"='${eNode}' AND "anchorFromExternalOriginId"='${result.origin.id}' AND "anchorFromSnapshot"->>'schemaVersion'='external-adopted-route-anchor-v1';`,
+    )) === '1',
+    'external R2 live/historical anchor invalid',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "AdoptedRoute" WHERE "id"='${result.origin.sourceAdoptedRouteId}' AND "status"='REPLACED';`,
+    )) === '1',
+    'R1 was not replaced',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "ItineraryNode" WHERE "id"='${eNode}' AND "source"='ROUTE_GENERATED' AND "adoptedRouteId"='${adoptedExternal.operationReceipt.adoptedRouteId}' AND "sourceOperationId"='${adoptedExternal.operationReceipt.id}' AND "providerPlaceRef" IS NULL AND "autoReplaceable";`,
+    )) === '1',
+    'formal E metadata invalid',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "TemporalValue" WHERE "nodeId"='${eNode}';`,
+    )) === '0' &&
+      (await sql(
+        `SELECT count(*) FROM "ExecutionEvent" WHERE "nodeId"='${eNode}';`,
+      )) === '0',
+    'external arrival was copied onto formal E',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "TransportEdge" WHERE "id"='${edgeId}';`,
+    )) === '0',
+    'source suffix remains live',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "TransportEdgeHistoryTimeValue" v JOIN "TransportEdgeHistory" h ON h."id"=v."transportEdgeHistoryId" WHERE h."originalTransportEdgeId"='${edgeId}' AND v."layer"='ACTUAL' AND v."sourceKind"='PROVIDER_OBSERVATION';`,
+    )) !== '0',
+    'provider ACTUAL missing from archive',
+  );
+  assert(
+    (await sql(
+      `SELECT to_jsonb(e) FROM "ExternalExecutionOrigin" e WHERE "id"='${result.origin.id}';`,
+    )) === beforeExternal,
+    'Adopt rewrote external execution fact',
+  );
+  const undoneExternal = await apiJson(
+    `/trips/${trip.id}/operations/${adoptedExternal.operationReceipt.id}/undo`,
+    'POST',
+    {
+      baseTripVersion: adoptedExternal.trip.version,
+      idempotencyKey: randomUUID(),
     },
   );
   assert(
-    rejection.status === 422 &&
-      (await rejection.json()).error?.code === 'PREVIEW_UNSUPPORTED',
-    'external Adopt did not return controlled unsupported',
+    undoneExternal.operationReceipt.delta.schemaVersion ===
+      'route-undo-delta-v3' &&
+      undoneExternal.trip.version === adoptedExternal.trip.version + 1,
+    'external Undo receipt/version invalid',
   );
   assert(
-    (await footprint()) === beforeAdopt,
-    'rejected external Adopt wrote data',
+    JSON.stringify(
+      undoneExternal.trip.days
+        .flatMap((day) => day.nodes)
+        .map((node) => node.id),
+    ) === JSON.stringify([a.id, d.id]),
+    'Undo did not restore original corridor',
   );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "ItineraryNode" WHERE "id"='${eNode}';`,
+    )) === '0' &&
+      (await sql(
+        `SELECT count(*) FROM "Place" WHERE "id"='${delta.materializedOriginPlaceId}';`,
+      )) === '0',
+    'Undo retained formal E Node/Place',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "AdoptedRoute" WHERE "id"='${adoptedExternal.operationReceipt.adoptedRouteId}' AND "status"='UNDONE' AND "anchorFromNodeId" IS NULL AND "anchorFromExternalOriginId"='${result.origin.id}' AND "anchorFromSnapshot"->>'materializedNodeId'='${eNode}';`,
+    )) === '1',
+    'Undo did not detach live E anchor while retaining immutable evidence',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "AdoptedRoute" WHERE "id"='${result.origin.sourceAdoptedRouteId}' AND "status"='ACTIVE';`,
+    )) === '1',
+    'Undo did not restore R1',
+  );
+  assert(
+    (await sql(
+      `SELECT jsonb_agg(to_jsonb(v)-'id'-'transportEdgeId' ORDER BY "pointKind","layer") FROM "TemporalValue" v WHERE "transportEdgeId"='${edgeId}';`,
+    )) === beforeActual,
+    'Undo did not restore exact provider temporal evidence',
+  );
+  assert(
+    (await sql(
+      `SELECT to_jsonb(e) FROM "ExternalExecutionOrigin" e WHERE "id"='${result.origin.id}';`,
+    )) === beforeExternal,
+    'Undo changed external execution fact',
+  );
+  assert(
+    (await sql(
+      `SELECT jsonb_build_object('leg',(SELECT to_jsonb(l) FROM "GroundTransitLegExecution" l WHERE "id"='${result.origin.sourceGroundTransitLegExecutionId}'),'observations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY "id") FROM "GroundTransitObservation" o WHERE "legExecutionId"='${result.origin.sourceGroundTransitLegExecutionId}'),'transitions',(SELECT jsonb_agg(to_jsonb(t) ORDER BY "id") FROM "GroundTransitStateTransition" t WHERE "legExecutionId"='${result.origin.sourceGroundTransitLegExecutionId}'));`,
+    )) === beforeGround,
+    'Adopt/Undo rewrote ground evidence',
+  );
+  const handoffRestored = await apiJson(`${base}/route-reevaluation`, 'GET');
+  assert(
+    handoffRestored.readiness === 'READY' &&
+      handoffRestored.originBasis === 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN' &&
+      handoffRestored.externalQuery?.basisVersion ===
+        undoneExternal.trip.version,
+    'Undo did not restore explicit external planning capability',
+  );
+  // The owner explicitly closes the retained execution origin after Undo.
+  trip = undoneExternal.trip;
+  previous.version = trip.version;
+  previous.edges = JSON.parse(await footprint()).edges;
+  previous.routes = JSON.parse(await footprint()).routes;
+  previous.nodes = JSON.parse(await footprint()).nodes;
   previous.previews = beforePlan.previews + 1;
   previous.snapshots = snapshotCount;
 
@@ -379,14 +531,14 @@ export async function verifyExternalOriginChain({
     `/trips/${trip.id}/execution/external-origins/${result.origin.id}/depart`,
     'POST',
     {
-      baseTripVersion: result.resultingTripVersion,
+      baseTripVersion: trip.version,
       idempotencyKey: randomUUID(),
     },
   );
   assert(
     departed.origin.status === 'DEPARTED' &&
       departed.origin.currentness === 'DEPARTED' &&
-      departed.resultingTripVersion === trip.version + 2,
+      departed.resultingTripVersion === trip.version + 1,
     'E departure lifecycle failed',
   );
   const rejectedQuery = await fetch(
@@ -415,23 +567,36 @@ export async function verifyExternalOriginChain({
     JSON.stringify(final) === JSON.stringify(previous),
     'departure mutated itinerary/planning',
   );
+  await composeQuiet('start', 'worker');
   return {
     candidateReadOnly: true,
     providerArrivalCreatesOrigin: false,
     confirmation: 'ARRIVED',
     departure: 'DEPARTED',
-    itineraryMutationCount: 0,
-    placeMutationCount: 0,
+    confirmationItineraryMutationCount: 0,
+    confirmationPlaceMutationCount: 0,
+    formalTripRestoredAfterUndo: true,
     previewMutationCount: 1,
     formalTripPreviewMutations: 0,
     externalReplacementScope: 'EXTERNAL_ORIGIN',
     oneNodeFirstEdgePrefix: true,
     providerActualArchivable: true,
-    adoptMutationCount: 0,
+    adoptMutationCount: 1,
     externalRouteQuery: true,
     externalSnapshotCount: queried.candidates.length,
-    externalPreview: 'ADOPT_UNSUPPORTED',
-    externalAdopt: 'PREVIEW_UNSUPPORTED',
+    externalPreview: 'ACTIVE',
+    externalAdopt: 'SUCCESS',
+    externalUndo: 'SUCCESS',
+    formalOriginRemovedAfterUndo: true,
+    fakeGapTransportCount: 0,
+    sourceRouteId: result.origin.sourceAdoptedRouteId,
+    externalAdoptedRouteId: adoptedExternal.operationReceipt.adoptedRouteId,
+    materializedOriginNodeId: eNode,
+    materializedOriginPlaceId: delta.materializedOriginPlaceId,
+    materializedOriginDayOccurrenceId: delta.materializedOriginDayOccurrenceId,
+    createdTransportEdgeIds: delta.createdTransportEdgeIds,
+    archivedTransportEdgeIds: delta.archivedTransportEdgeIds,
+    preservedPrefixHash: delta.preservedPrefixHash,
     departedExternalQuery: 'ROUTE_QUERY_UNSUPPORTED',
     automaticQuery: false,
     automaticPreview: false,

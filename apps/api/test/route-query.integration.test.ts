@@ -3562,7 +3562,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   });
 
   it('accepts cancellation once, aggregates one strong presentation, and restores the same adopted route', async () => {
-    const { trip, leg } = await adoptedFixedGroundTrip();
+    const { trip, leg } = await adoptedFixedGroundTrip({
+      now: '2030-10-01T09:49:59Z',
+      departure: '2030-10-01T10:00:00Z',
+      arrival: '2030-10-01T11:00:00Z',
+    });
+    // Independent actions need distinct fixture times; equal occurredAt values
+    // have no chronological ordering guarantee in PostgreSQL.
+    currentNow = new Date('2030-10-01T09:50:00Z');
     const groundProvider = groundSequence([
       'CANCELLED',
       'RECOVERY',
@@ -3655,14 +3662,21 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         where: { legExecutionId: leg.id },
       }),
     ).toBe(2);
-    expect(
-      (
-        await managed.client.groundTransitStateTransition.findMany({
-          where: { legExecutionId: leg.id },
-          orderBy: { occurredAt: 'asc' },
-        })
-      ).map((item) => item.toState),
-    ).toEqual(['PENDING', 'NO_LONGER_FEASIBLE', 'PENDING']);
+    const transitions =
+      await managed.client.groundTransitStateTransition.findMany({
+        where: { legExecutionId: leg.id },
+        orderBy: { occurredAt: 'asc' },
+      });
+    expect(transitions.map((item) => item.toState)).toEqual([
+      'PENDING',
+      'NO_LONGER_FEASIBLE',
+      'PENDING',
+    ]);
+    expect(transitions.map((item) => item.occurredAt.toISOString())).toEqual([
+      '2030-10-01T09:49:59.000Z',
+      '2030-10-01T09:50:00.000Z',
+      '2030-10-01T09:51:00.000Z',
+    ]);
     const presentations = await managed.client.notificationEvent.findMany({
       where: {
         tripId: trip.id,

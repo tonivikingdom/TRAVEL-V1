@@ -85,6 +85,8 @@ Cloud verification was executed on 2026-10-01 with Node 24.19.0, pnpm 11.19.0 an
 
 Cloud Docker's `vfs` image cache initially exhausted storage during container creation. Removing unreferenced old TRAVEL-V1 test images and running Compose/P5B sequentially resolved it; both complete acceptance runs then passed. No application or CI checks were weakened. Independent GitHub CI results belong to the final Draft PR report.
 
+The first independent CI run exposed an existing cancellation/recovery fixture ordering ambiguity: adoption and cancellation used the same frozen timestamp while the assertion ordered transitions only by `occurredAt`. The fixture now assigns distinct adoption/cancellation/recovery instants and asserts both the complete state chain and its timestamps. Runtime transition behavior is unchanged; all external Preview regressions and the cloud full suite remain required.
+
 ## Scope and migrations
 
 Zero new migrations; 22 total. Prisma schema and all migration files are unchanged. No changes to AdoptedRoute anchors, route delta v2/v3/v4, Undo or external-origin persistence mapping.

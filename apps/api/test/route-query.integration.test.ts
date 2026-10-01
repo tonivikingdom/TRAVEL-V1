@@ -156,6 +156,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         provider,
         routePlanningRepository,
         {
+          externalOrigins: new PrismaExternalExecutionOriginRepository(
+            managed.client,
+          ),
           candidateSnapshotTtlSeconds: 900,
           clock: { now: () => currentNow },
         },
@@ -354,7 +357,11 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     const f = await adoptedFixedGroundTrip();
     await app.close();
     app = buildTestApi(
-      new SyntheticRouteProvider(() => providerResult),
+      new SyntheticRouteProvider(async (input) => {
+        providerInputs.push(input);
+        await providerHook?.();
+        return providerResult;
+      }),
       groundSequence(changes),
     );
     const base = `/trips/${f.trip.id}/execution/ground-transit/${f.leg.transportEdgeId}`;
@@ -378,7 +385,17 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         headers: bearer(userA),
       })
     ).json<ExternalOriginResponse>();
-    return { ...f, trip, base, view };
+    return {
+      ...f,
+      trip,
+      base,
+      view,
+      to: trip.days
+        .flatMap((day) => day.nodes)
+        .find(
+          (node) => node.id !== f.from.id && node.source !== 'ROUTE_GENERATED',
+        )!,
+    };
   }
   function confirmExternal(
     f: Awaited<ReturnType<typeof externalFixture>>,
@@ -490,6 +507,757 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     };
   }
+  async function confirmedExternalQueryFixture(
+    changes: Parameters<typeof groundSequence>[0] = ['SHORT_TURN'],
+  ) {
+    const f = await externalFixture(changes);
+    const confirmed = await confirmExternal(f);
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    const result = confirmed.json<ExternalOriginMutationResponse>();
+    const body = {
+      basisVersion: result.resultingTripVersion,
+      toNodeId: f.to.id,
+    };
+    const url = `/trips/${f.trip.id}/execution/external-origins/${result.origin.id}/routes/query`;
+    providerInputs.length = 0;
+    return { ...f, result, body, url };
+  }
+  async function readVersion(tripId: string) {
+    return (
+      await managed.client.trip.findUniqueOrThrow({ where: { id: tripId } })
+    ).version;
+  }
+  function externalQuery(
+    f: Awaited<ReturnType<typeof confirmedExternalQueryFixture>>,
+    body: object = f.body,
+    identity = userA,
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: f.url,
+      headers: bearer(identity),
+      payload: body,
+    });
+  }
+  async function assertExternalHandoffProvenance(
+    handoff: { sourceTransportEdgeId: string; adoptedRouteId: string },
+    origin: ExternalOriginMutationResponse['origin'],
+  ) {
+    expect(handoff).toMatchObject({
+      sourceTransportEdgeId: origin.sourceTransportEdgeId,
+      adoptedRouteId: origin.sourceAdoptedRouteId,
+    });
+    expect(
+      await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+        where: { id: origin.sourceGroundTransitLegExecutionId },
+      }),
+    ).toMatchObject({
+      id: origin.sourceGroundTransitLegExecutionId,
+      transportEdgeId: handoff.sourceTransportEdgeId,
+      adoptedRouteId: handoff.adoptedRouteId,
+    });
+  }
+  it.each(['same-route/different-edge', 'different-route'] as const)(
+    'P5E2 5B1 repair: %s handoff does not inherit another leg external origin',
+    async (kind) => {
+      const f = await suffixFixture(false, false, false);
+      let trip = f.first.trip;
+      const requestedLeg =
+        await managed.client.groundTransitLegExecution.findFirstOrThrow({
+          where: { tripId: trip.id, transportEdgeId: f.prefix.id },
+        });
+      let sourceLeg =
+        await managed.client.groundTransitLegExecution.findFirstOrThrow({
+          where: {
+            tripId: trip.id,
+            transportEdgeId: f.suffixEdges.find(
+              (edge) => edge.fromNodeId === f.B.id,
+            )!.id,
+          },
+        });
+      let toNodeId = f.D.id;
+      if (kind === 'different-route') {
+        trip = await addVisit(userA, trip, 'SYNTHETIC P', '2030-10-01');
+        trip = await addVisit(userA, trip, 'SYNTHETIC Q', '2030-10-01');
+        const [P, Q] = trip.days.flatMap((day) => day.nodes).slice(-2);
+        const base = candidate(
+          '2030-10-01T11:30:00Z',
+          '2030-10-01T12:30:00Z',
+          'UTC',
+          'UTC',
+        );
+        providerResult = {
+          status: 'SUCCESS',
+          candidates: [
+            {
+              ...base,
+              legs: [
+                {
+                  ...base.legs[0]!,
+                  mode: 'RAIL',
+                  groundTransit: {
+                    ...suffixFoundationCandidate(false).candidates[0]!.legs[0]!
+                      .groundTransit!,
+                    serviceIdentityKey: 'synthetic:repair:second-route',
+                    boardingHubRef: 'synthetic:P',
+                    alightingHubRef: 'synthetic:Q',
+                  },
+                },
+              ],
+            },
+          ],
+        };
+        const preview = await createPreview(userA, trip, P!.id, Q!.id, {
+          type: 'DEPART_AT',
+          instant: '2030-10-01T11:30:00Z',
+          timeZone: 'UTC',
+        });
+        const adopted = await adoptSuccessfully(
+          userA,
+          trip,
+          preview.previewId,
+          'synthetic-repair-second-route',
+        );
+        trip = adopted.trip;
+        sourceLeg =
+          await managed.client.groundTransitLegExecution.findFirstOrThrow({
+            where: { adoptedRouteId: adopted.operationReceipt.adoptedRouteId },
+          });
+        toNodeId = Q!.id;
+        expect(
+          await managed.client.adoptedRoute.count({
+            where: { tripId: trip.id, status: 'ACTIVE' },
+          }),
+        ).toBe(2);
+        expect(sourceLeg.adoptedRouteId).not.toBe(requestedLeg.adoptedRouteId);
+      } else {
+        expect(sourceLeg.adoptedRouteId).toBe(requestedLeg.adoptedRouteId);
+        expect(sourceLeg.transportEdgeId).not.toBe(
+          requestedLeg.transportEdgeId,
+        );
+      }
+      await app.close();
+      app = buildTestApi(
+        new SyntheticRouteProvider(async (input) => {
+          providerInputs.push(input);
+          return {
+            status: 'SUCCESS',
+            candidates: [
+              candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z'),
+            ],
+          };
+        }),
+        groundSequence(['SHORT_TURN']),
+      );
+      const base = `/trips/${trip.id}/execution/ground-transit/${sourceLeg.transportEdgeId}`;
+      const refresh = await app.inject({
+        method: 'POST',
+        url: `${base}/refresh`,
+        headers: bearer(userA),
+      });
+      expect(refresh.statusCode, refresh.body).toBe(200);
+      const view = (
+        await app.inject({
+          method: 'GET',
+          url: `${base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json<ExternalOriginResponse>();
+      expect(view.availability).toBe('CONFIRMATION_REQUIRED');
+      const confirmed = await app.inject({
+        method: 'POST',
+        url: `${base}/external-origin/confirm`,
+        headers: bearer(userA),
+        payload: {
+          baseTripVersion: await readVersion(trip.id),
+          candidateRef: view.candidate!.candidateRef,
+          idempotencyKey: randomUUID(),
+        },
+      });
+      expect(confirmed.statusCode, confirmed.body).toBe(200);
+      const result = confirmed.json<ExternalOriginMutationResponse>();
+      expect(result.origin).toMatchObject({
+        sourceTransportEdgeId: sourceLeg.transportEdgeId,
+        sourceGroundTransitLegExecutionId: sourceLeg.id,
+        sourceAdoptedRouteId: sourceLeg.adoptedRouteId,
+        currentness: 'CURRENT',
+      });
+      providerInputs.length = 0;
+      const before = await externalDurableState(trip.id);
+      const mismatched = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/execution/ground-transit/${requestedLeg.transportEdgeId}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(mismatched.statusCode, mismatched.body).toBe(200);
+      expect(mismatched.json().originBasis).not.toBe(
+        'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+      );
+      expect(mismatched.json().externalQuery ?? null).toBeNull();
+      expect(mismatched.json()).toMatchObject({
+        sourceTransportEdgeId: requestedLeg.transportEdgeId,
+        adoptedRouteId: requestedLeg.adoptedRouteId,
+        readiness: 'NOT_REQUIRED',
+      });
+      expect(await externalDurableState(trip.id)).toEqual(before);
+      const matching = await app.inject({
+        method: 'GET',
+        url: `${base}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(matching.statusCode, matching.body).toBe(200);
+      expect(matching.json()).toMatchObject({
+        readiness: 'READY',
+        originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+        query: null,
+        externalQuery: { externalOriginId: result.origin.id, toNodeId },
+      });
+      await assertExternalHandoffProvenance(matching.json(), result.origin);
+      expect(await externalDurableState(trip.id)).toEqual(before);
+      expect(providerInputs).toHaveLength(0);
+      const queried = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/external-origins/${result.origin.id}/routes/query`,
+        headers: bearer(userA),
+        payload: { basisVersion: result.resultingTripVersion, toNodeId },
+      });
+      expect(queried.statusCode, queried.body).toBe(200);
+      expect(providerInputs).toHaveLength(1);
+    },
+  );
+  it('P5E2 5B1 repair: matching edge/route with mismatched leg execution ID cannot expose external Query', async () => {
+    const f = await confirmedExternalQueryFixture();
+    await managed.client.externalExecutionOrigin.update({
+      where: { id: f.result.origin.id },
+      data: { sourceGroundTransitLegExecutionId: randomUUID() },
+    });
+    const before = await externalDurableState(f.trip.id);
+    const response = await app.inject({
+      method: 'GET',
+      url: `${f.base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().originBasis).not.toBe(
+      'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+    );
+    expect(response.json().externalQuery ?? null).toBeNull();
+    expect(await externalDurableState(f.trip.id)).toEqual(before);
+    expect(providerInputs).toHaveLength(0);
+  });
+  it('P5E2 5B1: handoff is READY/read-only; explicit external Query writes only snapshots; Preview is unsupported', async () => {
+    const f = await confirmedExternalQueryFixture();
+    const nodeSnapshot =
+      await managed.client.routeCandidateSnapshot.findFirstOrThrow({
+        where: { tripId: f.trip.id, originKind: 'ITINERARY_NODE' },
+      });
+    expect(nodeSnapshot).toMatchObject({
+      originKind: 'ITINERARY_NODE',
+      fromNodeId: f.from.id,
+      fromExternalOriginId: null,
+      externalOriginSnapshot: null,
+    });
+    expect(
+      (
+        await new PrismaRoutePlanningRepository(
+          managed.client,
+        ).findSnapshotOwned({
+          ownerUserId: userA.actor.userId,
+          tripId: f.trip.id,
+          snapshotId: nodeSnapshot.id,
+        })
+      )?.origin,
+    ).toEqual({ type: 'ITINERARY_NODE', nodeId: f.from.id });
+    const before = await externalDurableState(f.trip.id);
+    const handoff = await app.inject({
+      method: 'GET',
+      url: `${f.base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(handoff.json()).toMatchObject({
+      readiness: 'READY',
+      originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+      query: null,
+      externalQuery: {
+        externalOriginId: f.result.origin.id,
+        ...f.body,
+        hint: { type: 'DEPART_AT', timeZone: 'Asia/Tokyo' },
+      },
+    });
+    await assertExternalHandoffProvenance(handoff.json(), f.result.origin);
+    expect(await externalDurableState(f.trip.id)).toEqual(before);
+    expect(providerInputs).toHaveLength(0);
+    const response = await externalQuery(f);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(providerInputs).toHaveLength(1);
+    expect(providerInputs[0]).toMatchObject({
+      origin: {
+        placeId: f.result.origin.id,
+        name: f.result.origin.name,
+        latitude: f.result.origin.latitude,
+        longitude: f.result.origin.longitude,
+      },
+      earliestDeparture: currentNow,
+    });
+    const payload = response.json();
+    expect(payload).toMatchObject({
+      externalOriginId: f.result.origin.id,
+      ...f.body,
+      timeCondition: {
+        hardEarliestDeparture: currentNow.toISOString(),
+        planningEarliestDeparture: null,
+        lookbackSeconds: 0,
+      },
+    });
+    const stored =
+      await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+        where: { id: payload.candidates[0].candidateSnapshotId },
+      });
+    expect(stored).toMatchObject({
+      originKind: 'EXTERNAL_EXECUTION_ORIGIN',
+      fromNodeId: null,
+      fromExternalOriginId: f.result.origin.id,
+      externalOriginSnapshot: {
+        schema: 'external-route-origin-v1',
+        externalOriginId: f.result.origin.id,
+        sourceObservationIdentity: f.result.origin.sourceObservationIdentity,
+        timeZone: 'Asia/Tokyo',
+      },
+    });
+    const record = await new PrismaRoutePlanningRepository(
+      managed.client,
+    ).findSnapshotOwned({
+      ownerUserId: userA.actor.userId,
+      tripId: f.trip.id,
+      snapshotId: stored.id,
+    });
+    expect(record?.origin).toMatchObject({
+      type: 'EXTERNAL_EXECUTION_ORIGIN',
+      externalOriginId: f.result.origin.id,
+    });
+    const after = await externalDurableState(f.trip.id);
+    expect({
+      ...after,
+      footprint: {
+        ...after.footprint,
+        planning: {
+          ...after.footprint.planning,
+          routeCandidateSnapshots:
+            before.footprint.planning.routeCandidateSnapshots,
+        },
+      },
+    }).toEqual(before);
+    const preview = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: f.body.basisVersion,
+        candidateSnapshotId: stored.id,
+      },
+    });
+    expect(preview.statusCode, preview.body).toBe(422);
+    expect(preview.json()).toMatchObject({
+      error: { code: 'PREVIEW_UNSUPPORTED' },
+    });
+    expect(await externalDurableState(f.trip.id)).toEqual(after);
+    expect(
+      await new PrismaRoutePlanningRepository(managed.client).createPreview({
+        ownerUserId: userA.actor.userId,
+        tripId: f.trip.id,
+        basisVersion: f.body.basisVersion,
+        snapshotId: stored.id,
+        expectedCandidateHash: stored.candidateHash,
+        fromNodeId: f.from.id,
+        toNodeId: f.to.id,
+        policyVersion: 'route-adoption-preview-v3',
+        previewPayload: {} as StoredRoutePreviewPayload,
+        previewHash: 'a'.repeat(64),
+        now: currentNow,
+        createdAt: currentNow,
+        expiresAt: new Date(currentNow.getTime() + 60000),
+      }),
+    ).toEqual({ status: 'PREVIEW_UNSUPPORTED' });
+  });
+  it.each([
+    'destination',
+    'REPLACED',
+    'UNDONE',
+    'missing-edge',
+    'wrong-edge',
+    'SUPERSEDED',
+    'DEPARTED',
+    'INVALIDATED',
+    'CONFLICT',
+    'timezone',
+    'stored-timezone',
+  ] as const)(
+    'P5E2 5B1: %s rejects before Provider with zero snapshots',
+    async (kind) => {
+      const f = await confirmedExternalQueryFixture();
+      if (kind === 'destination') f.body.toNodeId = f.from.id;
+      if (kind === 'REPLACED' || kind === 'UNDONE')
+        await managed.client.adoptedRoute.update({
+          where: { id: f.result.origin.sourceAdoptedRouteId },
+          data: { status: kind },
+        });
+      if (kind === 'missing-edge')
+        await managed.client.transportEdge.delete({
+          where: { id: f.leg.transportEdgeId },
+        });
+      if (kind === 'wrong-edge')
+        await managed.client.transportEdge.update({
+          where: { id: f.leg.transportEdgeId },
+          data: { source: 'MANUAL', adoptedRouteId: null },
+        });
+      if (kind === 'DEPARTED')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.result.origin.id },
+          data: { status: 'DEPARTED', departedAt: currentNow },
+        });
+      if (kind === 'INVALIDATED')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.result.origin.id },
+          data: { status: 'INVALIDATED', invalidatedAt: currentNow },
+        });
+      if (kind === 'SUPERSEDED')
+        await managed.client.executionEvent.create({
+          data: {
+            ownerUserId: userA.actor.userId,
+            tripId: f.trip.id,
+            nodeId: f.from.id,
+            type: 'ARRIVAL',
+            source: 'MANUAL',
+            occurredAt: new Date(currentNow.getTime() + 60000),
+          },
+        });
+      if (kind === 'CONFLICT')
+        await managed.client.temporalValue.createMany({
+          data: [f.from.id, f.to.id].map((nodeId) => ({
+            nodeId,
+            layer: 'ACTUAL' as const,
+            pointKind: 'ARRIVAL' as const,
+            instant: currentNow,
+            timeZone: 'UTC',
+            sourceKind: 'USER_VALUE' as const,
+          })),
+        });
+      if (kind === 'stored-timezone')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.result.origin.id },
+          data: { timeZone: 'invalid/Zone' },
+        });
+      if (kind === 'timezone')
+        f.body = {
+          ...f.body,
+          hint: {
+            type: 'DEPART_AT',
+            instant: currentNow.toISOString(),
+            timeZone: 'UTC',
+          },
+        } as typeof f.body;
+      const before = await externalDurableState(f.trip.id);
+      const response = await externalQuery(f);
+      expect(response.statusCode, response.body).toBe(
+        kind === 'timezone' ? 400 : 422,
+      );
+      expect(providerInputs).toHaveLength(0);
+      expect(await externalDurableState(f.trip.id)).toEqual(before);
+    },
+  );
+  it.each(['departure', 'supersession', 'route', 'edge', 'metadata'] as const)(
+    'P5E2 5B1: %s during Provider is fenced by locked snapshot revalidation',
+    async (kind) => {
+      const f = await confirmedExternalQueryFixture();
+      const snapshots = await managed.client.routeCandidateSnapshot.count();
+      providerHook = async () => {
+        if (kind === 'departure') {
+          const response = await app.inject({
+            method: 'POST',
+            url: `/trips/${f.trip.id}/execution/external-origins/${f.result.origin.id}/depart`,
+            headers: bearer(userA),
+            payload: {
+              baseTripVersion: f.body.basisVersion,
+              idempotencyKey: randomUUID(),
+            },
+          });
+          expect(response.statusCode, response.body).toBe(200);
+        }
+        // Deliberately retain Trip.version to exercise the independent locked
+        // proof checks, not just the normal version conflict path.
+        if (kind === 'supersession')
+          await managed.client.executionEvent.create({
+            data: {
+              ownerUserId: userA.actor.userId,
+              tripId: f.trip.id,
+              nodeId: f.from.id,
+              type: 'ARRIVAL',
+              source: 'MANUAL',
+              occurredAt: new Date(currentNow.getTime() + 60000),
+            },
+          });
+        if (kind === 'route')
+          await managed.client.adoptedRoute.update({
+            where: { id: f.result.origin.sourceAdoptedRouteId },
+            data: { status: 'REPLACED' },
+          });
+        if (kind === 'edge')
+          await managed.client.transportEdge.update({
+            where: { id: f.leg.transportEdgeId },
+            data: { source: 'MANUAL', adoptedRouteId: null },
+          });
+        if (kind === 'metadata')
+          await managed.client.externalExecutionOrigin.update({
+            where: { id: f.result.origin.id },
+            data: { name: 'SYNTHETIC changed metadata' },
+          });
+      };
+      const response = await externalQuery(f);
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'VERSION_CONFLICT' },
+      });
+      expect(providerInputs).toHaveLength(1);
+      expect(await managed.client.routeCandidateSnapshot.count()).toBe(
+        snapshots,
+      );
+    },
+  );
+  it('P5E2 5B1: departing after handoff rejects the old request before Provider', async () => {
+    const f = await confirmedExternalQueryFixture();
+    const handoff = (
+      await app.inject({
+        method: 'GET',
+        url: `${f.base}/route-reevaluation`,
+        headers: bearer(userA),
+      })
+    ).json();
+    await assertExternalHandoffProvenance(handoff, f.result.origin);
+    await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/execution/external-origins/${f.result.origin.id}/depart`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: f.body.basisVersion,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    const { externalOriginId: _id, ...request } = handoff.externalQuery;
+    void _id;
+    expect((await externalQuery(f, request)).statusCode).toBe(409);
+    expect(providerInputs).toHaveLength(0);
+  });
+  it('P5E2 5B1: E→F rollover rejects historical E and allows CURRENT F', async () => {
+    const { f, e } = await supersededExternalFixture();
+    const next = (
+      await confirmExternal(f)
+    ).json<ExternalOriginMutationResponse>();
+    const url = `/trips/${f.trip.id}/execution/external-origins/`;
+    const body = { basisVersion: next.resultingTripVersion, toNodeId: f.to.id };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `${url}${e.origin.id}/routes/query`,
+          headers: bearer(userA),
+          payload: body,
+        })
+      ).statusCode,
+    ).toBe(422);
+    const response = await app.inject({
+      method: 'POST',
+      url: `${url}${next.origin.id}/routes/query`,
+      headers: bearer(userA),
+      payload: body,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+  });
+  it('P5E2 5B1: vehicle recovery preserves CURRENT E planning authorization', async () => {
+    const f = await confirmedExternalQueryFixture(['SHORT_TURN', 'RECOVERY']);
+    await app.inject({
+      method: 'POST',
+      url: `${f.base}/refresh`,
+      headers: bearer(userA),
+    });
+    f.body.basisVersion = await readVersion(f.trip.id);
+    const response = await externalQuery(f);
+    expect(response.statusCode, response.body).toBe(200);
+    const handoff = (
+      await app.inject({
+        method: 'GET',
+        url: `${f.base}/route-reevaluation`,
+        headers: bearer(userA),
+      })
+    ).json();
+    await assertExternalHandoffProvenance(handoff, f.result.origin);
+    expect(handoff).toMatchObject({
+      readiness: 'READY',
+      originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+    });
+  });
+  it.each(['USER', 'ADMIN'] as const)(
+    'P5E2 5B1: another %s cannot query private external origin',
+    async (role) => {
+      const f = await confirmedExternalQueryFixture();
+      const before = await externalDurableState(f.trip.id);
+      expect(
+        (await externalQuery(f, f.body, role === 'ADMIN' ? admin : userB))
+          .statusCode,
+      ).toBe(404);
+      expect(providerInputs).toHaveLength(0);
+      expect(await externalDurableState(f.trip.id)).toEqual(before);
+    },
+  );
+  it.each(['past', 'future', 'arrive-by', 'no-hint'] as const)(
+    'P5E2 5B1: %s external time semantics use server floor without dwell',
+    async (kind) => {
+      const f = await confirmedExternalQueryFixture();
+      const currentTrip = (
+        await app.inject({
+          method: 'GET',
+          url: `/trips/${f.trip.id}`,
+          headers: bearer(userA),
+        })
+      ).json<TripView>();
+      const constrained = await command(userA, currentTrip, {
+        type: 'SET_TIME_INTENT',
+        nodeId: f.to.id,
+        pointKind: 'ARRIVAL',
+        operator: 'NOT_AFTER',
+        instant: '2030-10-01T11:00:00Z',
+        timeZone: 'UTC',
+        locked: true,
+      });
+      f.body.basisVersion = constrained.version;
+      const hint =
+        kind === 'no-hint'
+          ? undefined
+          : {
+              type: kind === 'arrive-by' ? 'ARRIVE_BY' : 'DEPART_AT',
+              instant:
+                kind === 'past'
+                  ? '2030-10-01T09:00:00Z'
+                  : kind === 'future'
+                    ? '2030-10-01T09:55:00Z'
+                    : '2030-10-01T11:30:00Z',
+              timeZone: 'Asia/Tokyo',
+            };
+      const response = await externalQuery(f, {
+        ...f.body,
+        ...(hint === undefined ? {} : { hint }),
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(providerInputs[0]!.earliestDeparture).toEqual(
+        kind === 'future' ? new Date('2030-10-01T09:55:00Z') : currentNow,
+      );
+      if (kind === 'arrive-by')
+        expect(providerInputs[0]!.latestArrival).toEqual(
+          new Date('2030-10-01T11:00:00Z'),
+        ); // tighter destination requirement wins
+      expect(
+        response.json().candidates[0].planningAssessment
+          .requiredUserAdjustments,
+      ).toEqual([]);
+      const resultCandidate = response.json().candidates[0];
+      expect(resultCandidate.planningAssessment.effectiveTotalTimeSeconds).toBe(
+        (Date.parse(resultCandidate.overall.arrival.instant) -
+          providerInputs[0]!.earliestDeparture!.getTime()) /
+          1000,
+      );
+    },
+  );
+  it('P5E2 5B1: old source vehicle ACTUAL and expired planned service do not constrain external departure', async () => {
+    const f = await confirmedExternalQueryFixture();
+    await managed.client.temporalValue.createMany({
+      data: [
+        {
+          transportEdgeId: f.leg.transportEdgeId,
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: new Date('2030-10-01T09:40:00Z'),
+          timeZone: 'UTC',
+          sourceKind: 'PROVIDER_OBSERVATION',
+        },
+        {
+          transportEdgeId: f.leg.transportEdgeId,
+          layer: 'ACTUAL',
+          pointKind: 'DEPARTURE',
+          instant: new Date('2030-10-01T10:30:00Z'),
+          timeZone: 'UTC',
+          sourceKind: 'PROVIDER_OBSERVATION',
+        },
+      ],
+    });
+    const before = await externalDurableState(f.trip.id);
+    const response = await externalQuery(f);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(providerInputs[0]!.earliestDeparture).toEqual(currentNow);
+    expect(providerInputs[0]!.latestArrival).toBeNull();
+    expect((await externalDurableState(f.trip.id)).origins).toEqual(
+      before.origins,
+    );
+  });
+  it('P5E2 5B1: destination dwell and downstream departure hard window constrain external arrival', async () => {
+    const f = await confirmedExternalQueryFixture();
+    let trip = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: f.to.id,
+      durationSeconds: 600,
+      locked: true,
+    });
+    trip = await command(userA, trip, {
+      type: 'SET_TIME_INTENT',
+      nodeId: f.to.id,
+      pointKind: 'DEPARTURE',
+      operator: 'NOT_AFTER',
+      instant: '2030-10-01T11:10:00Z',
+      timeZone: 'UTC',
+      locked: true,
+    });
+    f.body.basisVersion = trip.version;
+    const response = await externalQuery(f);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(providerInputs[0]!.latestArrival).toEqual(
+      new Date('2030-10-01T11:00:00Z'),
+    );
+    expect(
+      response.json().candidates[0].planningAssessment.requiredUserAdjustments,
+    ).toEqual([]);
+  });
+  it('P5E2 5B1: rejects client origin metadata and invalid Provider candidates without snapshots', async () => {
+    const f = await confirmedExternalQueryFixture();
+    expect(
+      (
+        await externalQuery(f, {
+          ...f.body,
+          latitude: 35,
+          fromNodeId: f.from.id,
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(providerInputs).toHaveLength(0);
+    const count = await managed.client.routeCandidateSnapshot.count();
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate(
+          '2030-10-01T10:00:00Z',
+          '2030-10-01T11:00:00Z',
+          'invalid/Zone',
+          'UTC',
+        ),
+      ],
+    };
+    expect((await externalQuery(f)).statusCode).toBe(503);
+    expect(await managed.client.routeCandidateSnapshot.count()).toBe(count);
+  });
   it('P5E2 5A: candidate is deterministic and read-only; confirmed/departed execution never mutates itinerary or planning', async () => {
     const f = await externalFixture();
     expect(f.view).toMatchObject({
@@ -567,12 +1335,25 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         })
       ).json(),
     ).toMatchObject({
-      readiness: 'ORIGIN_UNRESOLVED',
+      readiness: 'READY',
+      originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
       query: null,
-      reasonCodes: expect.arrayContaining([
-        'EXTERNAL_ORIGIN_ROUTE_PLANNING_NOT_SUPPORTED',
-      ]),
+      externalQuery: {
+        externalOriginId: result.origin.id,
+        basisVersion: result.resultingTripVersion,
+        toNodeId: f.to.id,
+      },
     });
+    await assertExternalHandoffProvenance(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+      result.origin,
+    );
     currentNow = new Date(currentNow.getTime() + 60_000);
     const key = randomUUID();
     const request = {
@@ -1141,7 +1922,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     ).toBe(0);
   });
-  it('P5E2 5A: provider recovery preserves confirmed user ARRIVAL and does not enable external routing', async () => {
+  it('P5E2 5A: provider recovery preserves confirmed user ARRIVAL and CURRENT external Query', async () => {
     const f = await externalFixture(['SHORT_TURN', 'RECOVERY']);
     const result = (
       await confirmExternal(f)
@@ -1177,7 +1958,22 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           headers: bearer(userA),
         })
       ).json(),
-    ).toMatchObject({ readiness: 'ORIGIN_UNRESOLVED', query: null });
+    ).toMatchObject({
+      readiness: 'READY',
+      originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+      query: null,
+      externalQuery: { externalOriginId: result.origin.id },
+    });
+    await assertExternalHandoffProvenance(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+      result.origin,
+    );
   });
   it('P5E2 5A: owner isolation covers candidate, confirm and departure including administrators', async () => {
     const f = await externalFixture();

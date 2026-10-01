@@ -196,3 +196,11 @@ export type {
   ExternalOriginCandidate,
   ExternalOriginRecord,
 } from './external-execution-origin-ports.js';
+
+export {
+  authorizeExternalOriginPlanning,
+  externalRouteOriginSnapshot,
+} from './external-origin-route-query.js';
+export type { ExternalOriginPlanningContext } from './external-execution-origin-ports.js';
+
+export { hashExternalRouteCandidateSnapshot } from './route-snapshot.js';

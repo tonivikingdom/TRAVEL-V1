@@ -11,19 +11,19 @@ if (!databaseUrl)
 const migrationsPath = fileURLToPath(
   new URL('../../../prisma/migrations/', import.meta.url),
 );
-const migration = '20260930130000_p5e2_external_execution_origin';
+const migration = '20261001090000_p5e2_external_origin_route_query';
 const splitMigrations = new Set([
   '20260920110000_p4b2_route_adoption',
   '20260920150000_p4b3_route_undo',
 ]);
 
-describe('P5E2 5A external execution origin migration', () => {
-  it('applies exactly 21 migrations on clean PostgreSQL 17', async () => {
-    await withDatabase('external_clean', async (client) => {
+describe('P5E2 5B1 external query snapshot migration', () => {
+  it('applies exactly 22 migrations on clean PostgreSQL 17', async () => {
+    await withDatabase('external_query_clean', async (client) => {
       const names = (await migrationNames()).filter(
         (name) => name <= migration,
       );
-      expect(names).toHaveLength(21);
+      expect(names).toHaveLength(22);
       for (const name of names) await applyMigration(client, name);
       expect(await count(client, 'ExternalExecutionOrigin')).toBe(0);
       expect(await count(client, 'ExternalExecutionOriginReceipt')).toBe(0);
@@ -54,11 +54,11 @@ describe('P5E2 5A external execution origin migration', () => {
     });
   });
   it('preserves populated baseline route/receipts, user execution and ground observation history', async () => {
-    await withDatabase('external_populated', async (client) => {
+    await withDatabase('external_query_populated', async (client) => {
       const beforeNames = (await migrationNames()).filter(
         (name) => name < migration,
       );
-      expect(beforeNames).toHaveLength(20);
+      expect(beforeNames).toHaveLength(21);
       for (const name of beforeNames) await applyMigration(client, name);
       await seedP4b2Data(client);
       await client.query(`
@@ -75,7 +75,28 @@ describe('P5E2 5A external execution origin migration', () => {
         INSERT INTO "GroundTransitStateTransition" ("id","legExecutionId","fromState","toState","source","evidenceRef","occurredAt") VALUES
         ('e0000000-0000-4000-8000-000000000001','c0000000-0000-4000-8000-000000000001','PENDING','IN_PROGRESS','DERIVED_LOCATION','SYNTHETIC:evidence','2030-01-01T00:00:00Z');
       `);
+      await client.query(`
+        INSERT INTO "ExternalExecutionOrigin" ("id","ownerUserId","tripId","sourceAdoptedRouteId","sourceTransportEdgeId","sourceGroundTransitLegExecutionId","sourceGroundTransitObservationId","sourceObservationIdentity","sourceObservationFetchedAt","sourceObservationFactsHash","provider","providerHubRef","canonicalHubRef","name","latitude","longitude","timeZone","arrivedAt","updatedAt") VALUES
+        ('f0000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','c0000000-0000-4000-8000-000000000001','d0000000-0000-4000-8000-000000000001','SYNTHETIC:accepted','2030-01-01T00:00:00Z','${'d'.repeat(64)}','SYNTHETIC','E','synthetic:E','Synthetic E',35,139,'Asia/Tokyo','2030-01-01T00:00:00Z',CURRENT_TIMESTAMP);
+        INSERT INTO "ExternalExecutionOriginReceipt" ("id","ownerUserId","tripId","externalOriginId","transition","idempotencyKey","requestHash","occurredAt","resultingTripVersion","response") VALUES
+        ('f1000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','f0000000-0000-4000-8000-000000000001','ARRIVAL','SYNTHETIC:external','${'e'.repeat(64)}','2030-01-01T00:00:00Z',5,'{}');
+      `);
+      for (const version of [2, 3, 4]) {
+        await client.query(
+          `INSERT INTO "OperationReceipt" ("id","ownerUserId","tripId","operationType","idempotencyKey","requestHash","baseTripVersion","resultingTripVersion","previewId","adoptedRouteId","delta","createdAt") SELECT $1::uuid,"ownerUserId","tripId","operationType",$2,"requestHash","baseTripVersion","resultingTripVersion","previewId","adoptedRouteId",$3::jsonb,"createdAt" FROM "OperationReceipt" LIMIT 1`,
+          [
+            randomUUID(),
+            `SYNTHETIC:v${version}`,
+            JSON.stringify({
+              schemaVersion: `route-adopt-delta-v${version}`,
+              fixture: 'SYNTHETIC retained receipt',
+            }),
+          ],
+        );
+      }
       const tables = [
+        'ExternalExecutionOrigin',
+        'ExternalExecutionOriginReceipt',
         'User',
         'Trip',
         'Place',
@@ -100,7 +121,7 @@ describe('P5E2 5A external execution origin migration', () => {
             async (table) =>
               (
                 await client.query(
-                  `SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) AS rows FROM "${table}" t`,
+                  `SELECT jsonb_agg((to_jsonb(t)-'originKind'-'fromExternalOriginId'-'externalOriginSnapshot') ORDER BY to_jsonb(t)::text) AS rows FROM "${table}" t`,
                 )
               ).rows[0],
           ),
@@ -108,8 +129,48 @@ describe('P5E2 5A external execution origin migration', () => {
       const before = await snapshot();
       await applyMigration(client, migration);
       expect(await snapshot()).toEqual(before);
-      expect(await count(client, 'ExternalExecutionOrigin')).toBe(0);
-      expect(await count(client, 'ExternalExecutionOriginReceipt')).toBe(0);
+      expect(await count(client, 'ExternalExecutionOrigin')).toBe(1);
+      expect(await count(client, 'ExternalExecutionOriginReceipt')).toBe(1);
+      const rows = (
+        await client.query(
+          'SELECT "originKind","fromNodeId","fromExternalOriginId","externalOriginSnapshot","candidateHash" FROM "RouteCandidateSnapshot"',
+        )
+      ).rows;
+      expect(rows).toEqual([
+        expect.objectContaining({
+          originKind: 'ITINERARY_NODE',
+          fromNodeId: '30000000-0000-4000-8000-000000000001',
+          fromExternalOriginId: null,
+          externalOriginSnapshot: null,
+          candidateHash: 'a'.repeat(64),
+        }),
+      ]);
+      // No FK to execution history is introduced. Copied evidence survives row lifecycle.
+      expect(
+        (
+          await client.query(
+            `SELECT count(*)::int AS n FROM pg_constraint WHERE contype='f' AND conrelid='"RouteCandidateSnapshot"'::regclass AND confrelid='"ExternalExecutionOrigin"'::regclass`,
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      for (const assignment of [
+        '"fromNodeId"=NULL',
+        `"fromExternalOriginId"='f0000000-0000-4000-8000-000000000001'`,
+        `"externalOriginSnapshot"='{}'::jsonb`,
+        `"originKind"='EXTERNAL_EXECUTION_ORIGIN'`,
+      ]) {
+        await expect(
+          client.query(`UPDATE "RouteCandidateSnapshot" SET ${assignment}`),
+        ).rejects.toMatchObject({ code: '23514' });
+      }
+      await client.query(
+        `UPDATE "RouteCandidateSnapshot" SET "originKind"='EXTERNAL_EXECUTION_ORIGIN',"fromNodeId"=NULL,"fromExternalOriginId"='f0000000-0000-4000-8000-000000000001',"externalOriginSnapshot"='{"schema":"external-route-origin-v1"}'`,
+      );
+      await expect(
+        client.query(
+          `UPDATE "RouteCandidateSnapshot" SET "externalOriginSnapshot"='null'::jsonb`,
+        ),
+      ).rejects.toMatchObject({ code: '23514' });
     });
   });
 });

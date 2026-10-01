@@ -642,6 +642,7 @@ function candidateSnapshot(
   };
   return {
     id: snapshotId,
+    origin: { type: 'ITINERARY_NODE', nodeId: fromNodeId },
     ownerUserId,
     tripId,
     basisVersion: 3,

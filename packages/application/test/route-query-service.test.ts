@@ -66,6 +66,10 @@ describe('RouteQueryService', () => {
             tripId: input.tripId,
             basisVersion: input.basisVersion,
             fromNodeId: input.fromNodeId,
+            origin: {
+              type: 'ITINERARY_NODE' as const,
+              nodeId: input.fromNodeId,
+            },
             toNodeId: input.toNodeId,
           })),
         }),

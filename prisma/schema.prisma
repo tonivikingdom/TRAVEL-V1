@@ -591,28 +591,36 @@ model ItineraryNode {
   @@index([provider, providerHubRef])
 }
 
+enum RouteQueryOriginKind {
+  ITINERARY_NODE
+  EXTERNAL_EXECUTION_ORIGIN
+}
+
 model RouteCandidateSnapshot {
-  id                   String         @id @default(uuid()) @db.Uuid
-  ownerUserId          String         @db.Uuid
-  tripId               String         @db.Uuid
-  basisVersion         Int
-  fromNodeId           String         @db.Uuid
-  toNodeId             String         @db.Uuid
-  provider             String         @db.VarChar(100)
-  providerCandidateRef String?        @db.VarChar(300)
-  observedAt           DateTime       @db.Timestamptz(3)
-  providerValidUntil   DateTime?      @db.Timestamptz(3)
-  candidatePayload     Json           @db.JsonB
-  candidateHash        String         @db.VarChar(64)
-  queryTimeCondition   Json           @db.JsonB
-  createdAt            DateTime       @db.Timestamptz(3)
-  expiresAt            DateTime       @db.Timestamptz(3)
-  owner                User           @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  trip                 Trip           @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
-  fromNode             ItineraryNode  @relation("RouteSnapshotFromNode", fields: [fromNodeId, tripId], references: [id, tripId], onDelete: Cascade)
-  toNode               ItineraryNode  @relation("RouteSnapshotToNode", fields: [toNodeId, tripId], references: [id, tripId], onDelete: Cascade)
-  previews             RoutePreview[]
-  adoptedRoutes        AdoptedRoute[]
+  id                     String               @id @default(uuid()) @db.Uuid
+  ownerUserId            String               @db.Uuid
+  tripId                 String               @db.Uuid
+  basisVersion           Int
+  originKind             RouteQueryOriginKind @default(ITINERARY_NODE)
+  fromNodeId             String?              @db.Uuid
+  fromExternalOriginId   String?              @db.Uuid
+  externalOriginSnapshot Json?                @db.JsonB
+  toNodeId               String               @db.Uuid
+  provider               String               @db.VarChar(100)
+  providerCandidateRef   String?              @db.VarChar(300)
+  observedAt             DateTime             @db.Timestamptz(3)
+  providerValidUntil     DateTime?            @db.Timestamptz(3)
+  candidatePayload       Json                 @db.JsonB
+  candidateHash          String               @db.VarChar(64)
+  queryTimeCondition     Json                 @db.JsonB
+  createdAt              DateTime             @db.Timestamptz(3)
+  expiresAt              DateTime             @db.Timestamptz(3)
+  owner                  User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                   Trip                 @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+  fromNode               ItineraryNode?       @relation("RouteSnapshotFromNode", fields: [fromNodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  toNode                 ItineraryNode        @relation("RouteSnapshotToNode", fields: [toNodeId, tripId], references: [id, tripId], onDelete: Cascade)
+  previews               RoutePreview[]
+  adoptedRoutes          AdoptedRoute[]
 
   @@unique([id, tripId, ownerUserId])
   @@index([ownerUserId, tripId, expiresAt])

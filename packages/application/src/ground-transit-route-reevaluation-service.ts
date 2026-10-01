@@ -1,5 +1,6 @@
 import type { GroundTransitRouteReevaluationHandoffView } from '@travel/contracts';
 import {
+  resolveExternalOriginRouteQueryAuthorization,
   assessGroundTransitOperational,
   resolveGroundTransitRouteReevaluationHandoff,
 } from '@travel/domain';
@@ -155,10 +156,70 @@ export class GroundTransitRouteReevaluationService {
         tripId,
         transportEdgeId,
       );
+      const externalOrigin = external.currentOrigin;
+      // Trip-level currentness is not provenance for the requested leg.
+      const matchesRequestedSource =
+        externalOrigin !== null &&
+        externalOrigin.sourceTransportEdgeId === transportEdgeId &&
+        externalOrigin.sourceGroundTransitLegExecutionId === leg.id &&
+        externalOrigin.sourceAdoptedRouteId === leg.adoptedRouteId;
+      const externalSourceRoute =
+        trip.adoptedRoutes?.find(
+          (row) => row.id === externalOrigin?.sourceAdoptedRouteId,
+        ) ?? null;
+      const externalSourceEdge =
+        trip.transportEdges.find(
+          (row) => row.id === externalOrigin?.sourceTransportEdgeId,
+        ) ?? null;
       if (
-        external.candidate !== null ||
-        external.currentOrigin?.currentness === 'CURRENT' ||
-        external.availability === 'UNRESOLVED'
+        externalOrigin !== null &&
+        matchesRequestedSource &&
+        externalSourceRoute !== null &&
+        resolveExternalOriginRouteQueryAuthorization({
+          origin: {
+            ...externalOrigin,
+            arrivedAt: new Date(externalOrigin.arrivedAt),
+            departedAt:
+              externalOrigin.departedAt === null
+                ? null
+                : new Date(externalOrigin.departedAt),
+            invalidatedAt:
+              externalOrigin.invalidatedAt === null
+                ? null
+                : new Date(externalOrigin.invalidatedAt),
+          },
+          currentness: externalOrigin.currentness,
+          sourceRoute: externalSourceRoute,
+          sourceEdge: externalSourceEdge,
+          toNodeId: externalSourceRoute.anchorToNodeId,
+        }) === 'AUTHORIZED'
+      ) {
+        return {
+          tripId,
+          sourceTransportEdgeId: transportEdgeId,
+          adoptedRouteId: leg.adoptedRouteId,
+          readiness: 'READY',
+          originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+          query: null,
+          externalQuery: {
+            externalOriginId: externalOrigin.id,
+            basisVersion: trip.version,
+            toNodeId: externalSourceRoute.anchorToNodeId,
+            hint: {
+              type: 'DEPART_AT',
+              instant: this.now().toISOString(),
+              timeZone: externalOrigin.timeZone,
+            },
+          },
+          reasonCodes: ['EXTERNAL_EXECUTION_ORIGIN_AVAILABLE'],
+          externalOriginStatus: external.availability,
+        };
+      }
+      if (
+        (externalOrigin?.currentness !== 'CURRENT' || matchesRequestedSource) &&
+        (external.candidate !== null ||
+          external.currentOrigin?.currentness === 'CURRENT' ||
+          external.availability === 'UNRESOLVED')
       ) {
         return {
           tripId,
@@ -169,7 +230,7 @@ export class GroundTransitRouteReevaluationService {
           query: null,
           reasonCodes: [
             ...external.reasonCodes,
-            'EXTERNAL_ORIGIN_ROUTE_PLANNING_NOT_SUPPORTED',
+            'EXTERNAL_ORIGIN_ROUTE_QUERY_UNAVAILABLE',
           ],
           externalOriginStatus: external.availability,
         };

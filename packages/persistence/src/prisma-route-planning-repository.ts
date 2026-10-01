@@ -1,3 +1,8 @@
+import {
+  authorizeExternalOriginPlanning,
+  externalRouteOriginSnapshot,
+} from '@travel/application';
+import { loadExternalOriginPlanningContext } from './prisma-external-execution-origin-repository.js';
 import type {
   CreateRoutePreviewResult,
   AdoptRoutePreviewResult,
@@ -72,6 +77,59 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     });
   }
 
+  async saveExternalOriginCandidateSnapshots(
+    input: Parameters<
+      NonNullable<
+        RoutePlanningRepository['saveExternalOriginCandidateSnapshots']
+      >
+    >[0],
+  ): Promise<SaveRouteCandidateSnapshotsResult> {
+    return this.client.$transaction(async (transaction) => {
+      await lockOwner(transaction, input.ownerUserId);
+      const status = await lockTrip(transaction, input);
+      if (status !== 'SUCCESS') return { status };
+      const context = await loadExternalOriginPlanningContext(
+        transaction,
+        input,
+      );
+      if (context === null) return { status: 'NOT_FOUND' };
+      if (
+        context.origin === null ||
+        authorizeExternalOriginPlanning(context, input.toNodeId) !==
+          'AUTHORIZED' ||
+        JSON.stringify(externalRouteOriginSnapshot(context.origin)) !==
+          JSON.stringify(input.originSnapshot)
+      )
+        return { status: 'VERSION_CONFLICT' };
+      const snapshots: RouteCandidateSnapshotRecord[] = [];
+      for (const draft of input.snapshots) {
+        const created = await transaction.routeCandidateSnapshot.create({
+          data: {
+            ownerUserId: input.ownerUserId,
+            tripId: input.tripId,
+            basisVersion: input.basisVersion,
+            originKind: 'EXTERNAL_EXECUTION_ORIGIN',
+            fromNodeId: null,
+            fromExternalOriginId: input.externalOriginId,
+            externalOriginSnapshot: toJson(input.originSnapshot),
+            toNodeId: input.toNodeId,
+            provider: draft.provider,
+            providerCandidateRef: draft.providerCandidateRef,
+            observedAt: draft.observedAt,
+            providerValidUntil: draft.providerValidUntil,
+            candidatePayload: toJson(draft.candidatePayload),
+            candidateHash: draft.candidateHash,
+            queryTimeCondition: toJson(draft.queryTimeCondition),
+            createdAt: draft.createdAt,
+            expiresAt: draft.expiresAt,
+          },
+        });
+        snapshots.push(toSnapshotRecord(created));
+      }
+      return { status: 'SUCCESS', snapshots };
+    });
+  }
+
   async findSnapshotOwned(input: {
     readonly ownerUserId: string;
     readonly tripId: string;
@@ -114,6 +172,8 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
         },
       });
       if (snapshot === null) return { status: 'NOT_FOUND' };
+      if (snapshot.originKind !== 'ITINERARY_NODE')
+        return { status: 'PREVIEW_UNSUPPORTED' };
       if (
         snapshot.basisVersion !== input.basisVersion ||
         snapshot.candidateHash !== input.expectedCandidateHash ||
@@ -259,7 +319,10 @@ function toSnapshotRecord(snapshot: {
   readonly ownerUserId: string;
   readonly tripId: string;
   readonly basisVersion: number;
-  readonly fromNodeId: string;
+  readonly originKind: 'ITINERARY_NODE' | 'EXTERNAL_EXECUTION_ORIGIN';
+  readonly fromNodeId: string | null;
+  readonly fromExternalOriginId: string | null;
+  readonly externalOriginSnapshot: Prisma.JsonValue | null;
   readonly toNodeId: string;
   readonly provider: string;
   readonly providerCandidateRef: string | null;
@@ -271,8 +334,27 @@ function toSnapshotRecord(snapshot: {
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }): RouteCandidateSnapshotRecord {
+  const originShape =
+    snapshot.originKind === 'ITINERARY_NODE'
+      ? {
+          fromNodeId: snapshot.fromNodeId!,
+          origin: {
+            type: 'ITINERARY_NODE' as const,
+            nodeId: snapshot.fromNodeId!,
+          },
+        }
+      : {
+          fromNodeId: null,
+          origin: {
+            type: 'EXTERNAL_EXECUTION_ORIGIN' as const,
+            externalOriginId: snapshot.fromExternalOriginId!,
+            snapshot:
+              snapshot.externalOriginSnapshot as unknown as import('@travel/contracts').ExternalRouteOriginSnapshot,
+          },
+        };
   return {
     ...snapshot,
+    ...originShape,
     candidatePayload:
       snapshot.candidatePayload as unknown as RouteCandidatePayload,
     queryTimeCondition:

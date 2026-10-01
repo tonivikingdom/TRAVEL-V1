@@ -97,7 +97,16 @@ export interface GroundTransitRouteReevaluationHandoffView {
   readonly externalOriginStatus?:
     'NOT_AVAILABLE' | 'CONFIRMATION_REQUIRED' | 'CONFIRMED' | 'UNRESOLVED';
   readonly originBasis?:
-    'PLANNED_ROUTE_ORIGIN' | 'CONFIRMED_EXECUTION_NODE' | null;
+    | 'PLANNED_ROUTE_ORIGIN'
+    | 'CONFIRMED_EXECUTION_NODE'
+    | 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN'
+    | null;
+  /** READY exposes either query or externalQuery; GET remains read-only. */
+  readonly externalQuery?:
+    | (import('./routes.js').ExternalOriginRouteQueryRequest & {
+        readonly externalOriginId: string;
+      })
+    | null;
   readonly tripId: string;
   readonly sourceTransportEdgeId: string;
   readonly adoptedRouteId: string;

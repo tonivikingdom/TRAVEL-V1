@@ -290,7 +290,7 @@ function providerTimeZone(input: RouteProviderQueryInput): string {
   return input.preference.type === 'NONE' ? 'UTC' : input.preference.timeZone;
 }
 
-/** Explicit synthetic external hub execution fixture; no external planning. */
+/** Explicit synthetic external hub execution/query fixture; no materialization. */
 function externalOriginFoundationCandidate(
   input: RouteProviderQueryInput,
   observedAt: Date,

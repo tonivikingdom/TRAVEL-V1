@@ -12,6 +12,41 @@ export type RouteQueryHint =
       readonly timeZone: string;
     };
 
+export interface ExternalOriginRouteQueryRequest {
+  readonly basisVersion: number;
+  readonly toNodeId: string;
+  readonly hint?: RouteQueryHint | null;
+}
+export interface ExternalOriginRouteQueryResponse {
+  readonly tripId: string;
+  readonly basisVersion: number;
+  readonly externalOriginId: string;
+  readonly toNodeId: string;
+  readonly timeCondition: RouteQueryTimeConditionView;
+  readonly candidates: readonly RouteCandidateView[];
+}
+
+/** Immutable planning evidence, not a new execution fact. */
+export interface ExternalRouteOriginSnapshot {
+  readonly schema: 'external-route-origin-v1';
+  readonly externalOriginId: string;
+  readonly provider: string;
+  readonly providerHubRef: string;
+  readonly canonicalHubRef: string;
+  readonly name: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly timeZone: string;
+  readonly arrivedAt: string;
+  readonly sourceAdoptedRouteId: string;
+  readonly sourceTransportEdgeId: string;
+  readonly sourceGroundTransitLegExecutionId: string;
+  readonly sourceGroundTransitObservationId: string;
+  readonly sourceObservationIdentity: string;
+  readonly sourceObservationFetchedAt: string;
+  readonly sourceObservationFactsHash: string;
+}
+
 export interface RouteQueryRequest {
   readonly basisVersion: number;
   readonly fromNodeId: string;

@@ -1,4 +1,12 @@
+import {
+  authorizeExternalOriginPlanning,
+  externalRouteOriginSnapshot,
+} from './external-origin-route-query.js';
+import type { ExternalExecutionOriginRepository } from './external-execution-origin-ports.js';
 import type {
+  ExternalOriginRouteQueryRequest,
+  ExternalOriginRouteQueryResponse,
+  ExternalRouteOriginSnapshot,
   RouteQueryHint,
   RouteQueryRequest,
   RouteQueryResponse,
@@ -21,6 +29,7 @@ import {
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
 import type {
+  RouteProviderLocationInput,
   RouteProvider,
   RouteProviderTimePreference,
 } from './route-ports.js';
@@ -28,9 +37,14 @@ import {
   systemClock,
   type Clock,
   type RouteCandidatePayload,
+  type RouteCandidateSnapshotDraft,
+  type SaveRouteCandidateSnapshotsResult,
   type RoutePlanningRepository,
 } from './route-planning-ports.js';
-import { hashRouteCandidateSnapshot } from './route-snapshot.js';
+import {
+  hashExternalRouteCandidateSnapshot,
+  hashRouteCandidateSnapshot,
+} from './route-snapshot.js';
 import {
   evaluateTripScheduleRecord,
   orderedTripNodes,
@@ -194,9 +208,225 @@ export class RouteQueryService {
       this.options.lookbackSeconds ?? ROUTE_QUERY_LOOKBACK_SECONDS,
     );
 
-    const providerResult = await this.provider.queryRoutes({
+    const result = await this.queryCandidates({
       origin: toProviderPlace(origin),
       destination: toProviderPlace(destination),
+      time,
+      basisVersion: trip.version,
+      arrival,
+      fromNode,
+      hash: (facts) =>
+        hashRouteCandidateSnapshot({
+          ...facts,
+          tripId: trip.id,
+          basisVersion: trip.version,
+          fromNodeId: fromNode.id,
+          toNodeId: toNode.id,
+        }),
+      save: (snapshots) =>
+        this.planningRepository.saveCandidateSnapshots({
+          ownerUserId: actor.userId,
+          tripId: trip.id,
+          basisVersion: trip.version,
+          fromNodeId: fromNode.id,
+          toNodeId: toNode.id,
+          snapshots,
+        }),
+    });
+    return {
+      tripId: trip.id,
+      basisVersion: trip.version,
+      fromNodeId: fromNode.id,
+      toNodeId: toNode.id,
+      ...result,
+    };
+  }
+
+  async queryExternalOriginRoutes(
+    actor: Actor,
+    tripId: string,
+    externalOriginId: string,
+    input: ExternalOriginRouteQueryRequest,
+  ): Promise<ExternalOriginRouteQueryResponse> {
+    requireUuid(tripId, 'tripId');
+    requireUuid(externalOriginId, 'externalOriginId');
+    requireUuid(input.toNodeId, 'toNodeId');
+    authorize(actor, 'READ_PRIVATE_RESOURCE', {
+      kind: 'PRIVATE_RESOURCE',
+      ownerUserId: actor.userId,
+    });
+    const basisVersion = positiveInteger(input.basisVersion, 'basisVersion');
+    const [trip, context] = await Promise.all([
+      this.repository.findOwnedById({ ownerUserId: actor.userId, tripId }),
+      this.options.externalOrigins?.readPlanning?.({
+        ownerUserId: actor.userId,
+        tripId,
+        externalOriginId,
+      }),
+    ]);
+    if (trip === null || context == null || context.origin === null)
+      throw new ApplicationError(
+        'NOT_FOUND',
+        '行程或外部执行起点不存在。',
+        404,
+      );
+    if (trip.version !== basisVersion || context.tripVersion !== basisVersion)
+      throw new ApplicationError(
+        'VERSION_CONFLICT',
+        '行程版本已变化，请刷新。',
+        409,
+      );
+    if (
+      authorizeExternalOriginPlanning(context, input.toNodeId) !== 'AUTHORIZED'
+    )
+      throw new ApplicationError(
+        'ROUTE_QUERY_UNSUPPORTED',
+        '外部执行起点必须仍为当前停留站点，且连接当前来源路线的原终点。',
+        422,
+      );
+    const origin = context.origin;
+    const originSnapshot: ExternalRouteOriginSnapshot =
+      externalRouteOriginSnapshot(origin);
+    const destinationNode = orderedTripNodes(trip).find(
+      (node) => node.id === input.toNodeId,
+    );
+    if (destinationNode === undefined)
+      throw new ApplicationError(
+        'ROUTE_QUERY_UNSUPPORTED',
+        '来源路线终点不存在。',
+        422,
+      );
+    const destination = requirePlaceEndpoint(destinationNode);
+    // The source corridor is being replanned from an external execution fact.
+    // Its vehicle ACTUAL/fixed-service anchors cannot constrain departure at E.
+    // Preserve the real destination and every downstream hard requirement.
+    const orderedNodes = orderedTripNodes(trip);
+    const destinationIndex = orderedNodes.findIndex(
+      (node) => node.id === input.toNodeId,
+    );
+    const retainedNodeIds = new Set(
+      orderedNodes.slice(destinationIndex).map((node) => node.id),
+    );
+    const schedule = evaluateTripScheduleRecord({
+      ...trip,
+      dayOccurrences: trip.dayOccurrences.map((day) => ({
+        ...day,
+        nodes: day.nodes.filter((node) => retainedNodeIds.has(node.id)),
+      })),
+      transportEdges: trip.transportEdges.filter(
+        (edge) =>
+          retainedNodeIds.has(edge.fromNodeId) &&
+          retainedNodeIds.has(edge.toNodeId),
+      ),
+    });
+    if (schedule.conflicts.length > 0)
+      throw new ApplicationError(
+        'CONSTRAINT_CONFLICT',
+        '当前行程存在硬时间冲突。',
+        409,
+      );
+    const destinationProjection = schedule.nodes.find(
+      (node) => node.nodeId === input.toNodeId,
+    );
+    if (destinationProjection === undefined)
+      throw new ApplicationError(
+        'ROUTE_QUERY_UNSUPPORTED',
+        '终点时间投影不存在。',
+        422,
+      );
+    const timeZone = validateIanaTimeZoneInput(origin.timeZone);
+    if (input.hint != null && input.hint.timeZone !== timeZone)
+      throw new ApplicationError(
+        'VALIDATION_ERROR',
+        '查询起点时区必须与可信外部起点一致。',
+        400,
+      );
+    const now = (this.options.clock ?? systemClock).now();
+    const time = combineQueryTime(
+      now,
+      destinationProjection.arrival.requirementWindow.latest,
+      null,
+      input.hint,
+      0,
+    );
+    const saveExternal =
+      this.planningRepository.saveExternalOriginCandidateSnapshots?.bind(
+        this.planningRepository,
+      );
+    if (saveExternal === undefined)
+      throw new ApplicationError(
+        'ROUTE_QUERY_UNSUPPORTED',
+        '外部起点快照持久化未配置。',
+        422,
+      );
+    const result = await this.queryCandidates({
+      origin: {
+        placeId: origin.id,
+        name: origin.name,
+        latitude: origin.latitude,
+        longitude: origin.longitude,
+      },
+      destination: toProviderPlace(destination),
+      time,
+      basisVersion,
+      arrival: null,
+      fromNode: null,
+      hash: (facts) =>
+        hashExternalRouteCandidateSnapshot({
+          ...facts,
+          tripId,
+          basisVersion,
+          toNodeId: input.toNodeId,
+          externalOriginSnapshot: originSnapshot,
+        }),
+      save: (snapshots) =>
+        saveExternal({
+          ownerUserId: actor.userId,
+          tripId,
+          basisVersion,
+          externalOriginId,
+          toNodeId: input.toNodeId,
+          originSnapshot,
+          snapshots,
+        }),
+    });
+    return {
+      tripId,
+      basisVersion,
+      externalOriginId,
+      toNodeId: input.toNodeId,
+      ...result,
+    };
+  }
+
+  private async queryCandidates({
+    origin,
+    destination,
+    time,
+    basisVersion,
+    arrival,
+    fromNode,
+    hash,
+    save,
+  }: {
+    origin: RouteProviderLocationInput;
+    destination: RouteProviderLocationInput;
+    time: NormalizedQueryTime;
+    basisVersion: number;
+    arrival: Date | null;
+    fromNode: ItineraryNodeRecord | null;
+    hash: (facts: {
+      provider: string;
+      observedAt: string;
+      candidatePayload: RouteCandidatePayload;
+    }) => string;
+    save: (
+      snapshots: readonly RouteCandidateSnapshotDraft[],
+    ) => Promise<SaveRouteCandidateSnapshotsResult>;
+  }) {
+    const providerResult = await this.provider.queryRoutes({
+      origin: origin,
+      destination: destination,
       earliestDeparture: time.earliestDeparture,
       latestArrival: time.latestArrival,
       preference: time.preference,
@@ -258,7 +488,9 @@ export class RouteQueryService {
     }
 
     const availableStart =
-      effectiveAvailableStart(time) ??
+      (fromNode === null
+        ? time.earliestDeparture
+        : effectiveAvailableStart(time)) ??
       arrival ??
       time.earliestDeparture ??
       accepted.reduce(
@@ -271,7 +503,14 @@ export class RouteQueryService {
     const assessments = new Map(
       accepted.map((candidate) => [
         candidate.candidateId,
-        assessCandidateDwell(candidate, arrival, fromNode),
+        fromNode === null
+          ? assessDwell({
+              arrival: null,
+              departure: candidate.departure.instant,
+              systemSuggestedDurationSeconds: null,
+              userMinimumDurationSeconds: null,
+            })
+          : assessCandidateDwell(candidate, arrival, fromNode),
       ]),
     );
     const fullyFeasible = accepted.filter(
@@ -303,20 +542,15 @@ export class RouteQueryService {
     const payloads = ranked.map((candidate) =>
       toCandidatePayload(
         candidate,
-        trip.version,
+        basisVersion,
         timeCondition,
         availableStart,
         assessments.get(candidate.candidateId)!,
         fromNode,
       ),
     );
-    const saved = await this.planningRepository.saveCandidateSnapshots({
-      ownerUserId: actor.userId,
-      tripId: trip.id,
-      basisVersion: trip.version,
-      fromNodeId: fromNode.id,
-      toNodeId: toNode.id,
-      snapshots: ranked.map((candidate, index) => {
+    const saved = await save(
+      ranked.map((candidate, index) => {
         const candidatePayload = payloads[index];
         if (candidatePayload === undefined) {
           throw new Error('Route candidate snapshot payload is missing');
@@ -332,11 +566,7 @@ export class RouteQueryService {
           observedAt: candidate.observedAt,
           providerValidUntil: candidate.validUntil,
           candidatePayload,
-          candidateHash: hashRouteCandidateSnapshot({
-            tripId: trip.id,
-            basisVersion: trip.version,
-            fromNodeId: fromNode.id,
-            toNodeId: toNode.id,
+          candidateHash: hash({
             provider: candidate.provider,
             observedAt: candidate.observedAt.toISOString(),
             candidatePayload,
@@ -346,22 +576,16 @@ export class RouteQueryService {
           expiresAt,
         };
       }),
-    });
-    if (saved.status === 'NOT_FOUND') {
+    );
+    if (saved.status === 'NOT_FOUND')
       throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
-    }
-    if (saved.status !== 'SUCCESS') {
+    if (saved.status !== 'SUCCESS')
       throw new ApplicationError(
         'VERSION_CONFLICT',
-        '行程在路线查询期间发生变化，请刷新后重新查询。',
+        '行程或执行事实在查询期间发生变化，请刷新。',
         409,
       );
-    }
     return {
-      tripId: trip.id,
-      basisVersion: trip.version,
-      fromNodeId: fromNode.id,
-      toNodeId: toNode.id,
       timeCondition,
       candidates: saved.snapshots.map((snapshot) => ({
         ...snapshot.candidatePayload,
@@ -373,6 +597,7 @@ export class RouteQueryService {
 }
 
 export interface RouteQueryServiceOptions {
+  readonly externalOrigins?: ExternalExecutionOriginRepository;
   readonly candidateSnapshotTtlSeconds: number;
   readonly lookbackSeconds?: number;
   readonly valueEffectiveTimeBasisPoints?: number;
@@ -512,9 +737,9 @@ function toCandidatePayload(
   timeCondition: RouteQueryTimeConditionView,
   availableStart: Date,
   dwell: DwellPlanningAssessment,
-  fromNode: ItineraryNodeRecord,
+  fromNode: ItineraryNodeRecord | null,
 ): RouteCandidatePayload {
-  const minimumIntent = fromNode.timeIntents.find(
+  const minimumIntent = fromNode?.timeIntents.find(
     (intent) => intent.kind === 'MIN_DWELL',
   );
   return {
@@ -554,7 +779,7 @@ function toCandidatePayload(
           ? [
               {
                 intentId: minimumIntent.id,
-                nodeId: fromNode.id,
+                nodeId: fromNode!.id,
                 fromDurationSeconds: minimumIntent.durationSeconds!,
                 toDurationSeconds: dwell.adjustedUserMinimumDurationSeconds,
               },

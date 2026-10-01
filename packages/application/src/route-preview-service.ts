@@ -75,6 +75,12 @@ export class RoutePreviewService {
       snapshotId: input.candidateSnapshotId,
     });
     if (snapshot === null) throw notFound();
+    if (snapshot.fromNodeId === null)
+      throw new ApplicationError(
+        'PREVIEW_UNSUPPORTED',
+        '外部执行起点的候选暂不支持 Preview。',
+        422,
+      );
     if (snapshot.basisVersion !== basisVersion) throw stalePreview();
 
     const now = (this.options.clock ?? systemClock).now();
@@ -175,6 +181,12 @@ export class RoutePreviewService {
         throw notFound();
       case 'VERSION_CONFLICT':
         throw versionConflict();
+      case 'PREVIEW_UNSUPPORTED':
+        throw new ApplicationError(
+          'PREVIEW_UNSUPPORTED',
+          '外部执行起点暂不支持 Preview。',
+          422,
+        );
       case 'NOT_ADJACENT':
       case 'PREVIEW_STALE':
         throw stalePreview();
@@ -217,7 +229,7 @@ export class RoutePreviewService {
 }
 
 function validateSnapshot(
-  snapshot: RouteCandidateSnapshotRecord,
+  snapshot: RouteCandidateSnapshotRecord & { readonly fromNodeId: string },
 ): NormalizedRouteCandidate {
   const hash = hashRouteCandidateSnapshot({
     tripId: snapshot.tripId,
@@ -254,7 +266,7 @@ function validateSnapshot(
 
 function requireCurrentCorridor(
   trip: TripAggregateRecord,
-  snapshot: RouteCandidateSnapshotRecord,
+  snapshot: RouteCandidateSnapshotRecord & { readonly fromNodeId: string },
 ) {
   const nodes = orderedTripNodes(trip);
   const fromIndex = nodes.findIndex((node) => node.id === snapshot.fromNodeId);
@@ -270,7 +282,7 @@ function requireCurrentCorridor(
 
 function buildChangeSummary(
   candidate: NormalizedRouteCandidate,
-  snapshot: RouteCandidateSnapshotRecord,
+  snapshot: RouteCandidateSnapshotRecord & { readonly fromNodeId: string },
   trip: TripAggregateRecord,
   corridor: ReturnType<typeof requireCurrentCorridor>,
   userConfirmedSameHub: ReadonlySet<number>,
@@ -896,7 +908,7 @@ function projectionRolesForSegment(
 }
 
 function toCandidateView(
-  snapshot: RouteCandidateSnapshotRecord,
+  snapshot: RouteCandidateSnapshotRecord & { readonly fromNodeId: string },
 ): RouteCandidateView {
   return {
     ...snapshot.candidatePayload,
@@ -934,7 +946,7 @@ function candidateUsesSupportedZones(
 }
 
 function assertSnapshotFresh(
-  snapshot: RouteCandidateSnapshotRecord,
+  snapshot: RouteCandidateSnapshotRecord & { readonly fromNodeId: string },
   now: Date,
 ): void {
   if (

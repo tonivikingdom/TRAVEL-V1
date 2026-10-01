@@ -156,6 +156,8 @@ async function executeAdoption(
   });
   if (preview === null) return { status: 'NOT_FOUND' };
   if (
+    preview.candidateSnapshot.fromNodeId === null ||
+    preview.candidateSnapshot.originKind !== 'ITINERARY_NODE' ||
     preview.policyVersion !== 'route-adoption-preview-v3' ||
     preview.expiresAt <= input.now ||
     preview.candidateSnapshot.expiresAt <= input.now ||

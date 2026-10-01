@@ -1,4 +1,5 @@
 import type {
+  ExternalRouteOriginSnapshot,
   OperationReceiptView,
   RouteCandidateView,
   RoutePreviewView,
@@ -31,14 +32,31 @@ export interface RouteCandidateSnapshotDraft {
   readonly expiresAt: Date;
 }
 
-export interface RouteCandidateSnapshotRecord extends RouteCandidateSnapshotDraft {
+interface RouteCandidateSnapshotBase extends RouteCandidateSnapshotDraft {
   readonly id: string;
   readonly ownerUserId: string;
   readonly tripId: string;
   readonly basisVersion: number;
-  readonly fromNodeId: string;
   readonly toNodeId: string;
 }
+export type RouteCandidateSnapshotRecord = RouteCandidateSnapshotBase &
+  (
+    | {
+        readonly origin: {
+          readonly type: 'ITINERARY_NODE';
+          readonly nodeId: string;
+        };
+        readonly fromNodeId: string;
+      }
+    | {
+        readonly origin: {
+          readonly type: 'EXTERNAL_EXECUTION_ORIGIN';
+          readonly externalOriginId: string;
+          readonly snapshot: ExternalRouteOriginSnapshot;
+        };
+        readonly fromNodeId: null;
+      }
+  );
 
 export interface RoutePreviewRecord {
   readonly id: string;
@@ -67,7 +85,11 @@ export type CreateRoutePreviewResult =
   | { readonly status: 'SUCCESS'; readonly preview: RoutePreviewRecord }
   | {
       readonly status:
-        'NOT_FOUND' | 'VERSION_CONFLICT' | 'PREVIEW_STALE' | 'NOT_ADJACENT';
+        | 'NOT_FOUND'
+        | 'VERSION_CONFLICT'
+        | 'PREVIEW_STALE'
+        | 'NOT_ADJACENT'
+        | 'PREVIEW_UNSUPPORTED';
     };
 
 export interface OperationReceiptRecord extends Omit<
@@ -114,6 +136,15 @@ export type UndoRouteAdoptionResult =
     };
 
 export interface RoutePlanningRepository {
+  saveExternalOriginCandidateSnapshots?(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly basisVersion: number;
+    readonly externalOriginId: string;
+    readonly toNodeId: string;
+    readonly originSnapshot: ExternalRouteOriginSnapshot;
+    readonly snapshots: readonly RouteCandidateSnapshotDraft[];
+  }): Promise<SaveRouteCandidateSnapshotsResult>;
   saveCandidateSnapshots(input: {
     readonly ownerUserId: string;
     readonly tripId: string;

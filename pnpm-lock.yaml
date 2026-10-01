@@ -81,6 +81,9 @@ importers:
       '@travel/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@travel/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
 
   packages/application:
     dependencies:

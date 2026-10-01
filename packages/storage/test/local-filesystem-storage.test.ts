@@ -47,6 +47,46 @@ describe('private local filesystem object storage', () => {
     ).toEqual([]);
   });
 
+  it('converges repeated and concurrent deletion of a valid object key', async () => {
+    const { storage } = await createStorage();
+    const key = randomUUID();
+    await storage.put({
+      objectKey: key,
+      source: chunks('SYNTHETIC'),
+      declaredByteSize: 9,
+      maxByteSize: 100,
+    });
+    await Promise.all(Array.from({ length: 20 }, () => storage.delete(key)));
+    await Promise.all(Array.from({ length: 20 }, () => storage.delete(key)));
+    expect(await storage.exists(key)).toBe(false);
+  });
+
+  it('cleans only the exact reservation-bound temporary object after a crash', async () => {
+    const { root, storage } = await createStorage();
+    const key = randomUUID();
+    const unknown = randomUUID();
+    await writeFile(join(root, `.tmp-${key}`), 'SYNTHETIC_PARTIAL');
+    await writeFile(join(root, `.tmp-${unknown}`), 'SYNTHETIC_UNKNOWN_KEEP');
+    await storage.delete(key);
+    expect(await readdir(root)).toEqual([`.tmp-${unknown}`]);
+    await storage.delete(key);
+  });
+
+  it('rejects a symlink temporary object while preserving the outside file', async () => {
+    const { root, storage } = await createStorage();
+    const outside = await mkdtemp(join(tmpdir(), 'travel-storage-outside-'));
+    roots.push(outside);
+    await writeFile(join(outside, 'secret'), 'SYNTHETIC_KEEP');
+    const key = randomUUID();
+    await symlink(join(outside, 'secret'), join(root, `.tmp-${key}`));
+    await expect(storage.delete(key)).rejects.toMatchObject({
+      code: 'PATH_UNSAFE',
+    });
+    expect(await readFile(join(outside, 'secret'), 'utf8')).toBe(
+      'SYNTHETIC_KEEP',
+    );
+  });
+
   it('rejects traversal, encoded traversal, and absolute paths', async () => {
     const { storage } = await createStorage();
     for (const key of [

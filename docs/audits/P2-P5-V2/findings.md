@@ -2,6 +2,9 @@
 
 所有 finding 均以业务固定基线 `317a08ed4c9d5ff0fcb455573a012762269eaaf7` 为准。保留原 F-01–F-10 编号；新增 F-11–F-13。行号用于定位固定 SHA，后续变化应以函数名复核。
 
+后续状态：P5 Audit Repair Batch 4 修复 F-07/F-08；F-05/F-06 仍 OPEN。原固定基线的证据不重写，
+当前实现及验收见 [P5-AUDIT-REPAIR-4](../../status/P5-AUDIT-REPAIR-4.md)。
+
 ## F-01 航班后台监控没有用户级 opt-in / pause / stop
 
 - **分类 / 严重度 / 动作**：`PRINCIPLE_GAP / HIGH / ADD`

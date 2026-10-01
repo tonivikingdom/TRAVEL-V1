@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, type ReadStream } from 'node:fs';
 import { chmod, lstat, mkdir, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -28,7 +28,8 @@ export class LocalFilesystemObjectStorage implements ObjectStorage {
     validateWriteRequest(input);
     const root = await this.safeRoot();
     const target = this.objectPath(root, input.objectKey);
-    const temporary = join(root, `.tmp-${randomUUID()}`);
+    const temporary = join(root, `.tmp-${input.objectKey}`);
+    await ensureTargetDoesNotExist(temporary);
     await ensureTargetDoesNotExist(target);
 
     const hash = createHash('sha256');
@@ -80,17 +81,10 @@ export class LocalFilesystemObjectStorage implements ObjectStorage {
   async delete(objectKey: string): Promise<void> {
     const root = await this.safeRoot();
     const target = this.objectPath(root, objectKey);
-    const status = await safeLstat(target);
-    if (status === null) {
-      return;
-    }
-    if (status.isSymbolicLink() || !status.isFile()) {
-      throw new StorageError(
-        'PATH_UNSAFE',
-        'Object path is not a regular file',
-      );
-    }
-    await rm(target);
+    await deleteRegularFile(target);
+    // The temporary key is derived from this exact DB-backed reservation key.
+    // Crash cleanup never enumerates or guesses another file's ownership.
+    await deleteRegularFile(join(root, `.tmp-${objectKey}`));
   }
 
   async stat(objectKey: string): Promise<ObjectStat | null> {
@@ -224,4 +218,12 @@ async function safeLstat(target: string) {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
+}
+
+async function deleteRegularFile(target: string): Promise<void> {
+  const status = await safeLstat(target);
+  if (status === null) return;
+  if (status.isSymbolicLink() || !status.isFile())
+    throw new StorageError('PATH_UNSAFE', 'Object path is not a regular file');
+  await rm(target, { force: true });
 }

@@ -205,7 +205,36 @@ export interface StoredObjectRecord {
   readonly deletedAt: Date | null;
 }
 
+export interface StoredObjectCleanupClaim {
+  readonly id: string;
+  readonly ownerUserId: string;
+  readonly storageKey: string;
+  readonly cleanupAttempts: number;
+}
+
 export interface StoredObjectRepository {
+  claimCleanupBatch(input: {
+    readonly now: Date;
+    readonly pendingBefore: Date;
+    readonly limit: number;
+    readonly leaseUntil: Date;
+  }): Promise<readonly StoredObjectCleanupClaim[]>;
+  /** A completed/failed write may arrive after a previous physical cleanup. */
+  claimObjectCleanup(input: {
+    readonly id: string;
+    readonly ownerUserId: string;
+    readonly leaseUntil: Date;
+  }): Promise<StoredObjectCleanupClaim | null>;
+  completeCleanup(input: {
+    readonly claim: StoredObjectCleanupClaim;
+    readonly now: Date;
+  }): Promise<boolean>;
+  failCleanup(input: {
+    readonly claim: StoredObjectCleanupClaim;
+    readonly retryAt: Date;
+    readonly errorCode: string;
+  }): Promise<boolean>;
+
   reserve(input: {
     readonly id: string;
     readonly ownerUserId: string;

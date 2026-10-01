@@ -321,21 +321,26 @@ model NotificationEvent {
 }
 
 model StoredObject {
-  id               String            @id @default(uuid()) @db.Uuid
-  ownerUserId      String            @db.Uuid
-  storageKey       String            @unique @db.VarChar(64)
-  state            StoredObjectState @default(PENDING)
-  displayName      String            @db.VarChar(255)
-  mediaType        String            @db.VarChar(127)
-  declaredByteSize BigInt
-  byteSize         BigInt?
-  sha256           String?           @db.VarChar(64)
-  createdAt        DateTime          @default(now()) @db.Timestamptz(3)
-  readyAt          DateTime?         @db.Timestamptz(3)
-  deletedAt        DateTime?         @db.Timestamptz(3)
-  owner            User              @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  id                   String            @id @default(uuid()) @db.Uuid
+  ownerUserId          String            @db.Uuid
+  storageKey           String            @unique @db.VarChar(64)
+  state                StoredObjectState @default(PENDING)
+  displayName          String            @db.VarChar(255)
+  mediaType            String            @db.VarChar(127)
+  declaredByteSize     BigInt
+  byteSize             BigInt?
+  sha256               String?           @db.VarChar(64)
+  createdAt            DateTime          @default(now()) @db.Timestamptz(3)
+  readyAt              DateTime?         @db.Timestamptz(3)
+  deletedAt            DateTime?         @db.Timestamptz(3)
+  storageDeletedAt     DateTime?         @db.Timestamptz(3)
+  cleanupAttempts      Int               @default(0)
+  cleanupNextAttemptAt DateTime?         @db.Timestamptz(3)
+  cleanupLastErrorCode String?           @db.VarChar(64)
+  owner                User              @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
 
   @@index([ownerUserId, state, createdAt])
+  @@index([state, storageDeletedAt, cleanupNextAttemptAt, createdAt], map: "StoredObject_cleanup_scan_idx")
 }
 
 model Invitation {

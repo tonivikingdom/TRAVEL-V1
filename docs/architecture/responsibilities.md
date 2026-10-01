@@ -172,7 +172,7 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   自动触发。
 - 生命周期自动迁移尚未实现，本次不修改 P2A/P2B 业务代码。
 
-## 实时监控与提醒（O-08 产品规则已确认，P5D1 仅实现显式风险评估 foundation）
+## 实时监控与提醒（服务端监控已实现，原生 Push/客户端后台定位未实现）
 
 - application 将用户开关与 OFF/IDLE/RUNNING/LIMITED 分开；定位权限丢失进入 LIMITED，不改
   `userEnabled`。恢复时重新同步，旧位置和中断过程不能伪造成当前事实。
@@ -187,8 +187,10 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   由事务内 fingerprint/generation 去重。风险 bookkeeping 不增加 Trip version。
 - P5D1 只从现有 ACTUAL/ESTIMATED、固定班次 PLANNED、用户 POINT_TIME/MIN_DWELL 与已有系统建议读取
   证据，只检查最近的 downstream protected anchor；UNKNOWN 不降成 safe，也不猜下一班或 Provider 事实。
-- P5D3 只实现已绑定航班的服务端持久定点/状态驱动监控与账户级事件；定位采集、Push、通用固定提醒调度、
-  客户端 presence 与投递仍未实现。P1B2 `NotificationEvent`、P5D1 手工评估或 P5D3 航班 Job
+- P5D3 航班与 P5E2 地面交通监控通过显式启用的 Assistance capability 和持久 Worker Job 运行，
+  可产生站内 `NotificationEvent` 并触发执行风险评估；Debug Web 按钮是手动测试入口，测试台不自动轮询。
+  原生 Push、客户端/OS 后台定位采集、通用固定提醒调度、客户端 presence 与投递仍未实现。
+  P1B2 `NotificationEvent`、P5D1 手工评估或服务端监控 Job
   都不等于完整 O-08 客户端能力已完成。
 
 ## Flight operational facts（P5D2）
@@ -261,6 +263,9 @@ NotificationEvent / ObjectStorage 已获单独授权并在独立功能分支实�
   atomic rename，并拒绝 traversal、绝对路径和 symlink。Staging/Production provider 未配置。
 - 单文件、用户总量和 MIME allowlist 均为环境配置；用户总量预留在 PostgreSQL 事务中按 owner
   advisory lock 串行化，避免并发明显超卖。O-09 正式产品数值仍未决定。
+- F-07 reconciliation 由 DB 指定精确 key：Worker 在 DB READY heartbeat 每次最多 claim 一批，
+  stale PENDING 原子变 FAILED 释放 quota，FAILED/DELETED physical cleanup 使用 lease、attempt fencing
+  与指数重试。同步上传失败/删除也记录物理完成状态；不扫描 bucket 或文件系统。真实存储仍未配置。
 
 ## Trip 版本（P2 起）
 

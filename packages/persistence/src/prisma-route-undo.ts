@@ -1,3 +1,11 @@
+import {
+  externalGeneratedNodeFacts,
+  externalGroundTransitExecutionFacts,
+  lockExternalGroundTransitExecutionRows,
+  hashExternalRouteAudit,
+  lockExternalRouteMutationRows,
+} from './prisma-external-route-state.js';
+import { nodeDeletionReferenceInclude } from './prisma-node-deletion-protection.js';
 import type {
   OperationReceiptRecord,
   UndoRouteAdoptionResult,
@@ -7,6 +15,8 @@ import type {
   RouteAdoptDeltaV2,
   RouteAdoptDeltaV3,
   RouteAdoptDeltaV4,
+  RouteAdoptDeltaV5,
+  RouteUndoDeltaV3,
   RouteAdoptGeneratedNodeSnapshot,
   RouteUndoDeltaV2,
 } from '@travel/contracts';
@@ -18,7 +28,7 @@ import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
 type Transaction = Prisma.TransactionClient;
 type RouteAdoptUndoBasis =
-  RouteAdoptDeltaV2 | RouteAdoptDeltaV3 | RouteAdoptDeltaV4;
+  RouteAdoptDeltaV2 | RouteAdoptDeltaV3 | RouteAdoptDeltaV4 | RouteAdoptDeltaV5;
 
 interface UndoInput {
   readonly ownerUserId: string;
@@ -100,7 +110,7 @@ async function executeUndo(
   if (target.operationType !== 'ROUTE_ADOPT') {
     return { status: 'UNDO_UNAVAILABLE' };
   }
-  const delta = parseRouteAdoptDelta(target.delta);
+  const delta = parseRouteAdoptDelta(target.delta, target.adoptedRouteId);
   if (delta === null || target.undoExpiresAt === null) {
     return { status: 'UNDO_UNAVAILABLE' };
   }
@@ -118,6 +128,29 @@ async function executeUndo(
   });
   if (priorUndo !== null) return { status: 'UNDO_CONFLICT' };
 
+  if (delta.schemaVersion === 'route-adopt-delta-v5') {
+    await lockExternalRouteMutationRows(
+      transaction,
+      input.tripId,
+      [
+        ...delta.createdNodeIds,
+        ...delta.reusedNodeIds,
+        ...delta.preservedPrefixNodeIds,
+      ],
+      [
+        ...delta.createdTransportEdgeIds,
+        ...delta.preservedPrefixTransportEdgeIds,
+      ],
+    );
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "AdoptedRoute" WHERE "tripId"=${input.tripId}::uuid AND "id" IN (${target.adoptedRouteId}::uuid, ${delta.sourceAdoptedRouteId}::uuid) ORDER BY "id" FOR UPDATE`,
+    );
+    await lockExternalGroundTransitExecutionRows(
+      transaction,
+      input.tripId,
+      target.adoptedRouteId,
+    );
+  }
   const state = await validateCurrentUndoState(
     transaction,
     input,
@@ -132,7 +165,14 @@ async function executeUndo(
       tripId: input.tripId,
       status: 'ACTIVE',
     },
-    data: { status: 'UNDONE', replacedAt: null, undoneAt: input.now },
+    data: {
+      status: 'UNDONE',
+      replacedAt: null,
+      undoneAt: input.now,
+      ...(delta.schemaVersion === 'route-adopt-delta-v5'
+        ? { anchorFromNodeId: null }
+        : {}),
+    },
   });
   if (leaveActive.count !== 1) throw new UndoAbort('UNDO_CONFLICT');
 
@@ -157,6 +197,22 @@ async function executeUndo(
     await transaction.place.delete({ where: { id: place.id } });
   }
 
+  let restoredOccurrenceIds: string[];
+  let restoredNodeIds: string[];
+  if (delta.schemaVersion === 'route-adopt-delta-v5') {
+    restoredOccurrenceIds = await restoreDayOccurrences(
+      transaction,
+      input.tripId,
+      delta,
+      input.now,
+    );
+    restoredNodeIds = await restoreGeneratedNodes(
+      transaction,
+      input.tripId,
+      delta,
+    );
+    await restoreNodePlacements(transaction, input.tripId, delta);
+  }
   const removedCreatedOccurrenceIds: string[] = [];
   for (const occurrenceId of delta.createdDayOccurrenceIds) {
     const occurrence = await transaction.dayOccurrence.findFirst({
@@ -177,19 +233,20 @@ async function executeUndo(
     removedCreatedOccurrenceIds.push(occurrence.id);
   }
 
-  const restoredOccurrenceIds = await restoreDayOccurrences(
-    transaction,
-    input.tripId,
-    delta,
-    input.now,
-  );
-  const restoredNodeIds = await restoreGeneratedNodes(
-    transaction,
-    input.tripId,
-    delta,
-  );
-  await restoreNodePlacements(transaction, input.tripId, delta);
-
+  if (delta.schemaVersion !== 'route-adopt-delta-v5') {
+    restoredOccurrenceIds = await restoreDayOccurrences(
+      transaction,
+      input.tripId,
+      delta,
+      input.now,
+    );
+    restoredNodeIds = await restoreGeneratedNodes(
+      transaction,
+      input.tripId,
+      delta,
+    );
+    await restoreNodePlacements(transaction, input.tripId, delta);
+  }
   const restoredTransportEdgeIds: string[] = [];
   for (const history of state.histories) {
     await transaction.transportEdge.create({
@@ -321,14 +378,34 @@ async function executeUndo(
     undoneAdoptedRouteId: target.adoptedRouteId,
     restoredAdoptedRouteId: delta.previousActiveAdoptedRouteId,
     removedCreatedNodeIds: [...delta.createdNodeIds],
-    restoredNodeIds,
+    restoredNodeIds: restoredNodeIds!,
     removedCreatedTransportEdgeIds: [...delta.createdTransportEdgeIds],
     restoredTransportEdgeIds,
-    restoredDayOccurrenceIds: restoredOccurrenceIds,
+    restoredDayOccurrenceIds: restoredOccurrenceIds!,
     removedAdoptCreatedDayOccurrenceIds: removedCreatedOccurrenceIds,
     restoredOwnedDates: [...delta.beforeOwnedDates],
     restoredUserTimeIntentIds,
   };
+  if (
+    delta.schemaVersion === 'route-adopt-delta-v5' &&
+    (await hashPreservedRoutePrefix(
+      transaction,
+      input.tripId,
+      delta.preservedPrefixNodeIds,
+      delta.preservedPrefixTransportEdgeIds,
+    )) !== delta.preservedPrefixHash
+  )
+    throw new UndoAbort('UNDO_CONFLICT');
+  const completeUndoDelta: RouteUndoDeltaV2 | RouteUndoDeltaV3 =
+    delta.schemaVersion === 'route-adopt-delta-v5'
+      ? {
+          ...undoDelta,
+          schemaVersion: 'route-undo-delta-v3',
+          dematerializedExternalOriginNodeId: delta.materializedOriginNodeId,
+          dematerializedExternalOriginPlaceId: delta.materializedOriginPlaceId,
+          retainedExternalOriginId: delta.externalOriginId,
+        }
+      : undoDelta;
   const undoReceipt = await transaction.operationReceipt.create({
     data: {
       ownerUserId: input.ownerUserId,
@@ -342,7 +419,7 @@ async function executeUndo(
       adoptedRouteId: target.adoptedRouteId,
       targetOperationReceiptId: target.id,
       undoExpiresAt: null,
-      delta: undoDelta as unknown as Prisma.InputJsonValue,
+      delta: completeUndoDelta as unknown as Prisma.InputJsonValue,
       createdAt: input.now,
     },
   });
@@ -423,7 +500,19 @@ async function validateCurrentUndoState(
       status: 'ACTIVE',
     },
   });
-  if (targetRoute === null) return null;
+  if (targetRoute === null || targetRoute.anchorFromNodeId === null)
+    return null;
+  if (
+    delta.schemaVersion === 'route-adopt-delta-v5' &&
+    (targetRoute.anchorOriginKind !== 'EXTERNAL_EXECUTION_ORIGIN' ||
+      targetRoute.policyVersion !== 'route-external-origin-preview-v2' ||
+      targetRoute.anchorFromNodeId !== delta.materializedOriginNodeId ||
+      targetRoute.anchorFromExternalOriginId !== delta.externalOriginId ||
+      targetRoute.anchorToNodeId !== delta.destinationNodeId ||
+      hashExternalRouteAudit(targetRoute.anchorFromSnapshot) !==
+        hashExternalRouteAudit(delta.materializedOriginAnchorSnapshot))
+  )
+    return null;
   if (
     delta.schemaVersion === 'route-adopt-delta-v4' &&
     (delta.replacementAnchorFromNodeId !== targetRoute.anchorFromNodeId ||
@@ -494,14 +583,18 @@ async function validateCurrentUndoState(
         include: {
           temporalValues: true,
           timeIntents: true,
-          _count: {
-            select: {
-              routeSnapshotsFrom: true,
-              routeSnapshotsTo: true,
-              adoptedRouteAnchorFrom: true,
-              adoptedRouteAnchorTo: true,
-            },
-          },
+          ...(delta.schemaVersion === 'route-adopt-delta-v5'
+            ? nodeDeletionReferenceInclude
+            : {
+                _count: {
+                  select: {
+                    routeSnapshotsFrom: true,
+                    routeSnapshotsTo: true,
+                    adoptedRouteAnchorFrom: true,
+                    adoptedRouteAnchorTo: true,
+                  },
+                },
+              }),
         },
       }),
       transaction.itineraryNode.findMany({
@@ -568,7 +661,11 @@ async function validateCurrentUndoState(
         node.temporalValues.length > 0 ||
         node._count.routeSnapshotsFrom > 0 ||
         node._count.routeSnapshotsTo > 0 ||
-        node._count.adoptedRouteAnchorFrom > 0 ||
+        node._count.adoptedRouteAnchorFrom >
+          (delta.schemaVersion === 'route-adopt-delta-v5' &&
+          node.id === delta.materializedOriginNodeId
+            ? 1
+            : 0) ||
         node._count.adoptedRouteAnchorTo > 0,
     )
   ) {
@@ -656,7 +753,8 @@ async function validateCurrentUndoState(
         id: delta.previousActiveAdoptedRouteId,
         tripId: input.tripId,
         anchorFromNodeId:
-          delta.schemaVersion === 'route-adopt-delta-v4'
+          delta.schemaVersion === 'route-adopt-delta-v4' ||
+          delta.schemaVersion === 'route-adopt-delta-v5'
             ? delta.sourceRouteAnchorFromNodeId
             : targetRoute.anchorFromNodeId,
         anchorToNodeId: targetRoute.anchorToNodeId,
@@ -664,6 +762,18 @@ async function validateCurrentUndoState(
       },
     });
     if (previous === null) return null;
+    if (
+      delta.schemaVersion === 'route-adopt-delta-v5' &&
+      !(await validateV5Corridor(
+        transaction,
+        input.tripId,
+        targetRoute,
+        previous,
+        delta,
+        histories,
+      ))
+    )
+      return null;
     if (
       delta.schemaVersion === 'route-adopt-delta-v4' &&
       !(await validateV4Corridor(
@@ -719,7 +829,16 @@ async function restoreDayOccurrences(
     select: { id: true },
   });
   const beforeIds = new Set(delta.beforeDayOccurrences.map((item) => item.id));
-  if (current.some((occurrence) => !beforeIds.has(occurrence.id))) {
+  if (
+    current.some(
+      (occurrence) =>
+        !beforeIds.has(occurrence.id) &&
+        !(
+          delta.schemaVersion === 'route-adopt-delta-v5' &&
+          delta.createdDayOccurrenceIds.includes(occurrence.id)
+        ),
+    )
+  ) {
     throw new UndoAbort('UNDO_CONFLICT');
   }
   const offset = delta.beforeDayOccurrences.length * 4 + 10_000;
@@ -946,13 +1065,13 @@ async function validateV4Corridor(
     id: string;
     tripId: string;
     status: string;
-    anchorFromNodeId: string;
+    anchorFromNodeId: string | null;
     anchorToNodeId: string;
   },
   previous: {
     id: string;
     tripId: string;
-    anchorFromNodeId: string;
+    anchorFromNodeId: string | null;
     anchorToNodeId: string;
   },
   delta: RouteAdoptDeltaV4,
@@ -965,6 +1084,11 @@ async function validateV4Corridor(
   }[],
   createdEdges: readonly { id: string }[],
 ): Promise<boolean> {
+  if (
+    currentRoute.anchorFromNodeId === null ||
+    previous.anchorFromNodeId === null
+  )
+    return false;
   const [nodes, edges] = await Promise.all([
     transaction.itineraryNode.findMany({
       where: { tripId },
@@ -1084,14 +1208,16 @@ async function validateV4Corridor(
   );
 }
 
-function parseRouteAdoptDelta(
+export function parseRouteAdoptDelta(
   value: Prisma.JsonValue,
+  targetAdoptedRouteId?: string,
 ): RouteAdoptUndoBasis | null {
   if (
     !isRecord(value) ||
     (value.schemaVersion !== 'route-adopt-delta-v2' &&
       value.schemaVersion !== 'route-adopt-delta-v3' &&
-      value.schemaVersion !== 'route-adopt-delta-v4')
+      value.schemaVersion !== 'route-adopt-delta-v4' &&
+      value.schemaVersion !== 'route-adopt-delta-v5')
   ) {
     return null;
   }
@@ -1145,6 +1271,11 @@ function parseRouteAdoptDelta(
       !isUniqueUuidArray(value.archivedTransportEdgeIds) ||
       typeof value.preservedPrefixHash !== 'string' ||
       !/^[a-f0-9]{64}$/u.test(value.preservedPrefixHash))
+  )
+    return null;
+  if (
+    value.schemaVersion === 'route-adopt-delta-v5' &&
+    !validV5Shape(value, targetAdoptedRouteId)
   )
     return null;
   const delta = value as unknown as RouteAdoptUndoBasis;
@@ -1374,4 +1505,306 @@ class UndoAbort extends Error {
   ) {
     super(status);
   }
+}
+
+function validV5Shape(
+  value: Record<string, unknown>,
+  targetAdoptedRouteId?: string,
+): boolean {
+  const ids = [
+    'externalOriginId',
+    'sourceGroundTransitLegExecutionId',
+    'sourceAdoptedRouteId',
+    'sourceTransportEdgeId',
+    'sourceRouteAnchorFromNodeId',
+    'sourceRouteAnchorToNodeId',
+    'sourceDivergenceNodeId',
+    'destinationNodeId',
+    'materializedOriginNodeId',
+    'materializedOriginPlaceId',
+    'materializedOriginDayOccurrenceId',
+  ];
+  if (
+    value.replacementScope !== 'EXTERNAL_ORIGIN' ||
+    ids.some((key) => !isUuid(value[key])) ||
+    ![
+      'preservedPrefixNodeIds',
+      'preservedPrefixTransportEdgeIds',
+      'replacementNodeIds',
+      'archivedTransportEdgeIds',
+      'archivableProviderActualTransportEdgeIds',
+    ].every((key) => isUniqueUuidArray(value[key])) ||
+    !['preservedPrefixHash', 'archivedSuffixHash'].every(
+      (key) =>
+        typeof value[key] === 'string' &&
+        /^[a-f0-9]{64}$/u.test(value[key] as string),
+    ) ||
+    !Array.isArray(value.afterGeneratedNodeFacts) ||
+    !value.afterGeneratedNodeFacts.every(isRecord) ||
+    !Array.isArray(value.afterGroundTransitLegFacts) ||
+    !value.afterGroundTransitLegFacts.every(isRecord) ||
+    !isUniqueUuidArray(value.createdGroundTransitTransportEdgeIds) ||
+    !isRecord(value.materializedOriginAnchorSnapshot)
+  )
+    return false;
+  const d = value as unknown as RouteAdoptDeltaV5;
+  const anchor = d.materializedOriginAnchorSnapshot;
+  const legs = d.afterGroundTransitLegFacts;
+  if (
+    !isUniqueUuidArray(legs.map((leg) => leg.id)) ||
+    !isUniqueUuidArray(legs.map((leg) => leg.transportEdgeId)) ||
+    !sameArray(
+      legs.map((leg) => String(leg.transportEdgeId)).sort(),
+      [...d.createdGroundTransitTransportEdgeIds].sort(),
+    ) ||
+    d.createdGroundTransitTransportEdgeIds.some(
+      (id) => !d.createdTransportEdgeIds.includes(id),
+    ) ||
+    new Set(legs.map((leg) => leg.adoptedRouteId)).size > 1 ||
+    legs.some(
+      (leg) =>
+        !isUuid(leg.tripId) ||
+        !isUuid(leg.adoptedRouteId) ||
+        leg.adoptedRouteId === d.sourceAdoptedRouteId ||
+        (targetAdoptedRouteId !== undefined &&
+          leg.adoptedRouteId !== targetAdoptedRouteId) ||
+        (leg.mode !== 'RAIL' && leg.mode !== 'BUS') ||
+        !Array.isArray(leg.observations) ||
+        leg.observations.length !== 0 ||
+        !Array.isArray(leg.stateTransitions) ||
+        leg.stateTransitions.length !== 1 ||
+        leg.state !== 'PENDING' ||
+        !leg.stateTransitions.every(
+          (t) =>
+            isRecord(t) &&
+            isUuid(t.id) &&
+            t.legExecutionId === leg.id &&
+            t.fromState === null &&
+            t.toState === 'PENDING' &&
+            t.source === 'ROUTE_ADOPT' &&
+            t.evidenceRef === `adopted-route:${String(leg.adoptedRouteId)}`,
+        ),
+    )
+  )
+    return false;
+  return (
+    anchor.schemaVersion === 'external-adopted-route-anchor-v1' &&
+    isRecord(anchor.externalOrigin) &&
+    anchor.externalOrigin.schema === 'external-route-origin-v1' &&
+    anchor.externalOrigin.externalOriginId === d.externalOriginId &&
+    anchor.externalOrigin.sourceAdoptedRouteId === d.sourceAdoptedRouteId &&
+    anchor.externalOrigin.sourceTransportEdgeId === d.sourceTransportEdgeId &&
+    anchor.externalOrigin.sourceGroundTransitLegExecutionId ===
+      d.sourceGroundTransitLegExecutionId &&
+    anchor.materializedNodeId === d.materializedOriginNodeId &&
+    anchor.materializedPlaceId === d.materializedOriginPlaceId &&
+    anchor.materializedDayOccurrenceId ===
+      d.materializedOriginDayOccurrenceId &&
+    isLocalDate(anchor.localDate) &&
+    d.previousActiveAdoptedRouteId === d.sourceAdoptedRouteId &&
+    d.sourceRouteAnchorToNodeId === d.destinationNodeId &&
+    sameArray(d.beforeCorridorNodeIds, d.replacementNodeIds) &&
+    d.beforeCorridorNodeIds[0] === d.sourceDivergenceNodeId &&
+    d.beforeCorridorNodeIds.at(-1) === d.destinationNodeId &&
+    d.afterCorridorNodeIds[0] === d.materializedOriginNodeId &&
+    d.afterCorridorNodeIds.at(-1) === d.destinationNodeId &&
+    d.preservedPrefixNodeIds.length >= 1 &&
+    d.preservedPrefixNodeIds[0] === d.sourceRouteAnchorFromNodeId &&
+    d.preservedPrefixNodeIds.at(-1) === d.sourceDivergenceNodeId &&
+    d.preservedPrefixTransportEdgeIds.length ===
+      d.preservedPrefixNodeIds.length - 1 &&
+    d.createdNodeIds.includes(d.materializedOriginNodeId) &&
+    d.createdPlaceIds.includes(d.materializedOriginPlaceId) &&
+    d.createdNodeIds.every((id) => !d.reusedNodeIds.includes(id)) &&
+    sameArray(
+      [...d.afterCorridorNodeIds.slice(0, -1)].sort(),
+      [...d.createdNodeIds, ...d.reusedNodeIds].sort(),
+    ) &&
+    d.createdTransportEdgeIds.length === d.afterCorridorNodeIds.length - 1 &&
+    [
+      ...d.beforeDayOccurrences.map((day) => day.id),
+      ...d.createdDayOccurrenceIds,
+    ].includes(d.materializedOriginDayOccurrenceId) &&
+    d.archivedTransportEdgeIds[0] === d.sourceTransportEdgeId &&
+    d.archivedTransportEdgeIds.length === d.beforeCorridorNodeIds.length - 1 &&
+    d.archivableProviderActualTransportEdgeIds.every((id) =>
+      d.archivedTransportEdgeIds.includes(id),
+    ) &&
+    sameArray(
+      d.afterGeneratedNodeFacts.map((node) => String(node.id)).sort(),
+      [...d.createdNodeIds, ...d.reusedNodeIds].sort(),
+    )
+  );
+}
+
+async function validateV5Corridor(
+  tx: Transaction,
+  tripId: string,
+  current: {
+    id: string;
+    anchorFromNodeId: string | null;
+    anchorToNodeId: string;
+    status: string;
+    tripId: string;
+  },
+  previous: {
+    id: string;
+    anchorFromNodeId: string | null;
+    anchorToNodeId: string;
+    status: string;
+    tripId: string;
+  },
+  delta: RouteAdoptDeltaV5,
+  histories: readonly Prisma.TransportEdgeHistoryGetPayload<{
+    include: { temporalValues: true };
+  }>[],
+) {
+  if (
+    previous.anchorFromNodeId !== delta.sourceRouteAnchorFromNodeId ||
+    previous.anchorToNodeId !== delta.destinationNodeId ||
+    current.anchorFromNodeId !== delta.materializedOriginNodeId
+  )
+    return false;
+  const groundEdges = await tx.transportEdge.findMany({
+    where: {
+      tripId,
+      adoptedRouteId: current.id,
+      mode: { in: ['RAIL', 'BUS'] },
+    },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  const groundFacts = await externalGroundTransitExecutionFacts(
+    tx,
+    tripId,
+    current.id,
+  );
+  if (
+    !sameArray(
+      groundEdges.map((edge) => edge.id),
+      [...delta.createdGroundTransitTransportEdgeIds].sort(),
+    ) ||
+    groundFacts.some(
+      (leg) => leg.tripId !== tripId || leg.adoptedRouteId !== current.id,
+    ) ||
+    hashExternalRouteAudit(groundFacts) !==
+      hashExternalRouteAudit(delta.afterGroundTransitLegFacts)
+  )
+    return false;
+  if (
+    hashExternalRouteAudit(
+      await externalGeneratedNodeFacts(tx, tripId, [
+        ...delta.createdNodeIds,
+        ...delta.reusedNodeIds,
+      ]),
+    ) !== hashExternalRouteAudit(delta.afterGeneratedNodeFacts)
+  )
+    return false;
+  if (
+    hashExternalRouteAudit(
+      histories.map((history) => ({
+        ...history,
+        temporalValues: [...history.temporalValues].sort((a, b) =>
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+        ),
+      })),
+    ) !== delta.archivedSuffixHash
+  )
+    return false;
+  if (
+    (await hashPreservedRoutePrefix(
+      tx,
+      tripId,
+      delta.preservedPrefixNodeIds,
+      delta.preservedPrefixTransportEdgeIds,
+    )) !== delta.preservedPrefixHash
+  )
+    return false;
+  const nodes = await tx.itineraryNode.findMany({
+    where: { tripId },
+    orderBy: [
+      { dayOccurrence: { sequence: 'asc' } },
+      { position: 'asc' },
+      { id: 'asc' },
+    ],
+  });
+  const edges = await tx.transportEdge.findMany({ where: { tripId } });
+  const start = nodes.findIndex(
+    (node) => node.id === delta.sourceRouteAnchorFromNodeId,
+  );
+  const end = nodes.findIndex(
+    (node) => node.id === delta.sourceDivergenceNodeId,
+  );
+  if (
+    start < 0 ||
+    end < start ||
+    !sameArray(
+      nodes.slice(start, end + 1).map((node) => node.id),
+      delta.preservedPrefixNodeIds,
+    ) ||
+    nodes[end + 1]?.id !== delta.materializedOriginNodeId ||
+    edges.some(
+      (edge) =>
+        edge.fromNodeId === delta.sourceDivergenceNodeId &&
+        edge.toNodeId === delta.materializedOriginNodeId,
+    )
+  )
+    return false;
+  const originalIds = [
+    ...delta.preservedPrefixNodeIds.slice(0, -1),
+    ...delta.beforeCorridorNodeIds,
+  ];
+  const originalNodes = originalIds.map(
+    (id) =>
+      delta.beforeGeneratedNodes.find((node) => node.id === id) ??
+      nodes.find((node) => node.id === id),
+  );
+  if (originalNodes.some((node) => node === undefined)) return false;
+  const restored = resolveCurrentRouteReplacementCorridor(
+    tripId,
+    originalNodes as NonNullable<(typeof originalNodes)[number]>[],
+    [
+      ...edges.filter((edge) =>
+        delta.preservedPrefixTransportEdgeIds.includes(edge.id),
+      ),
+      ...histories.map((h) => ({
+        id: h.originalTransportEdgeId,
+        tripId,
+        fromNodeId: h.originalFromNodeId,
+        toNodeId: h.originalToNodeId,
+        source: h.source,
+        adoptedRouteId: h.adoptedRouteId,
+      })),
+    ],
+    [{ ...previous, status: 'ACTIVE' }],
+    delta.sourceRouteAnchorFromNodeId,
+    delta.destinationNodeId,
+  );
+  if (!restored || !sameArray(restored.replacementNodeIds, originalIds))
+    return false;
+  if (
+    !sameArray(
+      histories.map((h) => h.originalTransportEdgeId).sort(),
+      [...delta.archivedTransportEdgeIds].sort(),
+    ) ||
+    histories.some(
+      (h) => h.adoptedRouteId !== previous.id || h.source !== 'ADOPTED_ROUTE',
+    )
+  )
+    return false;
+  const providerActualIds = histories
+    .filter((h) => h.temporalValues.some((v) => v.layer === 'ACTUAL'))
+    .map((h) => h.originalTransportEdgeId)
+    .sort();
+  return (
+    histories.every((h) =>
+      h.temporalValues.every(
+        (v) => v.layer !== 'ACTUAL' || v.sourceKind === 'PROVIDER_OBSERVATION',
+      ),
+    ) &&
+    sameArray(
+      providerActualIds,
+      [...delta.archivableProviderActualTransportEdgeIds].sort(),
+    )
+  );
 }

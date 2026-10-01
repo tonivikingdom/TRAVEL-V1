@@ -417,7 +417,7 @@ describe('external Preview Application policy', () => {
     ).toBe('2030-10-02');
   });
 
-  it('keeps external GET readable with ADOPT_UNSUPPORTED and uses the separate save port', async () => {
+  it('keeps v2 ACTIVE and historical v1 ADOPT_UNSUPPORTED readable through the separate save port', async () => {
     const f = fixture();
     const save = vi.fn(async (input) => ({
       status: 'SUCCESS' as const,
@@ -470,9 +470,9 @@ describe('external Preview Application policy', () => {
       candidateSnapshotId: f.snapshot.id,
     });
     expect(preview).toMatchObject({
-      status: 'ADOPT_UNSUPPORTED',
-      adoptable: false,
-      policyVersion: 'route-external-origin-preview-v1',
+      status: 'ACTIVE',
+      adoptable: true,
+      policyVersion: 'route-external-origin-preview-v2',
     });
     expect(planning.createPreview).not.toHaveBeenCalled();
     const result = await save.mock.results[0]!.value;
@@ -480,6 +480,17 @@ describe('external Preview Application policy', () => {
     expect(
       await service.getPreview(actor, f.trip.id, preview.previewId),
     ).toEqual(preview);
+    vi.mocked(planning.findPreviewOwned).mockResolvedValue({
+      ...result.preview,
+      policyVersion: 'route-external-origin-preview-v1',
+      previewPayload: {
+        ...result.preview.previewPayload,
+        policyVersion: 'route-external-origin-preview-v1',
+      },
+    });
+    expect(
+      await service.getPreview(actor, f.trip.id, preview.previewId),
+    ).toMatchObject({ status: 'ADOPT_UNSUPPORTED', adoptable: false });
     expect(trips.executeCommand).not.toHaveBeenCalled();
     expect(trips.setTemporalValue).not.toHaveBeenCalled();
   });

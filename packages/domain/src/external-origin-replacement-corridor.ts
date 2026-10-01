@@ -35,6 +35,7 @@ export function resolveExternalOriginReplacementCorridor(input: {
     route === null ||
     route.tripId !== input.tripId ||
     route.status !== 'ACTIVE' ||
+    route.anchorFromNodeId === null ||
     input.destinationNodeId !== route.anchorToNodeId
   )
     return null;

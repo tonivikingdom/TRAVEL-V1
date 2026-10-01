@@ -18,7 +18,7 @@ export interface CorridorRoute {
   readonly id: string;
   readonly tripId: string;
   readonly status: string;
-  readonly anchorFromNodeId: string;
+  readonly anchorFromNodeId: string | null;
   readonly anchorToNodeId: string;
 }
 export interface RouteReplacementCorridor {
@@ -103,6 +103,7 @@ export function resolveCurrentRouteReplacementCorridor(
   }
   if (matches.length !== 1) return null;
   const route = matches[0]!;
+  if (route.anchorFromNodeId === null) return null;
   const start = orderedNodes.findIndex(
     (node) => node.id === route.anchorFromNodeId,
   );

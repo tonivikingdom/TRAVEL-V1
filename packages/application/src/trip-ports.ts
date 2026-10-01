@@ -166,7 +166,7 @@ export interface TripAggregateRecord {
 export interface AdoptedRouteRecord {
   readonly id: string;
   readonly tripId: string;
-  readonly anchorFromNodeId: string;
+  readonly anchorFromNodeId: string | null;
   readonly anchorToNodeId: string;
   readonly sourcePreviewId: string;
   readonly candidateSnapshotId: string;

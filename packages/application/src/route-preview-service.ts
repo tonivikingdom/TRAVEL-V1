@@ -18,6 +18,7 @@ import type { ExternalExecutionOriginRepository } from './external-execution-ori
 import {
   buildExternalOriginPreviewPayload,
   EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
+  LEGACY_EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
 } from './external-origin-route-preview.js';
 import {
   validateSnapshot,
@@ -271,6 +272,7 @@ export class RoutePreviewService {
 const SUPPORTED_ROUTE_PREVIEW_POLICIES = new Set([
   ROUTE_PREVIEW_POLICY_VERSION,
   EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
+  LEGACY_EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
 ]);
 
 function toPreviewView(
@@ -300,7 +302,7 @@ function toPreviewView(
       : blocked
         ? ('BLOCKED' as const)
         : preview.previewPayload.policyVersion ===
-            EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION
+            LEGACY_EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION
           ? ('ADOPT_UNSUPPORTED' as const)
           : ('ACTIVE' as const);
   return {

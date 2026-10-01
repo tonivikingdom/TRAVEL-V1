@@ -1,3 +1,4 @@
+import { executeExternalRouteAdoption } from './prisma-external-route-adoption.js';
 import {
   generatedNodeDeletionProtectionReasons,
   hashRouteCandidateSnapshot,
@@ -30,7 +31,7 @@ import { Prisma, type PrismaClient } from './generated/prisma/client.js';
 
 type Transaction = Prisma.TransactionClient;
 
-interface LockedTripRow {
+export interface LockedTripRow {
   readonly id: string;
   readonly version: number;
   readonly effectiveStartDate: Date | null;
@@ -41,7 +42,7 @@ interface AdvisoryLockRow {
   readonly locked: boolean;
 }
 
-interface AdoptionInput {
+export interface AdoptionInput {
   readonly ownerUserId: string;
   readonly tripId: string;
   readonly previewId: string;
@@ -58,7 +59,7 @@ interface AdoptionInput {
   readonly undoExpiresAt: Date;
 }
 
-interface ReceiptDelta {
+export interface ReceiptDelta {
   schemaVersion: 'route-adopt-delta-v3';
   createdNodeIds: string[];
   reusedNodeIds: string[];
@@ -151,12 +152,16 @@ async function executeAdoption(
     },
     include: { candidateSnapshot: true },
   });
-  if (
-    preview !== null &&
-    (preview.candidateSnapshot.originKind === 'EXTERNAL_EXECUTION_ORIGIN' ||
-      preview.policyVersion === 'route-external-origin-preview-v1')
-  )
-    return { status: 'PREVIEW_UNSUPPORTED' };
+  if (preview?.candidateSnapshot.originKind === 'EXTERNAL_EXECUTION_ORIGIN') {
+    if (preview.policyVersion !== 'route-external-origin-preview-v2')
+      return { status: 'PREVIEW_UNSUPPORTED' };
+    return executeExternalRouteAdoption(
+      transaction,
+      input,
+      lockedTrip,
+      preview,
+    );
+  }
   if (lockedTrip.version !== input.baseTripVersion) {
     return { status: 'VERSION_CONFLICT' };
   }
@@ -496,42 +501,9 @@ async function executeAdoption(
     });
   }
 
-  for (const edge of oldEdges) {
-    const history = await transaction.transportEdgeHistory.create({
-      data: {
-        originalTransportEdgeId: edge.id,
-        tripId: edge.tripId,
-        originalFromNodeId: edge.fromNodeId,
-        originalToNodeId: edge.toNodeId,
-        mode: edge.mode,
-        fixedService: edge.fixedService,
-        serviceLabel: edge.serviceLabel,
-        note: edge.note,
-        source: edge.source,
-        adoptedRouteId: edge.adoptedRouteId,
-        provider: edge.provider,
-        providerRef: edge.providerRef,
-        originalCreatedAt: edge.createdAt,
-        invalidatedAt: input.now,
-        invalidationReason: 'USER_REPLACED',
-        temporalValues: {
-          create: edge.temporalValues.map((value) => ({
-            layer: value.layer,
-            pointKind: value.pointKind,
-            instant: value.instant,
-            timeZone: value.timeZone,
-            sourceKind: value.sourceKind,
-            sourceRef: value.sourceRef,
-            observedAt: value.observedAt,
-            originalCreatedAt: value.createdAt,
-            originalUpdatedAt: value.updatedAt,
-          })),
-        },
-      },
-    });
-    delta.archivedTransportHistoryIds.push(history.id);
-    await transaction.transportEdge.delete({ where: { id: edge.id } });
-  }
+  delta.archivedTransportHistoryIds.push(
+    ...(await archiveRouteEdges(transaction, oldEdges, input.now)),
+  );
   await transaction.itineraryNode.deleteMany({
     where: { id: { in: removedNodes.map((node) => node.id) } },
   });
@@ -558,115 +530,16 @@ async function executeAdoption(
     ['TO_NODE', plan.anchorToNodeId],
     ...resolvedNodes.refs.entries(),
   ]);
-  for (const [segmentIndex, segment] of plan.segments.entries()) {
-    const fromNodeId = refs.get(segment.fromRef);
-    const toNodeId = refs.get(segment.toRef);
-    if (fromNodeId === undefined || toNodeId === undefined) {
-      throw new AdoptionAbort('PREVIEW_STALE');
-    }
-    const edge = await transaction.transportEdge.create({
-      data: {
-        tripId: input.tripId,
-        fromNodeId,
-        toNodeId,
-        mode: segment.mode,
-        fixedService: segment.fixedService,
-        serviceLabel: segment.serviceLabel,
-        note: null,
-        source: 'ADOPTED_ROUTE',
-        adoptedRouteId: adoptedRoute.id,
-        provider: preview.candidateSnapshot.provider,
-        providerRef: segment.providerRef,
-      },
-    });
-    delta.createdTransportEdgeIds.push(edge.id);
-    if (segment.mode === 'RAIL' || segment.mode === 'BUS') {
-      const metadata = segment.groundTransit ?? null;
-      await transaction.groundTransitLegExecution.create({
-        data: {
-          tripId: input.tripId,
-          adoptedRouteId: adoptedRoute.id,
-          transportEdgeId: edge.id,
-          legIndex: segment.legIndex ?? segmentIndex,
-          provider: preview.candidateSnapshot.provider,
-          mode: segment.mode,
-          serviceClass: metadata?.serviceClass ?? null,
-          serviceIdentityKey: metadata?.serviceIdentityKey ?? null,
-          baseline: {
-            schemaVersion: 'ground-transit-baseline-v1',
-            provider: preview.candidateSnapshot.provider,
-            mode: segment.mode,
-            serviceClass: metadata?.serviceClass ?? null,
-            serviceIdentityKey: metadata?.serviceIdentityKey ?? null,
-            lineRef: metadata?.lineRef ?? null,
-            lineName: metadata?.lineName ?? null,
-            directionRef: metadata?.directionRef ?? null,
-            directionLabel: metadata?.directionLabel ?? null,
-            boardingHubRef: metadata?.boardingHubRef ?? null,
-            alightingHubRef: metadata?.alightingHubRef ?? null,
-            headwayMinSeconds: metadata?.headwayMinSeconds ?? null,
-            headwayMaxSeconds: metadata?.headwayMaxSeconds ?? null,
-            minimumTransferSeconds: metadata?.minimumTransferSeconds ?? null,
-            boardingAccessMinimumSeconds:
-              metadata?.boardingAccessMinimumSeconds ?? null,
-            hasOnwardConnection: segmentIndex < plan.segments.length - 1,
-            plannedDeparture: segment.departure?.instant ?? null,
-            plannedArrival: segment.arrival?.instant ?? null,
-          },
-          createdAt: input.now,
-          stateTransitions: {
-            create: {
-              toState: 'PENDING',
-              source: 'ROUTE_ADOPT',
-              evidenceRef: `adopted-route:${adoptedRoute.id}`,
-              occurredAt: input.now,
-            },
-          },
-        },
-      });
-    }
-    const sourceRef = `snapshot:${preview.candidateSnapshotId}/candidate:${payload.candidate.candidateId}/leg:${segment.legIndex ?? segmentIndex}`;
-    const temporalValues = [
-      segment.departure === null
-        ? null
-        : {
-            transportEdgeId: edge.id,
-            layer: 'PLANNED' as const,
-            pointKind: 'DEPARTURE' as const,
-            instant: new Date(segment.departure.instant),
-            timeZone: segment.departure.timeZone,
-            sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
-            sourceRef,
-            observedAt: preview.candidateSnapshot.observedAt,
-          },
-      segment.arrival === null
-        ? null
-        : {
-            transportEdgeId: edge.id,
-            layer: 'PLANNED' as const,
-            pointKind: 'ARRIVAL' as const,
-            instant: new Date(segment.arrival.instant),
-            timeZone: segment.arrival.timeZone,
-            sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
-            sourceRef,
-            observedAt: preview.candidateSnapshot.observedAt,
-          },
-    ].filter((value) => value !== null);
-    if (temporalValues.length > 0) {
-      await transaction.temporalValue.createMany({ data: temporalValues });
-    }
-    const projections = await createTransportDayProjections(
-      transaction,
-      input.tripId,
-      edge.id,
-      fromNodeId,
-      toNodeId,
-    );
-    delta.createdDayProjections.push(...projections);
-    delta.affectedDayOccurrenceIds.push(
-      ...projections.map((projection) => projection.dayOccurrenceId),
-    );
-  }
+  await createAdoptedCandidateEdges(
+    transaction,
+    input,
+    preview,
+    adoptedRoute,
+    plan,
+    payload,
+    delta,
+    refs,
+  );
 
   await assertCurrentAdjacency(transaction, input.tripId);
   const range = await reconcileDateOwnership(
@@ -833,7 +706,7 @@ async function validateCurrentCorridor(
   return { ...corridor, nodeIds: [...corridor.replacementNodeIds] };
 }
 
-function sameAdjustments(
+export function sameAdjustments(
   expected: readonly {
     readonly intentId: string;
     readonly nodeId: string;
@@ -863,7 +736,7 @@ function sameAdjustments(
   );
 }
 
-async function resolveGeneratedNodes(
+export async function resolveGeneratedNodes(
   transaction: Transaction,
   input: {
     readonly ownerUserId: string;
@@ -1034,7 +907,7 @@ async function resolveGeneratedNodes(
   };
 }
 
-async function rewriteOccurrenceAndNodeOrder(
+export async function rewriteOccurrenceAndNodeOrder(
   transaction: Transaction,
   tripId: string,
   input: {
@@ -1142,7 +1015,7 @@ async function rewriteOccurrenceAndNodeOrder(
   }
 }
 
-async function createTransportDayProjections(
+export async function createTransportDayProjections(
   transaction: Transaction,
   tripId: string,
   transportEdgeId: string,
@@ -1187,7 +1060,7 @@ async function createTransportDayProjections(
   return rows;
 }
 
-async function assertCurrentAdjacency(
+export async function assertCurrentAdjacency(
   transaction: Transaction,
   tripId: string,
 ): Promise<void> {
@@ -1215,7 +1088,7 @@ async function assertCurrentAdjacency(
   }
 }
 
-async function reconcileDateOwnership(
+export async function reconcileDateOwnership(
   transaction: Transaction,
   ownerUserId: string,
   tripId: string,
@@ -1274,7 +1147,7 @@ async function lockOwner(
     throw new Error('Route adoption owner lock failed');
 }
 
-function toReceiptRecord(receipt: {
+export function toReceiptRecord(receipt: {
   readonly id: string;
   readonly ownerUserId: string;
   readonly tripId: string;
@@ -1302,7 +1175,7 @@ function refIndex(ref: string): number {
   return Number(match[1]);
 }
 
-function toGeneratedNodeSnapshot(node: {
+export function toGeneratedNodeSnapshot(node: {
   readonly id: string;
   readonly tripId: string;
   readonly dayOccurrenceId: string;
@@ -1382,10 +1255,183 @@ function isDateOwnershipConflict(error: unknown): boolean {
   );
 }
 
-class AdoptionAbort extends Error {
+export class AdoptionAbort extends Error {
   constructor(
     readonly status: Exclude<AdoptRoutePreviewResult['status'], 'SUCCESS'>,
   ) {
     super(status);
+  }
+}
+
+export async function archiveRouteEdges(
+  transaction: Transaction,
+  oldEdges: readonly Prisma.TransportEdgeGetPayload<{
+    include: { temporalValues: true; dayProjections: true };
+  }>[],
+  now: Date,
+) {
+  const ids: string[] = [];
+  for (const edge of oldEdges) {
+    const history = await transaction.transportEdgeHistory.create({
+      data: {
+        originalTransportEdgeId: edge.id,
+        tripId: edge.tripId,
+        originalFromNodeId: edge.fromNodeId,
+        originalToNodeId: edge.toNodeId,
+        mode: edge.mode,
+        fixedService: edge.fixedService,
+        serviceLabel: edge.serviceLabel,
+        note: edge.note,
+        source: edge.source,
+        adoptedRouteId: edge.adoptedRouteId,
+        provider: edge.provider,
+        providerRef: edge.providerRef,
+        originalCreatedAt: edge.createdAt,
+        invalidatedAt: now,
+        invalidationReason: 'USER_REPLACED',
+        temporalValues: {
+          create: edge.temporalValues.map((value) => ({
+            layer: value.layer,
+            pointKind: value.pointKind,
+            instant: value.instant,
+            timeZone: value.timeZone,
+            sourceKind: value.sourceKind,
+            sourceRef: value.sourceRef,
+            observedAt: value.observedAt,
+            originalCreatedAt: value.createdAt,
+            originalUpdatedAt: value.updatedAt,
+          })),
+        },
+      },
+    });
+    ids.push(history.id);
+    await transaction.transportEdge.delete({ where: { id: edge.id } });
+  }
+  return ids;
+}
+
+export async function createAdoptedCandidateEdges(
+  transaction: Transaction,
+  input: AdoptionInput,
+  preview: {
+    candidateSnapshotId: string;
+    candidateSnapshot: { provider: string; observedAt: Date };
+  },
+  adoptedRoute: { id: string },
+  plan: {
+    segments: StoredRoutePreviewPayload['changeSummary']['proposedSegments'];
+  },
+  payload: StoredRoutePreviewPayload,
+  delta: ReceiptDelta,
+  refs: Map<string, string>,
+) {
+  for (const [segmentIndex, segment] of plan.segments.entries()) {
+    const fromNodeId = refs.get(segment.fromRef);
+    const toNodeId = refs.get(segment.toRef);
+    if (fromNodeId === undefined || toNodeId === undefined) {
+      throw new AdoptionAbort('PREVIEW_STALE');
+    }
+    const edge = await transaction.transportEdge.create({
+      data: {
+        tripId: input.tripId,
+        fromNodeId,
+        toNodeId,
+        mode: segment.mode,
+        fixedService: segment.fixedService,
+        serviceLabel: segment.serviceLabel,
+        note: null,
+        source: 'ADOPTED_ROUTE',
+        adoptedRouteId: adoptedRoute.id,
+        provider: preview.candidateSnapshot.provider,
+        providerRef: segment.providerRef,
+      },
+    });
+    delta.createdTransportEdgeIds.push(edge.id);
+    if (segment.mode === 'RAIL' || segment.mode === 'BUS') {
+      const metadata = segment.groundTransit ?? null;
+      await transaction.groundTransitLegExecution.create({
+        data: {
+          tripId: input.tripId,
+          adoptedRouteId: adoptedRoute.id,
+          transportEdgeId: edge.id,
+          legIndex: segment.legIndex ?? segmentIndex,
+          provider: preview.candidateSnapshot.provider,
+          mode: segment.mode,
+          serviceClass: metadata?.serviceClass ?? null,
+          serviceIdentityKey: metadata?.serviceIdentityKey ?? null,
+          baseline: {
+            schemaVersion: 'ground-transit-baseline-v1',
+            provider: preview.candidateSnapshot.provider,
+            mode: segment.mode,
+            serviceClass: metadata?.serviceClass ?? null,
+            serviceIdentityKey: metadata?.serviceIdentityKey ?? null,
+            lineRef: metadata?.lineRef ?? null,
+            lineName: metadata?.lineName ?? null,
+            directionRef: metadata?.directionRef ?? null,
+            directionLabel: metadata?.directionLabel ?? null,
+            boardingHubRef: metadata?.boardingHubRef ?? null,
+            alightingHubRef: metadata?.alightingHubRef ?? null,
+            headwayMinSeconds: metadata?.headwayMinSeconds ?? null,
+            headwayMaxSeconds: metadata?.headwayMaxSeconds ?? null,
+            minimumTransferSeconds: metadata?.minimumTransferSeconds ?? null,
+            boardingAccessMinimumSeconds:
+              metadata?.boardingAccessMinimumSeconds ?? null,
+            hasOnwardConnection: segmentIndex < plan.segments.length - 1,
+            plannedDeparture: segment.departure?.instant ?? null,
+            plannedArrival: segment.arrival?.instant ?? null,
+          },
+          createdAt: input.now,
+          stateTransitions: {
+            create: {
+              toState: 'PENDING',
+              source: 'ROUTE_ADOPT',
+              evidenceRef: `adopted-route:${adoptedRoute.id}`,
+              occurredAt: input.now,
+            },
+          },
+        },
+      });
+    }
+    const sourceRef = `snapshot:${preview.candidateSnapshotId}/candidate:${payload.candidate.candidateId}/leg:${segment.legIndex ?? segmentIndex}`;
+    const temporalValues = [
+      segment.departure === null
+        ? null
+        : {
+            transportEdgeId: edge.id,
+            layer: 'PLANNED' as const,
+            pointKind: 'DEPARTURE' as const,
+            instant: new Date(segment.departure.instant),
+            timeZone: segment.departure.timeZone,
+            sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+            sourceRef,
+            observedAt: preview.candidateSnapshot.observedAt,
+          },
+      segment.arrival === null
+        ? null
+        : {
+            transportEdgeId: edge.id,
+            layer: 'PLANNED' as const,
+            pointKind: 'ARRIVAL' as const,
+            instant: new Date(segment.arrival.instant),
+            timeZone: segment.arrival.timeZone,
+            sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+            sourceRef,
+            observedAt: preview.candidateSnapshot.observedAt,
+          },
+    ].filter((value) => value !== null);
+    if (temporalValues.length > 0) {
+      await transaction.temporalValue.createMany({ data: temporalValues });
+    }
+    const projections = await createTransportDayProjections(
+      transaction,
+      input.tripId,
+      edge.id,
+      fromNodeId,
+      toNodeId,
+    );
+    delta.createdDayProjections.push(...projections);
+    delta.affectedDayOccurrenceIds.push(
+      ...projections.map((projection) => projection.dayOccurrenceId),
+    );
   }
 }

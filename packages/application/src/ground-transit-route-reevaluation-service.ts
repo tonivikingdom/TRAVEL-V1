@@ -115,7 +115,7 @@ export class GroundTransitRouteReevaluationService {
             ownerUserId: actor.userId,
             tripId,
             legExecutionId: leg.id,
-            fromNodeId: route!.anchorFromNodeId,
+            fromNodeId: route!.anchorFromNodeId!,
             corridorNodeIds: corridor!.nodes.map((node) => node.id),
           })
         : false;

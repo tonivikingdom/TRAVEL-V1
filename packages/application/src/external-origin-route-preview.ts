@@ -32,8 +32,10 @@ import {
 } from './schedule-evaluation.js';
 import type { TripAggregateRecord } from './trip-ports.js';
 
-export const EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION =
+export const LEGACY_EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION =
   'route-external-origin-preview-v1';
+export const EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION =
+  'route-external-origin-preview-v2';
 
 /** Shared deterministic plan computation. Persistence reruns it after acquiring
  * the owner and Trip locks, using freshly loaded facts rather than the old plan.

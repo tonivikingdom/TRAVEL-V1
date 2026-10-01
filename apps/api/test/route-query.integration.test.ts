@@ -539,6 +539,212 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       payload: body,
     });
   }
+  async function assertExternalHandoffProvenance(
+    handoff: { sourceTransportEdgeId: string; adoptedRouteId: string },
+    origin: ExternalOriginMutationResponse['origin'],
+  ) {
+    expect(handoff).toMatchObject({
+      sourceTransportEdgeId: origin.sourceTransportEdgeId,
+      adoptedRouteId: origin.sourceAdoptedRouteId,
+    });
+    expect(
+      await managed.client.groundTransitLegExecution.findUniqueOrThrow({
+        where: { id: origin.sourceGroundTransitLegExecutionId },
+      }),
+    ).toMatchObject({
+      id: origin.sourceGroundTransitLegExecutionId,
+      transportEdgeId: handoff.sourceTransportEdgeId,
+      adoptedRouteId: handoff.adoptedRouteId,
+    });
+  }
+  it.each(['same-route/different-edge', 'different-route'] as const)(
+    'P5E2 5B1 repair: %s handoff does not inherit another leg external origin',
+    async (kind) => {
+      const f = await suffixFixture(false, false, false);
+      let trip = f.first.trip;
+      const requestedLeg =
+        await managed.client.groundTransitLegExecution.findFirstOrThrow({
+          where: { tripId: trip.id, transportEdgeId: f.prefix.id },
+        });
+      let sourceLeg =
+        await managed.client.groundTransitLegExecution.findFirstOrThrow({
+          where: {
+            tripId: trip.id,
+            transportEdgeId: f.suffixEdges.find(
+              (edge) => edge.fromNodeId === f.B.id,
+            )!.id,
+          },
+        });
+      let toNodeId = f.D.id;
+      if (kind === 'different-route') {
+        trip = await addVisit(userA, trip, 'SYNTHETIC P', '2030-10-01');
+        trip = await addVisit(userA, trip, 'SYNTHETIC Q', '2030-10-01');
+        const [P, Q] = trip.days.flatMap((day) => day.nodes).slice(-2);
+        const base = candidate(
+          '2030-10-01T11:30:00Z',
+          '2030-10-01T12:30:00Z',
+          'UTC',
+          'UTC',
+        );
+        providerResult = {
+          status: 'SUCCESS',
+          candidates: [
+            {
+              ...base,
+              legs: [
+                {
+                  ...base.legs[0]!,
+                  mode: 'RAIL',
+                  groundTransit: {
+                    ...suffixFoundationCandidate(false).candidates[0]!.legs[0]!
+                      .groundTransit!,
+                    serviceIdentityKey: 'synthetic:repair:second-route',
+                    boardingHubRef: 'synthetic:P',
+                    alightingHubRef: 'synthetic:Q',
+                  },
+                },
+              ],
+            },
+          ],
+        };
+        const preview = await createPreview(userA, trip, P!.id, Q!.id, {
+          type: 'DEPART_AT',
+          instant: '2030-10-01T11:30:00Z',
+          timeZone: 'UTC',
+        });
+        const adopted = await adoptSuccessfully(
+          userA,
+          trip,
+          preview.previewId,
+          'synthetic-repair-second-route',
+        );
+        trip = adopted.trip;
+        sourceLeg =
+          await managed.client.groundTransitLegExecution.findFirstOrThrow({
+            where: { adoptedRouteId: adopted.operationReceipt.adoptedRouteId },
+          });
+        toNodeId = Q!.id;
+        expect(
+          await managed.client.adoptedRoute.count({
+            where: { tripId: trip.id, status: 'ACTIVE' },
+          }),
+        ).toBe(2);
+        expect(sourceLeg.adoptedRouteId).not.toBe(requestedLeg.adoptedRouteId);
+      } else {
+        expect(sourceLeg.adoptedRouteId).toBe(requestedLeg.adoptedRouteId);
+        expect(sourceLeg.transportEdgeId).not.toBe(
+          requestedLeg.transportEdgeId,
+        );
+      }
+      await app.close();
+      app = buildTestApi(
+        new SyntheticRouteProvider(async (input) => {
+          providerInputs.push(input);
+          return {
+            status: 'SUCCESS',
+            candidates: [
+              candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z'),
+            ],
+          };
+        }),
+        groundSequence(['SHORT_TURN']),
+      );
+      const base = `/trips/${trip.id}/execution/ground-transit/${sourceLeg.transportEdgeId}`;
+      const refresh = await app.inject({
+        method: 'POST',
+        url: `${base}/refresh`,
+        headers: bearer(userA),
+      });
+      expect(refresh.statusCode, refresh.body).toBe(200);
+      const view = (
+        await app.inject({
+          method: 'GET',
+          url: `${base}/external-origin`,
+          headers: bearer(userA),
+        })
+      ).json<ExternalOriginResponse>();
+      expect(view.availability).toBe('CONFIRMATION_REQUIRED');
+      const confirmed = await app.inject({
+        method: 'POST',
+        url: `${base}/external-origin/confirm`,
+        headers: bearer(userA),
+        payload: {
+          baseTripVersion: await readVersion(trip.id),
+          candidateRef: view.candidate!.candidateRef,
+          idempotencyKey: randomUUID(),
+        },
+      });
+      expect(confirmed.statusCode, confirmed.body).toBe(200);
+      const result = confirmed.json<ExternalOriginMutationResponse>();
+      expect(result.origin).toMatchObject({
+        sourceTransportEdgeId: sourceLeg.transportEdgeId,
+        sourceGroundTransitLegExecutionId: sourceLeg.id,
+        sourceAdoptedRouteId: sourceLeg.adoptedRouteId,
+        currentness: 'CURRENT',
+      });
+      providerInputs.length = 0;
+      const before = await externalDurableState(trip.id);
+      const mismatched = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/execution/ground-transit/${requestedLeg.transportEdgeId}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(mismatched.statusCode, mismatched.body).toBe(200);
+      expect(mismatched.json().originBasis).not.toBe(
+        'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+      );
+      expect(mismatched.json().externalQuery ?? null).toBeNull();
+      expect(mismatched.json()).toMatchObject({
+        sourceTransportEdgeId: requestedLeg.transportEdgeId,
+        adoptedRouteId: requestedLeg.adoptedRouteId,
+        readiness: 'NOT_REQUIRED',
+      });
+      expect(await externalDurableState(trip.id)).toEqual(before);
+      const matching = await app.inject({
+        method: 'GET',
+        url: `${base}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(matching.statusCode, matching.body).toBe(200);
+      expect(matching.json()).toMatchObject({
+        readiness: 'READY',
+        originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+        query: null,
+        externalQuery: { externalOriginId: result.origin.id, toNodeId },
+      });
+      await assertExternalHandoffProvenance(matching.json(), result.origin);
+      expect(await externalDurableState(trip.id)).toEqual(before);
+      expect(providerInputs).toHaveLength(0);
+      const queried = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/external-origins/${result.origin.id}/routes/query`,
+        headers: bearer(userA),
+        payload: { basisVersion: result.resultingTripVersion, toNodeId },
+      });
+      expect(queried.statusCode, queried.body).toBe(200);
+      expect(providerInputs).toHaveLength(1);
+    },
+  );
+  it('P5E2 5B1 repair: matching edge/route with mismatched leg execution ID cannot expose external Query', async () => {
+    const f = await confirmedExternalQueryFixture();
+    await managed.client.externalExecutionOrigin.update({
+      where: { id: f.result.origin.id },
+      data: { sourceGroundTransitLegExecutionId: randomUUID() },
+    });
+    const before = await externalDurableState(f.trip.id);
+    const response = await app.inject({
+      method: 'GET',
+      url: `${f.base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().originBasis).not.toBe(
+      'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+    );
+    expect(response.json().externalQuery ?? null).toBeNull();
+    expect(await externalDurableState(f.trip.id)).toEqual(before);
+    expect(providerInputs).toHaveLength(0);
+  });
   it('P5E2 5B1: handoff is READY/read-only; explicit external Query writes only snapshots; Preview is unsupported', async () => {
     const f = await confirmedExternalQueryFixture();
     const nodeSnapshot =
@@ -578,6 +784,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         hint: { type: 'DEPART_AT', timeZone: 'Asia/Tokyo' },
       },
     });
+    await assertExternalHandoffProvenance(handoff.json(), f.result.origin);
     expect(await externalDurableState(f.trip.id)).toEqual(before);
     expect(providerInputs).toHaveLength(0);
     const response = await externalQuery(f);
@@ -825,6 +1032,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         headers: bearer(userA),
       })
     ).json();
+    await assertExternalHandoffProvenance(handoff, f.result.origin);
     await app.inject({
       method: 'POST',
       url: `/trips/${f.trip.id}/execution/external-origins/${f.result.origin.id}/depart`,
@@ -881,6 +1089,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         headers: bearer(userA),
       })
     ).json();
+    await assertExternalHandoffProvenance(handoff, f.result.origin);
     expect(handoff).toMatchObject({
       readiness: 'READY',
       originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
@@ -1135,6 +1344,16 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         toNodeId: f.to.id,
       },
     });
+    await assertExternalHandoffProvenance(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+      result.origin,
+    );
     currentNow = new Date(currentNow.getTime() + 60_000);
     const key = randomUUID();
     const request = {
@@ -1745,6 +1964,16 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       query: null,
       externalQuery: { externalOriginId: result.origin.id },
     });
+    await assertExternalHandoffProvenance(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+      result.origin,
+    );
   });
   it('P5E2 5A: owner isolation covers candidate, confirm and departure including administrators', async () => {
     const f = await externalFixture();

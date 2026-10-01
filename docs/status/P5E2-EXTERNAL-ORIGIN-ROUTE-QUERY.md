@@ -116,3 +116,50 @@ No external Preview semantics, Adopt, E node/Place materialization, source edge 
 new route, delta v5 or external Undo. No GPS auto-confirm, arbitrary coordinate routing,
 mid-edge/onboard routing, real Hub Resolver, paid provider, automatic Query/Preview/Adopt,
 formal UI, Push, staging or production. F-05/F-06/F-07/F-08 remain open.
+
+## Blocking review repair — Handoff provenance
+
+Recommended model for this narrow repair: GPT-6 Sol / Medium; no Astra escalation.
+
+A Trip-level CURRENT external origin previously passed its own planning authorization
+and was exposed by another leg's reevaluation endpoint. Real PostgreSQL reproduction
+failed for both a different edge within A→B→C→D and a distinct ACTIVE route in the
+same Trip: the wrong requested leg received CONFIRMED_EXTERNAL_EXECUTION_ORIGIN.
+The aggregate supports two disjoint ACTIVE routes, so both scenarios are covered.
+
+External READY now also requires sourceTransportEdgeId = requested transportEdgeId,
+sourceGroundTransitLegExecutionId = requested leg.id, and sourceAdoptedRouteId =
+requested leg.adoptedRouteId. The check is local to Handoff; explicit external Query
+and shared planning authorization remain unchanged. A foreign CURRENT origin also cannot
+force the requested leg into external-origin fallback; its normal reevaluation
+logic continues. Healthy mismatched legs return NOT_REQUIRED in the regressions.
+
+Three focused PostgreSQL/API regressions cover same-route/different-edge,
+different-route, and a mismatched source leg execution ID despite matching
+edge/route IDs. Matching responses assert edge/route provenance and the persisted
+source leg ID. Both matching and mismatching Handoff calls leave Trip.version,
+snapshots, previews, routes, origins, immutable origin receipts and Ground Transit
+observation/transition history unchanged. Explicit external Query still succeeds
+after the mismatched Handoff. Existing positive Handoff tests and Compose also
+assert source edge/route and persisted leg identity.
+
+No schema or migration changes: still 22 migrations. No external Preview/Adopt,
+materialization, delta v5, external Undo or Batch 5B2 work.
+
+Repair cloud validation completed before updating Draft PR #35:
+
+- Frozen install; Prisma generate/validate; format/check; lint; full typecheck; build: PASS.
+- Unit: **53 files / 621 tests PASS**, including Worker regressions.
+- PostgreSQL 17 integration: **28 files / 407 tests PASS** (Persistence 19/79,
+  API 9/328). Repair-only focused regressions: **3/3 PASS**; Batch 5B1 focused:
+  **32/32 PASS**. Existing execution, source/status/metadata/version races and
+  owner/admin isolation remain green.
+- Compose: PASS, including persisted source provenance, external Query/Preview
+  boundary, existing suffix Adopt/Undo and API/Worker lifecycle/recovery.
+- P5B: **5 users / 200 requests PASS**; **0 isolation failures**, **0 unexpected 5xx**,
+  **0 network failures**. Median 396.34 ms, p95 665.55 ms, maximum 673.95 ms.
+- No migration changes; clean 22 and populated 21→22 migration tests remain green
+  in the full persistence suite.
+
+Independent final-HEAD CI will be recorded in PR #35 and the final report. Keep
+Draft, stop for review, and do not start Batch 5B2.

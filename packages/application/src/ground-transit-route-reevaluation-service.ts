@@ -157,6 +157,12 @@ export class GroundTransitRouteReevaluationService {
         transportEdgeId,
       );
       const externalOrigin = external.currentOrigin;
+      // Trip-level currentness is not provenance for the requested leg.
+      const matchesRequestedSource =
+        externalOrigin !== null &&
+        externalOrigin.sourceTransportEdgeId === transportEdgeId &&
+        externalOrigin.sourceGroundTransitLegExecutionId === leg.id &&
+        externalOrigin.sourceAdoptedRouteId === leg.adoptedRouteId;
       const externalSourceRoute =
         trip.adoptedRoutes?.find(
           (row) => row.id === externalOrigin?.sourceAdoptedRouteId,
@@ -167,6 +173,7 @@ export class GroundTransitRouteReevaluationService {
         ) ?? null;
       if (
         externalOrigin !== null &&
+        matchesRequestedSource &&
         externalSourceRoute !== null &&
         resolveExternalOriginRouteQueryAuthorization({
           origin: {
@@ -209,9 +216,10 @@ export class GroundTransitRouteReevaluationService {
         };
       }
       if (
-        external.candidate !== null ||
-        external.currentOrigin?.currentness === 'CURRENT' ||
-        external.availability === 'UNRESOLVED'
+        (externalOrigin?.currentness !== 'CURRENT' || matchesRequestedSource) &&
+        (external.candidate !== null ||
+          external.currentOrigin?.currentness === 'CURRENT' ||
+          external.availability === 'UNRESOLVED')
       ) {
         return {
           tripId,

@@ -218,9 +218,18 @@ export async function verifyExternalOriginChain({
   assert(
     handoffAfter.readiness === 'READY' &&
       handoffAfter.originBasis === 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN' &&
+      handoffAfter.sourceTransportEdgeId ===
+        result.origin.sourceTransportEdgeId &&
+      handoffAfter.adoptedRouteId === result.origin.sourceAdoptedRouteId &&
       handoffAfter.query === null &&
       handoffAfter.externalQuery?.externalOriginId === result.origin.id,
     'confirmed E did not expose externalQuery',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "GroundTransitLegExecution" WHERE "id"='${result.origin.sourceGroundTransitLegExecutionId}' AND "transportEdgeId"='${handoffAfter.sourceTransportEdgeId}' AND "adoptedRouteId"='${handoffAfter.adoptedRouteId}';`,
+    )) === '1',
+    'external Handoff source leg provenance invalid',
   );
   assert((await footprint()) === afterConfirmation, 'handoff wrote data');
   const { externalOriginId, ...externalRequest } = handoffAfter.externalQuery;

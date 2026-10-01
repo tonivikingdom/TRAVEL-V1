@@ -108,6 +108,7 @@ function adoptionError(
     | 'VERSION_CONFLICT'
     | 'IDEMPOTENCY_CONFLICT'
     | 'PREVIEW_STALE'
+    | 'PREVIEW_UNSUPPORTED'
     | 'PREVIEW_BLOCKED'
     | 'USER_ADJUSTMENT_REQUIRED'
     | 'FACT_PROTECTED'
@@ -133,6 +134,12 @@ function adoptionError(
         'PREVIEW_STALE',
         '路线预览已过期或不再满足当前安全条件。',
         409,
+      );
+    case 'PREVIEW_UNSUPPORTED':
+      return new ApplicationError(
+        'PREVIEW_UNSUPPORTED',
+        '当前版本尚不支持采用外部执行起点的路线预览。',
+        422,
       );
     case 'PREVIEW_BLOCKED':
       return new ApplicationError(

@@ -114,6 +114,7 @@ export type AdoptRoutePreviewResult =
         | 'VERSION_CONFLICT'
         | 'IDEMPOTENCY_CONFLICT'
         | 'PREVIEW_STALE'
+        | 'PREVIEW_UNSUPPORTED'
         | 'PREVIEW_BLOCKED'
         | 'USER_ADJUSTMENT_REQUIRED'
         | 'FACT_PROTECTED'
@@ -169,6 +170,20 @@ export interface RoutePlanningRepository {
     readonly policyVersion: string;
     readonly previewPayload: StoredRoutePreviewPayload;
     readonly previewHash: string;
+    readonly now: Date;
+    readonly createdAt: Date;
+    readonly expiresAt: Date;
+  }): Promise<CreateRoutePreviewResult>;
+  createExternalOriginPreview?(input: {
+    readonly ownerUserId: string;
+    readonly tripId: string;
+    readonly basisVersion: number;
+    readonly snapshotId: string;
+    readonly expectedCandidateHash: string;
+    readonly policyVersion: string;
+    readonly previewPayload: StoredRoutePreviewPayload;
+    readonly previewHash: string;
+    readonly sameHubWalkingLegIndexes?: readonly number[];
     readonly now: Date;
     readonly createdAt: Date;
     readonly expiresAt: Date;

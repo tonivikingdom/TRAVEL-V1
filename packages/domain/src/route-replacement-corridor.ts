@@ -1,4 +1,5 @@
-export type RouteReplacementScope = 'FULL_CORRIDOR' | 'SUFFIX';
+export type RouteReplacementScope =
+  'FULL_CORRIDOR' | 'SUFFIX' | 'EXTERNAL_ORIGIN';
 export interface CorridorNode {
   readonly id: string;
   readonly kind: string;
@@ -21,7 +22,7 @@ export interface CorridorRoute {
   readonly anchorToNodeId: string;
 }
 export interface RouteReplacementCorridor {
-  readonly replacementScope: RouteReplacementScope;
+  readonly replacementScope: Exclude<RouteReplacementScope, 'EXTERNAL_ORIGIN'>;
   readonly sourceAdoptedRouteId: string | null;
   readonly sourceRouteAnchorFromNodeId: string;
   readonly sourceRouteAnchorToNodeId: string;

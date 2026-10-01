@@ -1,8 +1,14 @@
 import {
+  buildExternalOriginPreviewPayload,
+  EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
+  hashRoutePreviewPayload,
+  systemClock,
+  type Clock,
   authorizeExternalOriginPlanning,
   externalRouteOriginSnapshot,
 } from '@travel/application';
 import { loadExternalOriginPlanningContext } from './prisma-external-execution-origin-repository.js';
+import { readTripAggregateRecord } from './prisma-trip-repository.js';
 import type {
   CreateRoutePreviewResult,
   AdoptRoutePreviewResult,
@@ -34,7 +40,10 @@ interface LockedTripRow {
 }
 
 export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
-  constructor(private readonly client: PrismaClient) {}
+  constructor(
+    private readonly client: PrismaClient,
+    private readonly clock: Clock = systemClock,
+  ) {}
 
   async saveCandidateSnapshots(input: {
     readonly ownerUserId: string;
@@ -204,6 +213,81 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       });
       return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
     });
+  }
+
+  async createExternalOriginPreview(
+    input: Parameters<
+      NonNullable<RoutePlanningRepository['createExternalOriginPreview']>
+    >[0],
+  ): Promise<CreateRoutePreviewResult> {
+    return this.client.$transaction(
+      async (transaction) => {
+        await lockOwner(transaction, input.ownerUserId);
+        const tripStatus = await lockTrip(transaction, input);
+        if (tripStatus === 'NOT_FOUND') return { status: tripStatus };
+        if (tripStatus !== 'SUCCESS') return { status: 'PREVIEW_STALE' };
+        const row = await transaction.routeCandidateSnapshot.findFirst({
+          where: {
+            id: input.snapshotId,
+            ownerUserId: input.ownerUserId,
+            tripId: input.tripId,
+          },
+        });
+        if (row === null) return { status: 'NOT_FOUND' };
+        const snapshot = toSnapshotRecord(row);
+        if (snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN')
+          return { status: 'PREVIEW_UNSUPPORTED' };
+        const now = new Date(
+          Math.max(input.now.getTime(), this.clock.now().getTime()),
+        );
+        if (
+          input.policyVersion !== EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION ||
+          snapshot.basisVersion !== input.basisVersion ||
+          snapshot.candidateHash !== input.expectedCandidateHash ||
+          input.expiresAt <= now ||
+          input.expiresAt > snapshot.expiresAt ||
+          hashRoutePreviewPayload(input.previewPayload) !== input.previewHash
+        )
+          return { status: 'PREVIEW_STALE' };
+        const trip = await readTripAggregateRecord(transaction, input);
+        const context = await loadExternalOriginPlanningContext(transaction, {
+          ...input,
+          externalOriginId: snapshot.origin.externalOriginId,
+        });
+        if (trip === null || context === null)
+          return { status: 'PREVIEW_STALE' };
+        let lockedPayload: StoredRoutePreviewPayload;
+        try {
+          lockedPayload = buildExternalOriginPreviewPayload({
+            trip,
+            snapshot,
+            context,
+            now,
+            sameHubWalkingLegIndexes: input.sameHubWalkingLegIndexes,
+          });
+        } catch {
+          return { status: 'PREVIEW_STALE' };
+        }
+        if (hashRoutePreviewPayload(lockedPayload) !== input.previewHash)
+          return { status: 'PREVIEW_STALE' };
+        const preview = await transaction.routePreview.create({
+          data: {
+            ownerUserId: input.ownerUserId,
+            tripId: input.tripId,
+            basisVersion: input.basisVersion,
+            candidateSnapshotId: input.snapshotId,
+            candidateHash: input.expectedCandidateHash,
+            policyVersion: input.policyVersion,
+            previewPayload: toJson(lockedPayload),
+            previewHash: input.previewHash,
+            createdAt: input.createdAt,
+            expiresAt: input.expiresAt,
+          },
+        });
+        return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
   }
 
   async findPreviewOwned(input: {

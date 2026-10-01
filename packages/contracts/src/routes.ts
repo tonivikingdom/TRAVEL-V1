@@ -170,7 +170,7 @@ export interface CreateRoutePreviewRequest {
 }
 
 export type RoutePreviewStatus =
-  'ACTIVE' | 'BLOCKED' | 'EXPIRED' | 'SUPERSEDED_POLICY';
+  'ACTIVE' | 'BLOCKED' | 'EXPIRED' | 'SUPERSEDED_POLICY' | 'ADOPT_UNSUPPORTED';
 
 export type RouteGroupingEvidence = 'SYSTEM_STRUCTURED' | 'USER_CONFIRMED';
 
@@ -228,6 +228,36 @@ export interface RoutePreviewDayProjectionPlanView {
   readonly roles: readonly ('SAME_DAY' | 'START' | 'OCCUPIED' | 'END')[];
 }
 
+/** A future plan only; no node, place, execution fact or transport is created. */
+export interface ExternalOriginReplacementView {
+  readonly replacementScope: 'EXTERNAL_ORIGIN';
+  readonly externalOriginId: string;
+  readonly sourceAdoptedRouteId: string;
+  readonly sourceTransportEdgeId: string;
+  readonly sourceGroundTransitLegExecutionId: string;
+  readonly sourceRouteAnchorFromNodeId: string;
+  readonly sourceRouteAnchorToNodeId: string;
+  readonly sourceDivergenceNodeId: string;
+  readonly destinationNodeId: string;
+  readonly preservedPrefixNodeIds: readonly string[];
+  readonly preservedPrefixTransportEdgeIds: readonly string[];
+  readonly replacementNodeIds: readonly string[];
+  readonly replacementTransportEdgeIds: readonly string[];
+  readonly materializedOrigin: RoutePreviewGeneratedNodePlanView & {
+    readonly ref: 'EXTERNAL_ORIGIN';
+    readonly action: 'CREATE';
+    readonly nodeId: null;
+    readonly kind: 'PLACE_VISIT';
+    readonly source: 'ROUTE_GENERATED';
+    readonly providerPlaceRef: null;
+    readonly autoReplaceable: true;
+    readonly userModifiedAt: null;
+    readonly evidence: 'USER_CONFIRMED';
+    readonly temporalValues: readonly never[];
+    readonly executionEvents: readonly never[];
+  };
+}
+
 export interface RoutePreviewView {
   readonly previewId: string;
   readonly tripId: string;
@@ -272,6 +302,8 @@ export interface RoutePreviewView {
       readonly currentNodeIds: readonly string[];
       readonly currentAdoptedRouteId: string | null;
     };
+    readonly externalOriginReplacement?: ExternalOriginReplacementView;
+    readonly archivableProviderActualTransportEdgeIds?: readonly string[];
     readonly nodesToCreate?: readonly RoutePreviewGeneratedNodePlanView[];
     readonly nodesToReuse?: readonly RoutePreviewGeneratedNodePlanView[];
     readonly nodesToRemove?: readonly RoutePreviewRemovedNodeView[];

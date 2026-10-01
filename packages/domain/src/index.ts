@@ -176,3 +176,9 @@ export {
 } from './external-execution-origin.js';
 
 export { resolveExternalOriginRouteQueryAuthorization } from './external-origin-route-query.js';
+
+export {
+  resolveExternalOriginReplacementCorridor,
+  classifyExternalReplacementTransportActual,
+  type ExternalOriginReplacementCorridor,
+} from './external-origin-replacement-corridor.js';

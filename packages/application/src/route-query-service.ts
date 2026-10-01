@@ -47,6 +47,7 @@ import {
 } from './route-snapshot.js';
 import {
   evaluateTripScheduleRecord,
+  externalRouteDestinationSchedule,
   orderedTripNodes,
 } from './schedule-evaluation.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
@@ -300,25 +301,7 @@ export class RouteQueryService {
     // The source corridor is being replanned from an external execution fact.
     // Its vehicle ACTUAL/fixed-service anchors cannot constrain departure at E.
     // Preserve the real destination and every downstream hard requirement.
-    const orderedNodes = orderedTripNodes(trip);
-    const destinationIndex = orderedNodes.findIndex(
-      (node) => node.id === input.toNodeId,
-    );
-    const retainedNodeIds = new Set(
-      orderedNodes.slice(destinationIndex).map((node) => node.id),
-    );
-    const schedule = evaluateTripScheduleRecord({
-      ...trip,
-      dayOccurrences: trip.dayOccurrences.map((day) => ({
-        ...day,
-        nodes: day.nodes.filter((node) => retainedNodeIds.has(node.id)),
-      })),
-      transportEdges: trip.transportEdges.filter(
-        (edge) =>
-          retainedNodeIds.has(edge.fromNodeId) &&
-          retainedNodeIds.has(edge.toNodeId),
-      ),
-    });
+    const { schedule } = externalRouteDestinationSchedule(trip, input.toNodeId);
     if (schedule.conflicts.length > 0)
       throw new ApplicationError(
         'CONSTRAINT_CONFLICT',

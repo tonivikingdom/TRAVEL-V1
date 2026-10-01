@@ -90,6 +90,7 @@ export type {
   RoutePreviewLocationView,
   RoutePreviewSegmentView,
   RoutePreviewView,
+  ExternalOriginReplacementView,
   RoutePreviewStatus,
   RouteGroupingEvidence,
   RoutePreviewGeneratedNodePlanView,

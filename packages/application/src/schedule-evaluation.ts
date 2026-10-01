@@ -107,3 +107,31 @@ function toDomainIntent(record: UserTimeIntentRecord): ScheduleUserTimeIntent {
   }
   throw new Error('UserTimeIntent persistence invariant is broken');
 }
+
+/** Retain the real destination/downstream constraints, excluding abandoned
+ * corridor vehicle facts and its planned services. Shared by external Query/Preview. */
+export function externalRouteDestinationSchedule(
+  trip: TripAggregateRecord,
+  toNodeId: string,
+) {
+  const nodes = orderedTripNodes(trip);
+  const destinationIndex = nodes.findIndex((node) => node.id === toNodeId);
+  const retainedNodeIds = new Set(
+    destinationIndex < 0
+      ? []
+      : nodes.slice(destinationIndex).map((node) => node.id),
+  );
+  const retained = {
+    ...trip,
+    dayOccurrences: trip.dayOccurrences.map((day) => ({
+      ...day,
+      nodes: day.nodes.filter((node) => retainedNodeIds.has(node.id)),
+    })),
+    transportEdges: trip.transportEdges.filter(
+      (edge) =>
+        retainedNodeIds.has(edge.fromNodeId) &&
+        retainedNodeIds.has(edge.toNodeId),
+    ),
+  };
+  return { trip: retained, schedule: evaluateTripScheduleRecord(retained) };
+}

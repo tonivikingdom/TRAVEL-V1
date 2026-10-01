@@ -234,7 +234,16 @@ export async function verifyExternalOriginChain({
   assert((await footprint()) === afterConfirmation, 'handoff wrote data');
   const { externalOriginId, ...externalRequest } = handoffAfter.externalQuery;
   const externalPath = `/trips/${trip.id}/execution/external-origins/${externalOriginId}/routes/query`;
-  const queried = await apiJson(externalPath, 'POST', externalRequest);
+  // An explicit user planning request for a future departure: Preview must
+  // reject candidates whose departure has already passed by its own server now.
+  const queried = await apiJson(externalPath, 'POST', {
+    ...externalRequest,
+    hint: {
+      type: 'DEPART_AT',
+      instant: new Date(Date.now() + 5 * 60_000).toISOString(),
+      timeZone: result.origin.timeZone,
+    },
+  });
   assert(
     queried.candidates.length > 0 &&
       queried.externalOriginId === result.origin.id,
@@ -253,8 +262,95 @@ export async function verifyExternalOriginChain({
     )) === '1',
     'external snapshot origin shape invalid',
   );
+  const externalCandidate = queried.candidates[0];
+  const firstEndpoint = externalCandidate.legs[0].from;
+  assert(
+    firstEndpoint.latitude === result.origin.latitude &&
+      firstEndpoint.longitude === result.origin.longitude,
+    'synthetic candidate does not start at trusted external E',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "RouteCandidateSnapshot" s JOIN "ItineraryNode" n ON n."id"=s."toNodeId" JOIN "Place" p ON p."id"=n."placeId" WHERE s."id"='${externalCandidate.candidateSnapshotId}' AND (s."candidatePayload"->'legs'->-1->'to'->>'latitude')::numeric=p."latitude" AND (s."candidatePayload"->'legs'->-1->'to'->>'longitude')::numeric=p."longitude";`,
+    )) === '1',
+    'synthetic candidate does not end at trusted itinerary D',
+  );
+  const beforePreview = await footprint();
+  const externalPreview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
+    basisVersion: result.resultingTripVersion,
+    candidateSnapshotId: queried.candidates[0].candidateSnapshotId,
+  });
+  const plan = externalPreview.changeSummary.externalOriginReplacement;
+  assert(
+    externalPreview.status === 'ADOPT_UNSUPPORTED' &&
+      externalPreview.adoptable === false,
+    'external Preview must remain non-adoptable',
+  );
+  assert(
+    plan?.replacementScope === 'EXTERNAL_ORIGIN' &&
+      plan.externalOriginId === result.origin.id &&
+      plan.sourceTransportEdgeId === edgeId &&
+      plan.sourceGroundTransitLegExecutionId ===
+        result.origin.sourceGroundTransitLegExecutionId &&
+      plan.sourceAdoptedRouteId === result.origin.sourceAdoptedRouteId,
+    'external plan source provenance invalid',
+  );
+  assert(
+    plan.sourceDivergenceNodeId === a.id &&
+      JSON.stringify(plan.preservedPrefixNodeIds) === JSON.stringify([a.id]) &&
+      plan.preservedPrefixTransportEdgeIds.length === 0 &&
+      JSON.stringify(plan.replacementTransportEdgeIds) ===
+        JSON.stringify([edgeId]),
+    'first-edge external plan must permit a one-node prefix',
+  );
+  assert(
+    plan.materializedOrigin.ref === 'EXTERNAL_ORIGIN' &&
+      plan.materializedOrigin.nodeId === null &&
+      plan.materializedOrigin.action === 'CREATE' &&
+      plan.materializedOrigin.evidence === 'USER_CONFIRMED' &&
+      plan.materializedOrigin.temporalValues.length === 0 &&
+      plan.materializedOrigin.executionEvents.length === 0 &&
+      plan.materializedOrigin.providerHubRef === result.origin.providerHubRef,
+    'future E materialization plan invalid',
+  );
+  assert(
+    externalPreview.changeSummary.routeCorridor === undefined &&
+      externalPreview.changeSummary.proposedSegments[0].fromRef ===
+        'EXTERNAL_ORIGIN' &&
+      externalPreview.changeSummary.proposedSegments.at(-1).toRef === 'TO_NODE',
+    'external endpoints masqueraded as ordinary nodes',
+  );
+  assert(
+    externalPreview.changeSummary.archivableProviderActualTransportEdgeIds.includes(
+      edgeId,
+    ) &&
+      !externalPreview.changeSummary.protectedBlockingTransportEdgeIds.includes(
+        edgeId,
+      ),
+    'vehicle ACTUAL was incorrectly protected in external Preview',
+  );
+  const afterPreview = JSON.parse(await footprint());
+  const beforePlan = JSON.parse(beforePreview);
+  assert(
+    afterPreview.previews === beforePlan.previews + 1,
+    'Preview did not create exactly one planning row',
+  );
+  afterPreview.previews = beforePlan.previews;
+  assert(
+    JSON.stringify(afterPreview) === JSON.stringify(beforePlan),
+    'Preview changed formal Trip',
+  );
+  const fetchedPreview = await apiJson(
+    `/trips/${trip.id}/previews/${externalPreview.previewId}`,
+    'GET',
+  );
+  assert(
+    fetchedPreview.status === 'ADOPT_UNSUPPORTED',
+    'external GET was superseded by node policy',
+  );
+  const beforeAdopt = await footprint();
   const rejection = await fetch(
-    `http://127.0.0.1:${apiPort}/trips/${trip.id}/previews`,
+    `http://127.0.0.1:${apiPort}/trips/${trip.id}/previews/${externalPreview.previewId}/adopt`,
     {
       method: 'POST',
       headers: {
@@ -262,16 +358,21 @@ export async function verifyExternalOriginChain({
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        basisVersion: result.resultingTripVersion,
-        candidateSnapshotId: queried.candidates[0].candidateSnapshotId,
+        baseTripVersion: result.resultingTripVersion,
+        idempotencyKey: randomUUID(),
       }),
     },
   );
   assert(
     rejection.status === 422 &&
       (await rejection.json()).error?.code === 'PREVIEW_UNSUPPORTED',
-    'external Preview did not return controlled unsupported',
+    'external Adopt did not return controlled unsupported',
   );
+  assert(
+    (await footprint()) === beforeAdopt,
+    'rejected external Adopt wrote data',
+  );
+  previous.previews = beforePlan.previews + 1;
   previous.snapshots = snapshotCount;
 
   const departed = await apiJson(
@@ -321,11 +422,16 @@ export async function verifyExternalOriginChain({
     departure: 'DEPARTED',
     itineraryMutationCount: 0,
     placeMutationCount: 0,
-    previewMutationCount: 0,
+    previewMutationCount: 1,
+    formalTripPreviewMutations: 0,
+    externalReplacementScope: 'EXTERNAL_ORIGIN',
+    oneNodeFirstEdgePrefix: true,
+    providerActualArchivable: true,
     adoptMutationCount: 0,
     externalRouteQuery: true,
     externalSnapshotCount: queried.candidates.length,
-    externalPreview: 'PREVIEW_UNSUPPORTED',
+    externalPreview: 'ADOPT_UNSUPPORTED',
+    externalAdopt: 'PREVIEW_UNSUPPORTED',
     departedExternalQuery: 'ROUTE_QUERY_UNSUPPORTED',
     automaticQuery: false,
     automaticPreview: false,

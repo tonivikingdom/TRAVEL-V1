@@ -131,11 +131,7 @@ export class PrismaTripRepository implements TripRepository {
     readonly ownerUserId: string;
     readonly tripId: string;
   }): Promise<TripAggregateRecord | null> {
-    const trip = await this.client.trip.findFirst({
-      where: { id: input.tripId, ownerUserId: input.ownerUserId },
-      include: tripInclude,
-    });
-    return trip === null ? null : toTripRecord(trip);
+    return readTripAggregateRecord(this.client, input);
   }
 
   async updateMetadata(input: {
@@ -1577,4 +1573,15 @@ class TripTransactionAbort extends Error {
     super(status);
     this.name = 'TripTransactionAbort';
   }
+}
+
+export async function readTripAggregateRecord(
+  client: PrismaClient | Prisma.TransactionClient,
+  input: { ownerUserId: string; tripId: string },
+): Promise<TripAggregateRecord | null> {
+  const trip = await client.trip.findFirst({
+    where: { id: input.tripId, ownerUserId: input.ownerUserId },
+    include: tripInclude,
+  });
+  return trip === null ? null : toTripRecord(trip);
 }

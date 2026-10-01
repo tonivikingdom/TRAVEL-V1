@@ -204,3 +204,8 @@ export {
 export type { ExternalOriginPlanningContext } from './external-execution-origin-ports.js';
 
 export { hashExternalRouteCandidateSnapshot } from './route-snapshot.js';
+
+export {
+  buildExternalOriginPreviewPayload,
+  EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
+} from './external-origin-route-preview.js';

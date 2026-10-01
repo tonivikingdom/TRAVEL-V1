@@ -21,6 +21,7 @@ import {
   ROUTE_QUERY_LOOKBACK_SECONDS,
   VALUE_EFFECTIVE_TIME_BASIS_POINTS,
   validateRouteCandidate,
+  validateExternalRouteCandidateEndpoints,
   type DwellPlanningAssessment,
   type NormalizedRouteCandidate,
   type RouteLocation,
@@ -47,6 +48,7 @@ import {
 } from './route-snapshot.js';
 import {
   evaluateTripScheduleRecord,
+  externalRouteDestinationSchedule,
   orderedTripNodes,
 } from './schedule-evaluation.js';
 import { resolveCurrentRouteCorridor } from './route-corridor.js';
@@ -300,25 +302,7 @@ export class RouteQueryService {
     // The source corridor is being replanned from an external execution fact.
     // Its vehicle ACTUAL/fixed-service anchors cannot constrain departure at E.
     // Preserve the real destination and every downstream hard requirement.
-    const orderedNodes = orderedTripNodes(trip);
-    const destinationIndex = orderedNodes.findIndex(
-      (node) => node.id === input.toNodeId,
-    );
-    const retainedNodeIds = new Set(
-      orderedNodes.slice(destinationIndex).map((node) => node.id),
-    );
-    const schedule = evaluateTripScheduleRecord({
-      ...trip,
-      dayOccurrences: trip.dayOccurrences.map((day) => ({
-        ...day,
-        nodes: day.nodes.filter((node) => retainedNodeIds.has(node.id)),
-      })),
-      transportEdges: trip.transportEdges.filter(
-        (edge) =>
-          retainedNodeIds.has(edge.fromNodeId) &&
-          retainedNodeIds.has(edge.toNodeId),
-      ),
-    });
+    const { schedule } = externalRouteDestinationSchedule(trip, input.toNodeId);
     if (schedule.conflicts.length > 0)
       throw new ApplicationError(
         'CONSTRAINT_CONFLICT',
@@ -371,6 +355,17 @@ export class RouteQueryService {
       basisVersion,
       arrival: null,
       fromNode: null,
+      validateEndpoints: (candidate) =>
+        validateExternalRouteCandidateEndpoints(
+          candidate,
+          { ...originSnapshot, providerPlaceRef: null },
+          {
+            latitude: destination.latitude,
+            longitude: destination.longitude,
+            providerPlaceRef: destinationNode.providerPlaceRef ?? null,
+            providerHubRef: destinationNode.providerHubRef ?? null,
+          },
+        ),
       hash: (facts) =>
         hashExternalRouteCandidateSnapshot({
           ...facts,
@@ -408,7 +403,9 @@ export class RouteQueryService {
     fromNode,
     hash,
     save,
+    validateEndpoints,
   }: {
+    validateEndpoints?: (candidate: NormalizedRouteCandidate) => boolean;
     origin: RouteProviderLocationInput;
     destination: RouteProviderLocationInput;
     time: NormalizedQueryTime;
@@ -465,6 +462,8 @@ export class RouteQueryService {
         throw invalidProviderResponse();
       }
       candidateIds.add(candidate.candidateId);
+      if (validateEndpoints && !validateEndpoints(candidate))
+        throw invalidProviderResponse();
       const validation = validateRouteCandidate(candidate, {
         earliestDeparture: time.earliestDeparture,
         latestArrival: time.latestArrival,

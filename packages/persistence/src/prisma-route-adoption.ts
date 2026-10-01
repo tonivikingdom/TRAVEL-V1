@@ -142,9 +142,6 @@ async function executeAdoption(
   `);
   const lockedTrip = tripRows[0];
   if (lockedTrip === undefined) return { status: 'NOT_FOUND' };
-  if (lockedTrip.version !== input.baseTripVersion) {
-    return { status: 'VERSION_CONFLICT' };
-  }
 
   const preview = await transaction.routePreview.findFirst({
     where: {
@@ -154,6 +151,15 @@ async function executeAdoption(
     },
     include: { candidateSnapshot: true },
   });
+  if (
+    preview !== null &&
+    (preview.candidateSnapshot.originKind === 'EXTERNAL_EXECUTION_ORIGIN' ||
+      preview.policyVersion === 'route-external-origin-preview-v1')
+  )
+    return { status: 'PREVIEW_UNSUPPORTED' };
+  if (lockedTrip.version !== input.baseTripVersion) {
+    return { status: 'VERSION_CONFLICT' };
+  }
   if (preview === null) return { status: 'NOT_FOUND' };
   if (
     preview.candidateSnapshot.fromNodeId === null ||

@@ -13,6 +13,9 @@ import {
   GroundTransitRouteReevaluationService,
   type GroundTransitProvider,
   hashRoutePreviewPayload,
+  hashRouteCandidateSnapshot,
+  hashExternalRouteCandidateSnapshot,
+  buildExternalOriginPreviewPayload,
   RouteAdoptionService,
   RoutePreviewService,
   RouteQueryService,
@@ -66,6 +69,9 @@ import {
 } from 'vitest';
 
 import { buildApi } from '../src/app.js';
+type JsonInput = Parameters<
+  ManagedPrismaClient['client']['routePreview']['create']
+>[0]['data']['previewPayload'];
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (databaseUrl === undefined || databaseUrl.trim() === '') {
@@ -83,6 +89,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   let providerInputs: RouteProviderQueryInput[];
   let providerResult: RouteProviderResult;
   let currentNow: Date;
+  let externalEndpointFault:
+    'origin' | 'destination' | 'hub' | 'name' | undefined;
   let providerHook: (() => Promise<void>) | undefined;
   let tripRepository: PrismaTripRepository;
   let hubResolver: GroundTransitHubResolver;
@@ -102,6 +110,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     providerInputs = [];
     currentNow = NOW;
     providerHook = undefined;
+    externalEndpointFault = undefined;
     providerResult = {
       status: 'SUCCESS',
       candidates: [candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z')],
@@ -125,6 +134,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   ): FastifyInstance {
     const routePlanningRepository = new PrismaRoutePlanningRepository(
       managed.client,
+      { now: () => currentNow },
     );
     const groundTransitRepository = new PrismaGroundTransitRepository(
       managed.client,
@@ -167,6 +177,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         tripRepository,
         routePlanningRepository,
         {
+          externalOrigins: new PrismaExternalExecutionOriginRepository(
+            managed.client,
+          ),
           previewTtlSeconds: 600,
           clock: { now: () => currentNow },
         },
@@ -351,6 +364,51 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     await managed.close();
   });
 
+  // This test adapter returns the requested endpoints, like the synthetic production adapter.
+  // Fault injection deliberately contradicts them for malformed-response regressions.
+  function externalProviderResult(
+    input: RouteProviderQueryInput,
+  ): RouteProviderResult {
+    if (providerResult.status !== 'SUCCESS') return providerResult;
+    return {
+      ...providerResult,
+      candidates: providerResult.candidates.map((candidate) => ({
+        ...candidate,
+        legs: candidate.legs.map((leg, index) => ({
+          ...leg,
+          from:
+            index === 0
+              ? {
+                  ...input.origin,
+                  providerPlaceRef: null,
+                  providerHubRef: null,
+                  ...(externalEndpointFault === 'origin'
+                    ? { latitude: input.origin.latitude! + 1 }
+                    : {}),
+                  ...(externalEndpointFault === 'hub'
+                    ? { providerHubRef: 'synthetic:wrong-hub' }
+                    : {}),
+                  ...(externalEndpointFault === 'name'
+                    ? { latitude: null, longitude: null }
+                    : {}),
+                }
+              : leg.from,
+          to:
+            index === candidate.legs.length - 1
+              ? {
+                  ...input.destination,
+                  providerPlaceRef: null,
+                  providerHubRef: null,
+                  ...(externalEndpointFault === 'destination'
+                    ? { longitude: input.destination.longitude! + 1 }
+                    : {}),
+                }
+              : leg.to,
+        })),
+      })),
+    };
+  }
+
   async function externalFixture(
     changes: Parameters<typeof groundSequence>[0] = ['SHORT_TURN'],
   ) {
@@ -360,7 +418,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       new SyntheticRouteProvider(async (input) => {
         providerInputs.push(input);
         await providerHook?.();
-        return providerResult;
+        return externalProviderResult(input);
       }),
       groundSequence(changes),
     );
@@ -507,6 +565,1074 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     };
   }
+  async function externalPreviewFixture(
+    sourceIndex = 1,
+    changes: Parameters<typeof groundSequence>[0] = ['SHORT_TURN'],
+  ) {
+    const f = await suffixFixture(false, false, false);
+    currentNow = new Date('2030-10-01T10:29:00Z');
+    const source =
+      await managed.client.groundTransitLegExecution.findFirstOrThrow({
+        where: {
+          adoptedRouteId: f.first.operationReceipt.adoptedRouteId,
+          legIndex: sourceIndex,
+        },
+      });
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(async (input) => {
+        providerInputs.push(input);
+        await providerHook?.();
+        return externalProviderResult(input);
+      }),
+      groundSequence(changes),
+    );
+    const base = `/trips/${f.first.trip.id}/execution/ground-transit/${source.transportEdgeId}`;
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: `${base}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refreshed.statusCode, refreshed.body).toBe(200);
+    const candidateView = (
+      await app.inject({
+        method: 'GET',
+        url: `${base}/external-origin`,
+        headers: bearer(userA),
+      })
+    ).json<ExternalOriginResponse>();
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: `${base}/external-origin/confirm`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: await readVersion(f.first.trip.id),
+        candidateRef: candidateView.candidate!.candidateRef,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    const origin = confirmed.json<ExternalOriginMutationResponse>().origin;
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate(
+          '2030-10-01T10:30:00Z',
+          '2030-10-01T11:00:00Z',
+          'Asia/Tokyo',
+          'UTC',
+        ),
+      ],
+    };
+    const queryResult = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.first.trip.id}/execution/external-origins/${origin.id}/routes/query`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: await readVersion(f.first.trip.id),
+        toNodeId: f.D.id,
+      },
+    });
+    expect(queryResult.statusCode, queryResult.body).toBe(200);
+    const snapshotId = queryResult.json().candidates[0]
+      .candidateSnapshotId as string;
+    return { ...f, tripId: f.first.trip.id, source, origin, base, snapshotId };
+  }
+  async function previewFormalState(tripId: string) {
+    const state = await externalDurableState(tripId);
+    const { routePreviews: _previews, ...planning } = state.footprint.planning;
+    void _previews;
+    return {
+      ...state,
+      footprint: { ...state.footprint, planning },
+      jobs: await managed.client.job.findMany({ orderBy: { id: 'asc' } }),
+    };
+  }
+  async function previewFromExternalFixture(
+    f: Awaited<ReturnType<typeof externalPreviewFixture>>,
+    identity = userA,
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: `/trips/${f.tripId}/previews`,
+      headers: bearer(identity),
+      payload: {
+        basisVersion: await readVersion(f.tripId),
+        candidateSnapshotId: f.snapshotId,
+      },
+    });
+  }
+
+  it.each([0, 1, 2])(
+    'P5E2 5B2A: first/middle/last source edge %s has correct replacement plan and zero formal footprint',
+    async (sourceIndex) => {
+      const f = await externalPreviewFixture(sourceIndex);
+      const ordered = [f.A.id, f.B.id, f.C.id, f.D.id];
+      const edges = await managed.client.transportEdge.findMany({
+        where: { tripId: f.tripId },
+      });
+      const edgeIds = ordered
+        .slice(0, -1)
+        .map((id) => edges.find((edge) => edge.fromNodeId === id)!.id);
+      const before = await previewFormalState(f.tripId);
+      const previewCount = await managed.client.routePreview.count({
+        where: { tripId: f.tripId },
+      });
+      const response = await previewFromExternalFixture(f);
+      expect(response.statusCode, response.body).toBe(201);
+      const preview = response.json<RoutePreviewView>();
+      expect(preview).toMatchObject({
+        policyVersion: 'route-external-origin-preview-v1',
+        status: 'ADOPT_UNSUPPORTED',
+        adoptable: false,
+        currentConnection: {
+          fromNodeId: ordered[sourceIndex],
+          toNodeId: ordered[sourceIndex + 1],
+          state: 'ACTIVE',
+          transport: { id: f.source.transportEdgeId },
+        },
+      });
+      expect(preview.changeSummary.routeCorridor).toBeUndefined();
+      expect(preview.changeSummary.externalOriginReplacement).toMatchObject({
+        replacementScope: 'EXTERNAL_ORIGIN',
+        externalOriginId: f.origin.id,
+        sourceAdoptedRouteId: f.source.adoptedRouteId,
+        sourceTransportEdgeId: f.source.transportEdgeId,
+        sourceGroundTransitLegExecutionId: f.source.id,
+        sourceRouteAnchorFromNodeId: f.A.id,
+        sourceRouteAnchorToNodeId: f.D.id,
+        sourceDivergenceNodeId: ordered[sourceIndex],
+        destinationNodeId: f.D.id,
+        preservedPrefixNodeIds: ordered.slice(0, sourceIndex + 1),
+        preservedPrefixTransportEdgeIds: edgeIds.slice(0, sourceIndex),
+        replacementNodeIds: ordered.slice(sourceIndex),
+        replacementTransportEdgeIds: edgeIds.slice(sourceIndex),
+        materializedOrigin: {
+          ref: 'EXTERNAL_ORIGIN',
+          action: 'CREATE',
+          nodeId: null,
+          kind: 'PLACE_VISIT',
+          source: 'ROUTE_GENERATED',
+          autoReplaceable: true,
+          userModifiedAt: null,
+          evidence: 'USER_CONFIRMED',
+          provider: 'SYNTHETIC',
+          providerPlaceRef: null,
+          providerHubRef: f.origin.providerHubRef,
+          localDate: '2030-10-01',
+          location: {
+            name: f.origin.name,
+            latitude: f.origin.latitude,
+            longitude: f.origin.longitude,
+          },
+          temporalValues: [],
+          executionEvents: [],
+        },
+      });
+      expect(
+        preview.changeSummary.nodesToRemove?.map((node) => node.nodeId),
+      ).toEqual(ordered.slice(sourceIndex + 1, -1));
+      expect(preview.changeSummary.proposedSegments[0]!.fromRef).toBe(
+        'EXTERNAL_ORIGIN',
+      );
+      expect(preview.changeSummary.proposedSegments.at(-1)!.toRef).toBe(
+        'TO_NODE',
+      );
+      expect(
+        preview.changeSummary.proposedSegments.some(
+          (segment) => segment.fromRef === 'FROM_NODE',
+        ),
+      ).toBe(false);
+      expect(preview.changeSummary.requiredUserAdjustments).toEqual([]);
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+      expect(
+        await managed.client.routePreview.count({
+          where: { tripId: f.tripId },
+        }),
+      ).toBe(previewCount + 1);
+      const fetched = await app.inject({
+        method: 'GET',
+        url: `/trips/${f.tripId}/previews/${preview.previewId}`,
+        headers: bearer(userA),
+      });
+      expect(fetched.json()).toEqual(preview);
+      const rejected = await adopt(
+        userA,
+        { ...f.first.trip, version: preview.basisVersion },
+        preview.previewId,
+        'synthetic-external-adopt-unsupported',
+      );
+      expect(rejected.statusCode, rejected.body).toBe(422);
+      expect(rejected.json()).toMatchObject({
+        error: { code: 'PREVIEW_UNSUPPORTED' },
+      });
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
+  it.each([
+    'PROVIDER_OBSERVATION',
+    'USER_VALUE',
+    'EXECUTION_OBSERVATION',
+    'DERIVED',
+    'SYSTEM_SUGGESTION',
+    'ADOPTED_TRANSPORT_FACT',
+  ] as const)(
+    'P5E2 5B2A: suffix transport ACTUAL %s is classified without mutation',
+    async (sourceKind) => {
+      const f = await externalPreviewFixture();
+      await managed.client.temporalValue.create({
+        data: {
+          transportEdgeId: f.source.transportEdgeId,
+          layer: 'ACTUAL',
+          pointKind: 'DEPARTURE',
+          instant: new Date('2030-10-01T10:20:00Z'),
+          timeZone: 'UTC',
+          sourceKind,
+        },
+      });
+      // Executed prefix facts never block the abandoned source suffix.
+      await managed.client.temporalValue.create({
+        data: {
+          transportEdgeId: f.prefix.id,
+          layer: 'ACTUAL',
+          pointKind: 'ARRIVAL',
+          instant: new Date('2030-10-01T10:20:00Z'),
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      });
+      const before = await previewFormalState(f.tripId);
+      const response = await previewFromExternalFixture(f);
+      expect(response.statusCode, response.body).toBe(201);
+      const preview = response.json<RoutePreviewView>();
+      const vehicle = sourceKind === 'PROVIDER_OBSERVATION';
+      expect(preview.status).toBe(vehicle ? 'ADOPT_UNSUPPORTED' : 'BLOCKED');
+      expect(preview.adoptable).toBe(false);
+      expect(
+        preview.changeSummary.archivableProviderActualTransportEdgeIds,
+      ).toEqual(vehicle ? [f.source.transportEdgeId] : []);
+      expect(preview.changeSummary.protectedBlockingTransportEdgeIds).toEqual(
+        vehicle ? [] : [f.source.transportEdgeId],
+      );
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
+  it.each([
+    'node-actual',
+    'note',
+    'time-intent',
+    'auto-replaceable',
+    'user-modified',
+    'anchor',
+    'retained-snapshot',
+    'retained-receipt',
+  ] as const)(
+    'P5E2 5B2A: generated suffix %s protection is preserved',
+    async (kind) => {
+      const f = await externalPreviewFixture();
+      if (kind === 'node-actual')
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.C.id,
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: new Date('2030-10-01T10:40:00Z'),
+            timeZone: 'UTC',
+            sourceKind: 'EXECUTION_OBSERVATION',
+          },
+        });
+      else if (kind === 'note')
+        await managed.client.itineraryNode.update({
+          where: { id: f.C.id },
+          data: { note: 'SYNTHETIC user content' },
+        });
+      else if (kind === 'auto-replaceable')
+        await managed.client.itineraryNode.update({
+          where: { id: f.C.id },
+          data: { autoReplaceable: false },
+        });
+      else if (kind === 'user-modified')
+        await managed.client.itineraryNode.update({
+          where: { id: f.C.id },
+          data: { userModifiedAt: currentNow },
+        });
+      else if (kind === 'time-intent')
+        await managed.client.userTimeIntent.create({
+          data: {
+            nodeId: f.C.id,
+            tripId: f.tripId,
+            kind: 'MIN_DWELL',
+            operator: 'MINIMUM',
+            durationSeconds: 60,
+            locked: true,
+          },
+        });
+      else
+        await retainExternalPreviewNode(
+          f,
+          kind === 'retained-receipt'
+            ? 'receipt'
+            : kind === 'retained-snapshot'
+              ? 'snapshot'
+              : 'anchor',
+        );
+      const before = await previewFormalState(f.tripId);
+      const response = await previewFromExternalFixture(f);
+      expect(response.statusCode, response.body).toBe(201);
+      const preview = response.json<RoutePreviewView>();
+      expect(preview.status).toBe('BLOCKED');
+      expect(preview.changeSummary.protectedBlockingNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ nodeId: f.C.id, protected: true }),
+        ]),
+      );
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
+  async function retainExternalPreviewNode(
+    f: Awaited<ReturnType<typeof externalPreviewFixture>>,
+    kind: 'anchor' | 'snapshot' | 'receipt',
+  ) {
+    const sourceRoute = await managed.client.adoptedRoute.findUniqueOrThrow({
+      where: { id: f.source.adoptedRouteId },
+    });
+    const snapshot =
+      await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+        where: { id: sourceRoute.candidateSnapshotId },
+      });
+    const { externalOriginSnapshot: _unusedEvidence, ...nodeSnapshot } =
+      snapshot;
+    void _unusedEvidence;
+    const retained = await managed.client.routeCandidateSnapshot.create({
+      data: {
+        ...nodeSnapshot,
+        candidatePayload: snapshot.candidatePayload as JsonInput,
+        queryTimeCondition: snapshot.queryTimeCondition as JsonInput,
+        id: randomUUID(),
+        fromNodeId: f.C.id,
+      },
+    });
+    if (kind !== 'snapshot') {
+      const sourcePreview = await managed.client.routePreview.findUniqueOrThrow(
+        { where: { id: sourceRoute.sourcePreviewId } },
+      );
+      const preview = await managed.client.routePreview.create({
+        data: {
+          ...sourcePreview,
+          previewPayload: sourcePreview.previewPayload as JsonInput,
+          id: randomUUID(),
+          candidateSnapshotId: kind === 'receipt' ? retained.id : snapshot.id,
+        },
+      });
+      if (kind === 'receipt') {
+        const receipt = await managed.client.operationReceipt.findUniqueOrThrow(
+          { where: { id: f.first.operationReceipt.id } },
+        );
+        await managed.client.operationReceipt.create({
+          data: {
+            ...receipt,
+            delta: receipt.delta as JsonInput,
+            id: randomUUID(),
+            idempotencyKey: randomUUID(),
+            previewId: preview.id,
+          },
+        });
+      } else
+        await managed.client.adoptedRoute.create({
+          data: {
+            ...sourceRoute,
+            id: randomUUID(),
+            status: 'UNDONE',
+            anchorFromNodeId: f.C.id,
+            sourcePreviewId: preview.id,
+            candidateSnapshotId: snapshot.id,
+          },
+        });
+    } else {
+      // A historical AdoptedRoute retaining a snapshot protects its dependent node.
+      await managed.client.adoptedRoute.create({
+        data: {
+          ...sourceRoute,
+          id: randomUUID(),
+          status: 'REPLACED',
+          sourcePreviewId: await externalPreviewCopySourcePreview(f),
+          candidateSnapshotId: retained.id,
+        },
+      });
+    }
+  }
+
+  it.each([
+    'DEPARTED',
+    'SUPERSEDED',
+    'INVALIDATED',
+    'CONFLICT',
+    'REPLACED',
+    'UNDONE',
+    'missing-edge',
+    'wrong-edge',
+    'MANUAL-edge',
+    'leg-id',
+    'leg-route',
+    'leg-trip',
+    'metadata',
+    'past-departure',
+    'TTL',
+    'provider-TTL',
+    'candidate-hash',
+    'legacy-hash',
+    'timezone',
+  ] as const)(
+    'P5E2 5B2A: %s rejects external Preview as stale before persistence',
+    async (kind) => {
+      const f = await externalPreviewFixture();
+      if (kind === 'DEPARTED')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.origin.id },
+          data: { status: 'DEPARTED', departedAt: currentNow },
+        });
+      else if (kind === 'INVALIDATED')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.origin.id },
+          data: { status: 'INVALIDATED', invalidatedAt: currentNow },
+        });
+      else if (kind === 'SUPERSEDED') {
+        currentNow = new Date(currentNow.getTime() + 60000);
+        await manualExecution(
+          { ...f.first.trip, version: await readVersion(f.tripId) },
+          f.A.id,
+          'MANUAL_ARRIVAL',
+          currentNow.toISOString(),
+        );
+      } else if (kind === 'CONFLICT') {
+        const row =
+          await managed.client.externalExecutionOrigin.findUniqueOrThrow({
+            where: { id: f.origin.id },
+          });
+        await managed.client.externalExecutionOrigin.create({
+          data: { ...row, id: randomUUID() },
+        });
+      } else if (kind === 'REPLACED' || kind === 'UNDONE')
+        await managed.client.adoptedRoute.update({
+          where: { id: f.source.adoptedRouteId },
+          data: { status: kind },
+        });
+      else if (kind === 'missing-edge')
+        await managed.client.transportEdge.delete({
+          where: { id: f.source.transportEdgeId },
+        });
+      else if (kind === 'wrong-edge')
+        await managed.client.transportEdge.update({
+          where: { id: f.source.transportEdgeId },
+          data: { adoptedRouteId: await externalPreviewHistoricalRoute(f) },
+        });
+      else if (kind === 'MANUAL-edge')
+        await managed.client.transportEdge.update({
+          where: { id: f.source.transportEdgeId },
+          data: {
+            source: 'MANUAL',
+            adoptedRouteId: null,
+            provider: null,
+            providerRef: null,
+          },
+        });
+      else if (kind === 'leg-id')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.origin.id },
+          data: { sourceGroundTransitLegExecutionId: randomUUID() },
+        });
+      else if (kind === 'leg-route')
+        await managed.client.groundTransitLegExecution.update({
+          where: { id: f.source.id },
+          data: { adoptedRouteId: await externalPreviewHistoricalRoute(f) },
+        });
+      else if (kind === 'leg-trip')
+        await managed.client.groundTransitLegExecution.update({
+          where: { id: f.source.id },
+          data: {
+            tripId: await externalPreviewOtherTrip(f),
+            adoptedRouteId: await externalPreviewHistoricalRoute(f, true),
+          },
+        });
+      else if (kind === 'metadata')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.origin.id },
+          data: { name: 'SYNTHETIC changed hub metadata' },
+        });
+      else if (kind === 'timezone')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.origin.id },
+          data: { timeZone: 'Invalid/Zone' },
+        });
+      else if (kind === 'past-departure')
+        currentNow = new Date('2030-10-01T10:31:00Z');
+      else if (kind === 'TTL')
+        await managed.client.routeCandidateSnapshot.update({
+          where: { id: f.snapshotId },
+          data: {
+            expiresAt: currentNow,
+            createdAt: new Date(currentNow.getTime() - 60000),
+          },
+        });
+      else if (kind === 'provider-TTL')
+        await managed.client.routeCandidateSnapshot.update({
+          where: { id: f.snapshotId },
+          data: {
+            providerValidUntil: currentNow,
+            expiresAt: currentNow,
+            createdAt: new Date(currentNow.getTime() - 60000),
+          },
+        });
+      else if (kind === 'legacy-hash') {
+        const snapshot = await new PrismaRoutePlanningRepository(
+          managed.client,
+        ).findSnapshotOwned({
+          ownerUserId: userA.actor.userId,
+          tripId: f.tripId,
+          snapshotId: f.snapshotId,
+        });
+        await managed.client.routeCandidateSnapshot.update({
+          where: { id: f.snapshotId },
+          data: {
+            candidateHash: hashRouteCandidateSnapshot({
+              tripId: f.tripId,
+              basisVersion: snapshot!.basisVersion,
+              fromNodeId: f.origin.id,
+              toNodeId: f.D.id,
+              provider: snapshot!.provider,
+              observedAt: snapshot!.observedAt.toISOString(),
+              candidatePayload: snapshot!.candidatePayload,
+            }),
+          },
+        });
+      } else
+        await managed.client.routeCandidateSnapshot.update({
+          where: { id: f.snapshotId },
+          data: { candidateHash: '0'.repeat(64) },
+        });
+      const before = await previewFormalState(f.tripId);
+      const count = await managed.client.routePreview.count({
+        where: { tripId: f.tripId },
+      });
+      const response = await previewFromExternalFixture(f);
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PREVIEW_STALE' },
+      });
+      expect(
+        await managed.client.routePreview.count({
+          where: { tripId: f.tripId },
+        }),
+      ).toBe(count);
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
+  it.each([
+    'departure',
+    'supersession',
+    'REPLACED',
+    'UNDONE',
+    'edge-delete',
+    'edge-route',
+    'edge-MANUAL',
+    'leg-delete',
+    'leg-route',
+    'metadata',
+    'node-actual',
+    'historical-anchor',
+    'retained-reference',
+    'user-actual',
+    'provider-actual',
+    'prefix-topology',
+    'TTL',
+    'snapshot-hash',
+    'destination-endpoint',
+  ] as const)(
+    'P5E2 5B2A: locked Preview revalidates race %s with zero writes',
+    async (kind) => {
+      const f = await externalPreviewFixture();
+      const repo = new PrismaRoutePlanningRepository(managed.client, {
+        now: () => currentNow,
+      });
+      const snapshot = (await repo.findSnapshotOwned({
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+        snapshotId: f.snapshotId,
+      }))!;
+      const trip = (await tripRepository.findOwnedById({
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+      }))!;
+      const context = (await new PrismaExternalExecutionOriginRepository(
+        managed.client,
+      ).readPlanning({
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+        externalOriginId: f.origin.id,
+      }))!;
+      const payload = buildExternalOriginPreviewPayload({
+        trip,
+        snapshot,
+        context,
+        now: currentNow,
+      });
+      if (kind === 'destination-endpoint') {
+        const destination = trip.dayOccurrences
+          .flatMap((day) => day.nodes)
+          .find((node) => node.id === snapshot.toNodeId);
+        if (!destination?.place) throw new Error('missing destination');
+        await managed.client.place.update({
+          where: { id: destination.place.id },
+          data: { latitude: 0 },
+        });
+      } else if (kind === 'departure') {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/depart`,
+          headers: bearer(userA),
+          payload: {
+            baseTripVersion: trip.version,
+            idempotencyKey: randomUUID(),
+          },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+      } else if (kind === 'supersession') {
+        currentNow = new Date(currentNow.getTime() + 60000);
+        await manualExecution(
+          { ...f.first.trip, version: trip.version },
+          f.A.id,
+          'MANUAL_ARRIVAL',
+          currentNow.toISOString(),
+        );
+      } else if (kind === 'REPLACED' || kind === 'UNDONE')
+        await managed.client.adoptedRoute.update({
+          where: { id: f.source.adoptedRouteId },
+          data: { status: kind },
+        });
+      else if (kind === 'edge-delete' || kind === 'prefix-topology')
+        await managed.client.transportEdge.delete({
+          where: {
+            id:
+              kind === 'prefix-topology'
+                ? f.prefix.id
+                : f.source.transportEdgeId,
+          },
+        });
+      else if (kind === 'edge-route')
+        await managed.client.transportEdge.update({
+          where: { id: f.source.transportEdgeId },
+          data: { adoptedRouteId: await externalPreviewHistoricalRoute(f) },
+        });
+      else if (kind === 'edge-MANUAL')
+        await managed.client.transportEdge.update({
+          where: { id: f.source.transportEdgeId },
+          data: {
+            source: 'MANUAL',
+            adoptedRouteId: null,
+            provider: null,
+            providerRef: null,
+          },
+        });
+      else if (kind === 'leg-delete')
+        await managed.client.groundTransitLegExecution.delete({
+          where: { id: f.source.id },
+        });
+      else if (kind === 'leg-route')
+        await managed.client.groundTransitLegExecution.update({
+          where: { id: f.source.id },
+          data: { adoptedRouteId: await externalPreviewHistoricalRoute(f) },
+        });
+      else if (kind === 'metadata')
+        await managed.client.externalExecutionOrigin.update({
+          where: { id: f.origin.id },
+          data: { latitude: 35.72 },
+        });
+      else if (kind === 'node-actual')
+        await managed.client.temporalValue.create({
+          data: {
+            nodeId: f.C.id,
+            layer: 'ACTUAL',
+            pointKind: 'ARRIVAL',
+            instant: currentNow,
+            timeZone: 'UTC',
+            sourceKind: 'EXECUTION_OBSERVATION',
+          },
+        });
+      else if (kind === 'historical-anchor' || kind === 'retained-reference')
+        await retainExternalPreviewNode(
+          f,
+          kind === 'historical-anchor' ? 'anchor' : 'receipt',
+        );
+      else if (kind === 'user-actual' || kind === 'provider-actual')
+        await managed.client.temporalValue.create({
+          data: {
+            transportEdgeId: f.source.transportEdgeId,
+            layer: 'ACTUAL',
+            pointKind: 'DEPARTURE',
+            instant: currentNow,
+            timeZone: 'UTC',
+            sourceKind:
+              kind === 'provider-actual'
+                ? 'PROVIDER_OBSERVATION'
+                : 'USER_VALUE',
+          },
+        });
+      else if (kind === 'TTL')
+        currentNow = new Date(currentNow.getTime() + 1800000);
+      else
+        await managed.client.routeCandidateSnapshot.update({
+          where: { id: snapshot.id },
+          data: { candidateHash: 'f'.repeat(64) },
+        });
+      const before = await previewFormalState(f.tripId);
+      const count = await managed.client.routePreview.count({
+        where: { tripId: f.tripId },
+      });
+      expect(
+        await repo.createExternalOriginPreview({
+          ownerUserId: userA.actor.userId,
+          tripId: f.tripId,
+          basisVersion: trip.version,
+          snapshotId: snapshot.id,
+          expectedCandidateHash: snapshot.candidateHash,
+          policyVersion: payload.policyVersion,
+          previewPayload: payload,
+          previewHash: hashRoutePreviewPayload(payload),
+          now: snapshot.createdAt,
+          createdAt: snapshot.createdAt,
+          expiresAt: new Date(snapshot.createdAt.getTime() + 600000),
+        }),
+      ).toEqual({ status: 'PREVIEW_STALE' });
+      expect(
+        await managed.client.routePreview.count({
+          where: { tripId: f.tripId },
+        }),
+      ).toBe(count);
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+      if (kind === 'provider-actual') {
+        const refreshed = await previewFromExternalFixture(f);
+        expect(refreshed.statusCode, refreshed.body).toBe(201);
+        expect(refreshed.json()).toMatchObject({
+          status: 'ADOPT_UNSUPPORTED',
+          changeSummary: {
+            archivableProviderActualTransportEdgeIds: [
+              f.source.transportEdgeId,
+            ],
+          },
+        });
+      }
+    },
+  );
+
+  it.each(['USER', 'ADMIN'] as const)(
+    'P5E2 5B2A: another %s cannot create/read an external Preview',
+    async (role) => {
+      const f = await externalPreviewFixture();
+      const preview = (
+        await previewFromExternalFixture(f)
+      ).json<RoutePreviewView>();
+      const before = await previewFormalState(f.tripId);
+      const other = role === 'ADMIN' ? admin : userB;
+      expect((await previewFromExternalFixture(f, other)).statusCode).toBe(404);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/trips/${f.tripId}/previews/${preview.previewId}`,
+        headers: bearer(other),
+      });
+      expect(response.statusCode).toBe(404);
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
+  it('P5E2 5B2A: vehicle recovery alone keeps E Preview eligible', async () => {
+    const f = await externalPreviewFixture(1, ['SHORT_TURN', 'RECOVERY']);
+    currentNow = new Date(currentNow.getTime() + 60000);
+    const refresh = await app.inject({
+      method: 'POST',
+      url: `${f.base}/refresh`,
+      headers: bearer(userA),
+    });
+    expect(refresh.statusCode, refresh.body).toBe(200);
+    const response = await previewFromExternalFixture(f);
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json()).toMatchObject({ status: 'ADOPT_UNSUPPORTED' });
+  });
+
+  let externalPreviewForeignTrip:
+    { id: string; from: string; to: string } | undefined;
+  async function externalPreviewOtherTrip(
+    f: Awaited<ReturnType<typeof externalPreviewFixture>>,
+  ) {
+    const trip = await managed.client.trip.findUniqueOrThrow({
+      where: { id: f.tripId },
+    });
+    const other = await managed.client.trip.create({
+      data: { ...trip, id: randomUUID() },
+    });
+    const day = await managed.client.dayOccurrence.findFirstOrThrow({
+      where: { tripId: f.tripId },
+    });
+    const otherDay = await managed.client.dayOccurrence.create({
+      data: { ...day, id: randomUUID(), tripId: other.id },
+    });
+    const endpoints = await managed.client.itineraryNode.findMany({
+      where: { id: { in: [f.A.id, f.D.id] } },
+      orderBy: { position: 'asc' },
+    });
+    const ids: string[] = [];
+    for (const [position, endpoint] of endpoints.entries())
+      ids.push(
+        (
+          await managed.client.itineraryNode.create({
+            data: {
+              ...endpoint,
+              id: randomUUID(),
+              tripId: other.id,
+              dayOccurrenceId: otherDay.id,
+              position,
+            },
+          })
+        ).id,
+      );
+    externalPreviewForeignTrip = { id: other.id, from: ids[0]!, to: ids[1]! };
+    return other.id;
+  }
+  async function externalPreviewCopySourcePreview(
+    f: Awaited<ReturnType<typeof externalPreviewFixture>>,
+  ) {
+    const route = await managed.client.adoptedRoute.findUniqueOrThrow({
+      where: { id: f.source.adoptedRouteId },
+    });
+    const preview = await managed.client.routePreview.findUniqueOrThrow({
+      where: { id: route.sourcePreviewId },
+    });
+    return (
+      await managed.client.routePreview.create({
+        data: {
+          ...preview,
+          previewPayload: preview.previewPayload as JsonInput,
+          id: randomUUID(),
+        },
+      })
+    ).id;
+  }
+  async function externalPreviewHistoricalRoute(
+    f: Awaited<ReturnType<typeof externalPreviewFixture>>,
+    foreign = false,
+  ) {
+    const route = await managed.client.adoptedRoute.findUniqueOrThrow({
+      where: { id: f.source.adoptedRouteId },
+    });
+    const history = await managed.client.adoptedRoute.create({
+      data: {
+        ...route,
+        id: randomUUID(),
+        status: 'UNDONE',
+        sourcePreviewId: await externalPreviewCopySourcePreview(f),
+        ...(foreign
+          ? {
+              tripId: externalPreviewForeignTrip!.id,
+              anchorFromNodeId: externalPreviewForeignTrip!.from,
+              anchorToNodeId: externalPreviewForeignTrip!.to,
+            }
+          : {}),
+      },
+    });
+    return history.id;
+  }
+
+  it('P5E2 5B2A: legal same-ID transfer reuse ignores deletion-only historical anchor protection', async () => {
+    const f = await externalPreviewFixture();
+    await retainExternalPreviewNode(f, 'anchor');
+    const node = await managed.client.itineraryNode.findUniqueOrThrow({
+      where: { id: f.C.id },
+      include: { place: true },
+    });
+    const source = suffixFoundationCandidate(true).candidates[0]!;
+    const transfer = {
+      name: node.place!.name,
+      latitude: node.place!.latitude.toNumber(),
+      longitude: node.place!.longitude.toNumber(),
+      providerPlaceRef: node.providerPlaceRef,
+      providerHubRef: node.providerHubRef,
+    };
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...source,
+          legs: [
+            {
+              ...source.legs[0]!,
+              from: {
+                name: f.origin.name,
+                latitude: f.origin.latitude,
+                longitude: f.origin.longitude,
+                providerPlaceRef: null,
+                providerHubRef: f.origin.providerHubRef,
+              },
+              to: transfer,
+            },
+            { ...source.legs[1]!, from: transfer },
+          ],
+        },
+      ],
+    };
+    const queried = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+      headers: bearer(userA),
+      payload: { basisVersion: await readVersion(f.tripId), toNodeId: f.D.id },
+    });
+    expect(queried.statusCode, queried.body).toBe(200);
+    f.snapshotId = queried.json().candidates[0].candidateSnapshotId;
+    const response = await previewFromExternalFixture(f);
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json()).toMatchObject({
+      status: 'ADOPT_UNSUPPORTED',
+      changeSummary: {
+        nodesToRemove: [],
+        protectedBlockingNodes: [],
+        nodesToReuse: [{ nodeId: f.C.id }],
+        externalOriginReplacement: {
+          materializedOrigin: { nodeId: null, action: 'CREATE' },
+        },
+      },
+    });
+  });
+
+  it('P5E2 5B2A: destination minimum dwell and downstream hard departure are revalidated', async () => {
+    const f = await externalPreviewFixture();
+    await managed.client.userTimeIntent.create({
+      data: {
+        tripId: f.tripId,
+        nodeId: f.D.id,
+        kind: 'MIN_DWELL',
+        operator: 'MINIMUM',
+        durationSeconds: 600,
+        locked: true,
+      },
+    });
+    const constraint = await managed.client.userTimeIntent.create({
+      data: {
+        tripId: f.tripId,
+        nodeId: f.D.id,
+        kind: 'POINT_TIME',
+        operator: 'NOT_AFTER',
+        pointKind: 'DEPARTURE',
+        instant: new Date('2030-10-01T11:10:00Z'),
+        timeZone: 'UTC',
+        locked: true,
+      },
+    });
+    const good = await previewFromExternalFixture(f);
+    expect(good.statusCode, good.body).toBe(201);
+    expect(good.json().changeSummary.downstreamImpact).toMatchObject({
+      nodeId: f.D.id,
+      userMinimumDwellSeconds: 600,
+      projectedDwellSeconds: 600,
+      status: 'NORMAL',
+      requiredUserAdjustments: [],
+    });
+    await managed.client.userTimeIntent.update({
+      where: { id: constraint.id },
+      data: { instant: new Date('2030-10-01T11:05:00Z') },
+    });
+    const before = await previewFormalState(f.tripId);
+    const stale = await previewFromExternalFixture(f);
+    expect(stale.statusCode, stale.body).toBe(409);
+    expect(stale.json()).toMatchObject({ error: { code: 'PREVIEW_STALE' } });
+    expect(await previewFormalState(f.tripId)).toEqual(before);
+  });
+
+  it('P5E2 5B2A: E-to-F rollover rejects E snapshot and accepts CURRENT F preview', async () => {
+    const f = await confirmedExternalQueryFixture([
+      'SHORT_TURN',
+      'SHORT_TURN_F',
+    ]);
+    const queryE = await externalQuery(f);
+    expect(queryE.statusCode, queryE.body).toBe(200);
+    currentNow = new Date(currentNow.getTime() + 60000);
+    await manualExecution(
+      { ...f.trip, version: await readVersion(f.trip.id) },
+      f.from.id,
+      'MANUAL_ARRIVAL',
+      currentNow.toISOString(),
+    );
+    await nextExternalCandidate(f);
+    const confirmedF = await confirmExternal(f);
+    expect(confirmedF.statusCode, confirmedF.body).toBe(200);
+    const current = confirmedF.json<ExternalOriginMutationResponse>();
+    const version = await readVersion(f.trip.id);
+    const stale = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: version,
+        candidateSnapshotId: queryE.json().candidates[0].candidateSnapshotId,
+      },
+    });
+    expect(stale.statusCode, stale.body).toBe(409);
+    expect(stale.json()).toMatchObject({ error: { code: 'PREVIEW_STALE' } });
+    const queryF = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/execution/external-origins/${current.origin.id}/routes/query`,
+      headers: bearer(userA),
+      payload: { basisVersion: version, toNodeId: f.to.id },
+    });
+    expect(queryF.statusCode, queryF.body).toBe(200);
+    const preview = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: version,
+        candidateSnapshotId: queryF.json().candidates[0].candidateSnapshotId,
+      },
+    });
+    expect(preview.statusCode, preview.body).toBe(201);
+    expect(preview.json()).toMatchObject({
+      status: 'ADOPT_UNSUPPORTED',
+      changeSummary: {
+        externalOriginReplacement: { externalOriginId: current.origin.id },
+      },
+    });
+  });
+
+  it('P5E2 5B2A: departure does not turn unsupported external Adopt into a legacy stale path', async () => {
+    const f = await externalPreviewFixture();
+    const preview = (
+      await previewFromExternalFixture(f)
+    ).json<RoutePreviewView>();
+    const departed = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/depart`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: preview.basisVersion,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    expect(departed.statusCode, departed.body).toBe(200);
+    const before = await previewFormalState(f.tripId);
+    const rejected = await adopt(
+      userA,
+      { ...f.first.trip, version: preview.basisVersion },
+      preview.previewId,
+      'synthetic-external-stale-unsupported',
+    );
+    expect(rejected.statusCode, rejected.body).toBe(422);
+    expect(rejected.json()).toMatchObject({
+      error: { code: 'PREVIEW_UNSUPPORTED' },
+    });
+    expect(await previewFormalState(f.tripId)).toEqual(before);
+  });
+
   async function confirmedExternalQueryFixture(
     changes: Parameters<typeof groundSequence>[0] = ['SHORT_TURN'],
   ) {
@@ -522,6 +1648,99 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     providerInputs.length = 0;
     return { ...f, result, body, url };
   }
+  it.each(['origin', 'destination', 'hub', 'name'] as const)(
+    'rejects external Provider endpoint fault %s without writes',
+    async (fault) => {
+      const f = await confirmedExternalQueryFixture();
+      externalEndpointFault = fault;
+      const before = await externalDurableState(f.trip.id);
+      const response = await externalQuery(f);
+      expect(response.statusCode, response.body).toBe(503);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PROVIDER_UNAVAILABLE' },
+      });
+      expect(await externalDurableState(f.trip.id)).toEqual(before);
+    },
+  );
+
+  it('accepts external Query exact-coordinate fallback without structured refs', async () => {
+    const f = await confirmedExternalQueryFixture();
+    const response = await externalQuery(f);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().candidates[0].legs[0].from).toMatchObject({
+      latitude: f.result.origin.latitude,
+      longitude: f.result.origin.longitude,
+      providerPlaceRef: null,
+      providerHubRef: null,
+    });
+  });
+
+  it.each(['origin', 'destination'] as const)(
+    'rejects valid-hash persisted external candidate with wrong %s',
+    async (endpoint) => {
+      const f = await externalPreviewFixture();
+      const repository = new PrismaRoutePlanningRepository(managed.client);
+      const snapshot = await repository.findSnapshotOwned({
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+        snapshotId: f.snapshotId,
+      });
+      if (!snapshot || snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN')
+        throw new Error('missing external snapshot');
+      const payload = {
+        ...snapshot.candidatePayload,
+        legs: snapshot.candidatePayload.legs.map((leg, index) => ({
+          ...leg,
+          from:
+            endpoint === 'origin' && index === 0
+              ? { ...leg.from, latitude: 0, providerHubRef: 'wrong' }
+              : leg.from,
+          to:
+            endpoint === 'destination' &&
+            index === snapshot.candidatePayload.legs.length - 1
+              ? {
+                  ...leg.to,
+                  longitude: 0,
+                  providerPlaceRef: null,
+                  providerHubRef: null,
+                }
+              : leg.to,
+        })),
+      };
+      const candidateHash = hashExternalRouteCandidateSnapshot({
+        tripId: f.tripId,
+        basisVersion: snapshot.basisVersion,
+        toNodeId: snapshot.toNodeId,
+        provider: snapshot.provider,
+        observedAt: snapshot.observedAt.toISOString(),
+        candidatePayload: payload,
+        externalOriginSnapshot: snapshot.origin.snapshot,
+      });
+      await managed.client.routeCandidateSnapshot.update({
+        where: { id: f.snapshotId },
+        data: {
+          candidatePayload: payload as unknown as JsonInput,
+          candidateHash,
+        },
+      });
+      const before = await previewFormalState(f.tripId);
+      const previewCount = await managed.client.routePreview.count({
+        where: { tripId: f.tripId },
+      });
+      const response = await previewFromExternalFixture(f);
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PREVIEW_STALE' },
+      });
+      expect(
+        await managed.client.routePreview.count({
+          where: { tripId: f.tripId },
+        }),
+      ).toBe(previewCount);
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
   async function readVersion(tripId: string) {
     return (
       await managed.client.trip.findUniqueOrThrow({ where: { id: tripId } })
@@ -643,7 +1862,17 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           return {
             status: 'SUCCESS',
             candidates: [
-              candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z'),
+              {
+                ...candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z'),
+                legs: candidate(
+                  '2030-10-01T10:00:00Z',
+                  '2030-10-01T11:00:00Z',
+                ).legs.map((leg) => ({
+                  ...leg,
+                  from: { ...input.origin, providerPlaceRef: null },
+                  to: { ...input.destination, providerPlaceRef: null },
+                })),
+              },
             ],
           };
         }),
@@ -745,7 +1974,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(await externalDurableState(f.trip.id)).toEqual(before);
     expect(providerInputs).toHaveLength(0);
   });
-  it('P5E2 5B1: handoff is READY/read-only; explicit external Query writes only snapshots; Preview is unsupported', async () => {
+  it('P5E2 5B1/5B2A: handoff and Query stay read-only; external Preview is a plan only', async () => {
     const f = await confirmedExternalQueryFixture();
     const nodeSnapshot =
       await managed.client.routeCandidateSnapshot.findFirstOrThrow({
@@ -856,11 +2085,22 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         candidateSnapshotId: stored.id,
       },
     });
-    expect(preview.statusCode, preview.body).toBe(422);
+    expect(preview.statusCode, preview.body).toBe(201);
     expect(preview.json()).toMatchObject({
-      error: { code: 'PREVIEW_UNSUPPORTED' },
+      status: 'ADOPT_UNSUPPORTED',
+      adoptable: false,
     });
-    expect(await externalDurableState(f.trip.id)).toEqual(after);
+    const previewAfter = await externalDurableState(f.trip.id);
+    expect({
+      ...previewAfter,
+      footprint: {
+        ...previewAfter.footprint,
+        planning: {
+          ...previewAfter.footprint.planning,
+          routePreviews: after.footprint.planning.routePreviews,
+        },
+      },
+    }).toEqual(after);
     expect(
       await new PrismaRoutePlanningRepository(managed.client).createPreview({
         ownerUserId: userA.actor.userId,
@@ -2484,7 +3724,14 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   });
 
   it('accepts cancellation once, aggregates one strong presentation, and restores the same adopted route', async () => {
-    const { trip, leg } = await adoptedFixedGroundTrip();
+    const { trip, leg } = await adoptedFixedGroundTrip({
+      now: '2030-10-01T09:49:59Z',
+      departure: '2030-10-01T10:00:00Z',
+      arrival: '2030-10-01T11:00:00Z',
+    });
+    // Independent actions need distinct fixture times; equal occurredAt values
+    // have no chronological ordering guarantee in PostgreSQL.
+    currentNow = new Date('2030-10-01T09:50:00Z');
     const groundProvider = groundSequence([
       'CANCELLED',
       'RECOVERY',
@@ -2577,14 +3824,21 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         where: { legExecutionId: leg.id },
       }),
     ).toBe(2);
-    expect(
-      (
-        await managed.client.groundTransitStateTransition.findMany({
-          where: { legExecutionId: leg.id },
-          orderBy: { occurredAt: 'asc' },
-        })
-      ).map((item) => item.toState),
-    ).toEqual(['PENDING', 'NO_LONGER_FEASIBLE', 'PENDING']);
+    const transitions =
+      await managed.client.groundTransitStateTransition.findMany({
+        where: { legExecutionId: leg.id },
+        orderBy: { occurredAt: 'asc' },
+      });
+    expect(transitions.map((item) => item.toState)).toEqual([
+      'PENDING',
+      'NO_LONGER_FEASIBLE',
+      'PENDING',
+    ]);
+    expect(transitions.map((item) => item.occurredAt.toISOString())).toEqual([
+      '2030-10-01T09:49:59.000Z',
+      '2030-10-01T09:50:00.000Z',
+      '2030-10-01T09:51:00.000Z',
+    ]);
     const presentations = await managed.client.notificationEvent.findMany({
       where: {
         tripId: trip.id,

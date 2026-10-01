@@ -185,7 +185,12 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   routePreviewService = new RoutePreviewService(
     tripRepository,
     planningRepository,
-    { previewTtlSeconds: routePlanningConfig.previewTtlSeconds },
+    {
+      previewTtlSeconds: routePlanningConfig.previewTtlSeconds,
+      externalOrigins: new PrismaExternalExecutionOriginRepository(
+        managedPrisma.client,
+      ),
+    },
   );
   tripService = new TripService(tripRepository);
   routeAdoptionService = new RouteAdoptionService(

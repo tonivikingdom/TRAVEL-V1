@@ -318,5 +318,13 @@ export async function loadExternalOriginPlanningContext(
           where: { id: origin.sourceTransportEdgeId, tripId: input.tripId },
           select: { id: true, source: true, adoptedRouteId: true },
         });
-  return { ...context, origin, sourceRoute, sourceEdge };
+  const leg =
+    origin === null
+      ? null
+      : await readExternalOriginGroundLeg(
+          client,
+          input.tripId,
+          origin.sourceTransportEdgeId,
+        );
+  return { ...context, origin, sourceRoute, sourceEdge, leg };
 }

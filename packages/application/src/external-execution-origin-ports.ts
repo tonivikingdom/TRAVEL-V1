@@ -57,7 +57,25 @@ export interface ExternalOriginCandidate extends ExternalOriginCandidateView {
   readonly sourceGroundTransitObservationId: string;
   readonly sourceObservationFactsHash: string;
 }
+export interface ExternalOriginPlanningContext extends ExternalOriginContext {
+  readonly origin: ExternalOriginRecord | null;
+  readonly sourceRoute: {
+    id: string;
+    status: string;
+    anchorToNodeId: string;
+  } | null;
+  readonly sourceEdge: {
+    id: string;
+    source: string;
+    adoptedRouteId: string | null;
+  } | null;
+}
 export interface ExternalExecutionOriginRepository {
+  readPlanning?(input: {
+    ownerUserId: string;
+    tripId: string;
+    externalOriginId: string;
+  }): Promise<ExternalOriginPlanningContext | null>;
   read(input: {
     ownerUserId: string;
     tripId: string;

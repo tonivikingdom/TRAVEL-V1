@@ -806,6 +806,34 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     },
   );
 
+  app.post<{ Params: { tripId: string; externalOriginId: string } }>(
+    '/trips/:tripId/execution/external-origins/:externalOriginId/routes/query',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      const allowed = new Set(['basisVersion', 'toNodeId', 'hint']);
+      if (Object.keys(body).some((key) => !allowed.has(key)))
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '外部起点查询只接受版本、终点与时间提示。',
+          400,
+        );
+      return requireRouteQueryService(dependencies).queryExternalOriginRoutes(
+        authenticated.actor,
+        request.params.tripId,
+        request.params.externalOriginId,
+        {
+          basisVersion: requiredNumber(body, 'basisVersion'),
+          toNodeId: requiredString(body, 'toNodeId'),
+          ...(hasOwn(body, 'hint') ? { hint: parseRouteHint(body.hint) } : {}),
+        },
+      );
+    },
+  );
   app.post<{ Params: { id: string } }>(
     '/trips/:id/routes/query',
     async (request) => {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type {
+  ExternalRouteOriginSnapshot,
   RouteCandidateLegView,
   RouteLocationView,
   RouteTimePointView,
@@ -231,4 +232,23 @@ function isMode(value: unknown): value is RouteCandidateLeg['mode'] {
     value === 'FLIGHT' ||
     value === 'OTHER'
   );
+}
+
+export function hashExternalRouteCandidateSnapshot(
+  basis: Omit<CandidateHashBasis, 'fromNodeId'> & {
+    readonly externalOriginSnapshot: ExternalRouteOriginSnapshot;
+  },
+): string {
+  const candidateFacts = { ...basis.candidatePayload };
+  delete candidateFacts.planningAssessment;
+  return createHash('sha256')
+    .update(
+      canonicalJson({
+        ...basis,
+        schema: 'external-route-candidate-v1',
+        originKind: 'EXTERNAL_EXECUTION_ORIGIN',
+        candidatePayload: candidateFacts,
+      }),
+    )
+    .digest('hex');
 }

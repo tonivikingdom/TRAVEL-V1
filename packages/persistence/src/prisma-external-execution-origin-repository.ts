@@ -16,6 +16,13 @@ import { readExternalOriginGroundLeg } from './prisma-ground-transit-repository.
 type Client = PrismaClient | Prisma.TransactionClient;
 export class PrismaExternalExecutionOriginRepository implements ExternalExecutionOriginRepository {
   constructor(private readonly client: PrismaClient) {}
+  readPlanning(input: {
+    ownerUserId: string;
+    tripId: string;
+    externalOriginId: string;
+  }) {
+    return loadExternalOriginPlanningContext(this.client, input);
+  }
   read(input: Parameters<ExternalExecutionOriginRepository['read']>[0]) {
     return loadContext(
       this.client,
@@ -278,4 +285,38 @@ function error(
       : '执行事实或版本已变化，请刷新。',
     code === 'NOT_FOUND' ? 404 : 409,
   );
+}
+
+export async function loadExternalOriginPlanningContext(
+  client: Client,
+  input: { ownerUserId: string; tripId: string; externalOriginId: string },
+): Promise<import('@travel/application').ExternalOriginPlanningContext | null> {
+  const context = await loadContext(
+    client,
+    input.ownerUserId,
+    input.tripId,
+    null,
+  );
+  if (context === null) return null;
+  const origin =
+    context.origins.find((row) => row.id === input.externalOriginId) ?? null;
+  const sourceRoute =
+    origin === null
+      ? null
+      : await client.adoptedRoute.findFirst({
+          where: {
+            id: origin.sourceAdoptedRouteId,
+            tripId: input.tripId,
+            trip: { ownerUserId: input.ownerUserId },
+          },
+          select: { id: true, status: true, anchorToNodeId: true },
+        });
+  const sourceEdge =
+    origin === null
+      ? null
+      : await client.transportEdge.findFirst({
+          where: { id: origin.sourceTransportEdgeId, tripId: input.tripId },
+          select: { id: true, source: true, adoptedRouteId: true },
+        });
+  return { ...context, origin, sourceRoute, sourceEdge };
 }

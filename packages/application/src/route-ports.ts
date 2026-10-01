@@ -1,6 +1,7 @@
 import type { NormalizedRouteCandidate } from '@travel/domain';
 
 export interface RouteProviderLocationInput {
+  /** Opaque query-location identity; may be an external execution origin ID. No Place is implied. */
   readonly placeId: string;
   readonly name: string;
   readonly latitude: number;

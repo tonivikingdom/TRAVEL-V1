@@ -206,21 +206,65 @@ export async function verifyExternalOriginChain({
       result.resultingTripVersion === trip.version + 1,
     'manual E confirmation failed',
   );
-  const after = JSON.parse(await footprint());
+  const afterConfirmation = await footprint();
+  const after = JSON.parse(afterConfirmation);
   const previous = JSON.parse(before);
-  after.version = previous.version;
   assert(
-    JSON.stringify(after) === JSON.stringify(previous),
+    JSON.stringify({ ...after, version: previous.version }) ===
+      JSON.stringify(previous),
     'confirmation mutated itinerary/Place/route/planning data',
   );
   const handoffAfter = await apiJson(`${base}/route-reevaluation`, 'GET');
   assert(
-    handoffAfter.query === null &&
-      handoffAfter.reasonCodes.includes(
-        'EXTERNAL_ORIGIN_ROUTE_PLANNING_NOT_SUPPORTED',
-      ),
-    'confirmed E enabled external planning',
+    handoffAfter.readiness === 'READY' &&
+      handoffAfter.originBasis === 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN' &&
+      handoffAfter.query === null &&
+      handoffAfter.externalQuery?.externalOriginId === result.origin.id,
+    'confirmed E did not expose externalQuery',
   );
+  assert((await footprint()) === afterConfirmation, 'handoff wrote data');
+  const { externalOriginId, ...externalRequest } = handoffAfter.externalQuery;
+  const externalPath = `/trips/${trip.id}/execution/external-origins/${externalOriginId}/routes/query`;
+  const queried = await apiJson(externalPath, 'POST', externalRequest);
+  assert(
+    queried.candidates.length > 0 &&
+      queried.externalOriginId === result.origin.id,
+    'external Query returned no snapshots',
+  );
+  const afterQuery = JSON.parse(await footprint());
+  const snapshotCount = afterQuery.snapshots;
+  afterQuery.snapshots = after.snapshots;
+  assert(
+    JSON.stringify(afterQuery) === JSON.stringify(after),
+    'Query changed formal Trip data',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "RouteCandidateSnapshot" WHERE "id"='${queried.candidates[0].candidateSnapshotId}' AND "originKind"='EXTERNAL_EXECUTION_ORIGIN' AND "fromNodeId" IS NULL AND "fromExternalOriginId"='${result.origin.id}' AND "externalOriginSnapshot"->>'timeZone'='Asia/Tokyo';`,
+    )) === '1',
+    'external snapshot origin shape invalid',
+  );
+  const rejection = await fetch(
+    `http://127.0.0.1:${apiPort}/trips/${trip.id}/previews`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        basisVersion: result.resultingTripVersion,
+        candidateSnapshotId: queried.candidates[0].candidateSnapshotId,
+      }),
+    },
+  );
+  assert(
+    rejection.status === 422 &&
+      (await rejection.json()).error?.code === 'PREVIEW_UNSUPPORTED',
+    'external Preview did not return controlled unsupported',
+  );
+  previous.snapshots = snapshotCount;
+
   const departed = await apiJson(
     `/trips/${trip.id}/execution/external-origins/${result.origin.id}/depart`,
     'POST',
@@ -235,7 +279,27 @@ export async function verifyExternalOriginChain({
       departed.resultingTripVersion === trip.version + 2,
     'E departure lifecycle failed',
   );
+  const rejectedQuery = await fetch(
+    `http://127.0.0.1:${apiPort}${externalPath}`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...externalRequest,
+        basisVersion: departed.resultingTripVersion,
+      }),
+    },
+  );
+  assert(
+    rejectedQuery.status === 422 &&
+      (await rejectedQuery.json()).error?.code === 'ROUTE_QUERY_UNSUPPORTED',
+    'departed E Query was authorized',
+  );
   const final = JSON.parse(await footprint());
+  assert(final.snapshots === snapshotCount, 'departed Query wrote snapshots');
   final.version = previous.version;
   assert(
     JSON.stringify(final) === JSON.stringify(previous),
@@ -248,8 +312,12 @@ export async function verifyExternalOriginChain({
     departure: 'DEPARTED',
     itineraryMutationCount: 0,
     placeMutationCount: 0,
-    planningMutationCount: 0,
-    externalRouteQuery: false,
+    previewMutationCount: 0,
+    adoptMutationCount: 0,
+    externalRouteQuery: true,
+    externalSnapshotCount: queried.candidates.length,
+    externalPreview: 'PREVIEW_UNSUPPORTED',
+    departedExternalQuery: 'ROUTE_QUERY_UNSUPPORTED',
     automaticQuery: false,
     automaticPreview: false,
     automaticAdopt: false,

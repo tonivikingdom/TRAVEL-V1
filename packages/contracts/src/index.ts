@@ -178,3 +178,9 @@ export type {
   DepartExternalOriginRequest,
   ExternalOriginMutationResponse,
 } from './external-execution-origin.js';
+
+export type {
+  ExternalOriginRouteQueryRequest,
+  ExternalOriginRouteQueryResponse,
+  ExternalRouteOriginSnapshot,
+} from './routes.js';

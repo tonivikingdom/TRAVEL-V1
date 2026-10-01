@@ -174,3 +174,5 @@ export {
   type ExternalOriginFact,
   type ExternalExecutionOriginCurrentness,
 } from './external-execution-origin.js';
+
+export { resolveExternalOriginRouteQueryAuthorization } from './external-origin-route-query.js';

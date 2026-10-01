@@ -175,6 +175,9 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     routeProvider,
     planningRepository,
     {
+      externalOrigins: new PrismaExternalExecutionOriginRepository(
+        managedPrisma.client,
+      ),
       candidateSnapshotTtlSeconds:
         routePlanningConfig.candidateSnapshotTtlSeconds,
     },

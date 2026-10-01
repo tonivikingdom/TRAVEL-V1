@@ -46,7 +46,7 @@ contain `storage_reconciliation` and claimed/cleaned/failed/fenced counts, witho
 | Synchronous upload failure / explicit delete failure | FAILED / DELETED remains authoritative and retryable                                           |
 | Long upload crosses stale cutoff                     | Late markReady fails; upload failure cleanup takes a new fenced attempt; no READY resurrection |
 
-Synchronous upload cleanup preserves the original API error. Explicit deletion remains logically DELETED even when
+Synchronous upload cleanup preserves the original API error, including when LocalFilesystem partial-file cleanup fails. Explicit deletion remains logically DELETED even when
 physical storage returns STORAGE_UNAVAILABLE. Their immediate cleanup records success or schedules the same Worker
 retry. A late upload's cleanup can reopen an already completed physical deletion to handle its late write.
 
@@ -88,7 +88,7 @@ Query/Preview/Adopt, formal clients, Staging and Production deployment: **NO**.
 Cloud first-layer acceptance passed:
 
 - Frozen install, Prisma generate/validate, format, lint, full typecheck and build.
-- Unit: **719/719**; full PostgreSQL 17 integration: **580/580** (102 persistence + 478 API).
+- Unit: **720/720**; full PostgreSQL 17 integration: **580/580** (102 persistence + 478 API).
 - Focused PostgreSQL: **16/16**, including quota/crash/retry/SKIP LOCKED/attempt fencing/upload races and migration.
 - Clean Prisma deploy: **24 migrations**; populated baseline deploy: **23→24**, five storage lifecycle fixtures and
   twenty existing tables' facts preserved, including route receipts, external origins and Ground Transit evidence.

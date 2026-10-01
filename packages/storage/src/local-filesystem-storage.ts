@@ -63,7 +63,12 @@ export class LocalFilesystemObjectStorage implements ObjectStorage {
     } catch (error) {
       output.destroy();
       await waitForClose(output);
-      await rm(temporary, { force: true });
+      try {
+        await rm(temporary, { force: true });
+      } catch {
+        // Preserve the upload error. DB-backed exact-key reconciliation retries
+        // this reservation's partial file if immediate cleanup is unavailable.
+      }
       if (error instanceof StorageError) {
         throw error;
       }

@@ -469,6 +469,9 @@ export interface RouteAdoptDeltaV5 extends Omit<
   readonly archivableProviderActualTransportEdgeIds: readonly string[];
   /** Exact adopted generated-node/Place/placement facts for defensive Undo. */
   readonly afterGeneratedNodeFacts: readonly Record<string, unknown>[];
+  /** Adopt-created RAIL/BUS edge coverage and their exact execution baseline. */
+  readonly createdGroundTransitTransportEdgeIds: readonly string[];
+  readonly afterGroundTransitLegFacts: readonly Record<string, unknown>[];
   readonly archivedSuffixHash: string;
 }
 

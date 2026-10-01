@@ -1,5 +1,7 @@
 import {
   externalGeneratedNodeFacts,
+  externalGroundTransitExecutionFacts,
+  lockExternalGroundTransitExecutionRows,
   hashExternalRouteAudit,
   lockExternalRouteMutationRows,
 } from './prisma-external-route-state.js';
@@ -108,7 +110,7 @@ async function executeUndo(
   if (target.operationType !== 'ROUTE_ADOPT') {
     return { status: 'UNDO_UNAVAILABLE' };
   }
-  const delta = parseRouteAdoptDelta(target.delta);
+  const delta = parseRouteAdoptDelta(target.delta, target.adoptedRouteId);
   if (delta === null || target.undoExpiresAt === null) {
     return { status: 'UNDO_UNAVAILABLE' };
   }
@@ -142,6 +144,11 @@ async function executeUndo(
     );
     await transaction.$queryRaw(
       Prisma.sql`SELECT "id" FROM "AdoptedRoute" WHERE "tripId"=${input.tripId}::uuid AND "id" IN (${target.adoptedRouteId}::uuid, ${delta.sourceAdoptedRouteId}::uuid) ORDER BY "id" FOR UPDATE`,
+    );
+    await lockExternalGroundTransitExecutionRows(
+      transaction,
+      input.tripId,
+      target.adoptedRouteId,
     );
   }
   const state = await validateCurrentUndoState(
@@ -1203,6 +1210,7 @@ async function validateV4Corridor(
 
 export function parseRouteAdoptDelta(
   value: Prisma.JsonValue,
+  targetAdoptedRouteId?: string,
 ): RouteAdoptUndoBasis | null {
   if (
     !isRecord(value) ||
@@ -1265,7 +1273,10 @@ export function parseRouteAdoptDelta(
       !/^[a-f0-9]{64}$/u.test(value.preservedPrefixHash))
   )
     return null;
-  if (value.schemaVersion === 'route-adopt-delta-v5' && !validV5Shape(value))
+  if (
+    value.schemaVersion === 'route-adopt-delta-v5' &&
+    !validV5Shape(value, targetAdoptedRouteId)
+  )
     return null;
   const delta = value as unknown as RouteAdoptUndoBasis;
   if (delta.schemaVersion === 'route-adopt-delta-v4') {
@@ -1496,7 +1507,10 @@ class UndoAbort extends Error {
   }
 }
 
-function validV5Shape(value: Record<string, unknown>): boolean {
+function validV5Shape(
+  value: Record<string, unknown>,
+  targetAdoptedRouteId?: string,
+): boolean {
   const ids = [
     'externalOriginId',
     'sourceGroundTransitLegExecutionId',
@@ -1527,11 +1541,52 @@ function validV5Shape(value: Record<string, unknown>): boolean {
     ) ||
     !Array.isArray(value.afterGeneratedNodeFacts) ||
     !value.afterGeneratedNodeFacts.every(isRecord) ||
+    !Array.isArray(value.afterGroundTransitLegFacts) ||
+    !value.afterGroundTransitLegFacts.every(isRecord) ||
+    !isUniqueUuidArray(value.createdGroundTransitTransportEdgeIds) ||
     !isRecord(value.materializedOriginAnchorSnapshot)
   )
     return false;
   const d = value as unknown as RouteAdoptDeltaV5;
   const anchor = d.materializedOriginAnchorSnapshot;
+  const legs = d.afterGroundTransitLegFacts;
+  if (
+    !isUniqueUuidArray(legs.map((leg) => leg.id)) ||
+    !isUniqueUuidArray(legs.map((leg) => leg.transportEdgeId)) ||
+    !sameArray(
+      legs.map((leg) => String(leg.transportEdgeId)).sort(),
+      [...d.createdGroundTransitTransportEdgeIds].sort(),
+    ) ||
+    d.createdGroundTransitTransportEdgeIds.some(
+      (id) => !d.createdTransportEdgeIds.includes(id),
+    ) ||
+    new Set(legs.map((leg) => leg.adoptedRouteId)).size > 1 ||
+    legs.some(
+      (leg) =>
+        !isUuid(leg.tripId) ||
+        !isUuid(leg.adoptedRouteId) ||
+        leg.adoptedRouteId === d.sourceAdoptedRouteId ||
+        (targetAdoptedRouteId !== undefined &&
+          leg.adoptedRouteId !== targetAdoptedRouteId) ||
+        (leg.mode !== 'RAIL' && leg.mode !== 'BUS') ||
+        !Array.isArray(leg.observations) ||
+        leg.observations.length !== 0 ||
+        !Array.isArray(leg.stateTransitions) ||
+        leg.stateTransitions.length !== 1 ||
+        leg.state !== 'PENDING' ||
+        !leg.stateTransitions.every(
+          (t) =>
+            isRecord(t) &&
+            isUuid(t.id) &&
+            t.legExecutionId === leg.id &&
+            t.fromState === null &&
+            t.toState === 'PENDING' &&
+            t.source === 'ROUTE_ADOPT' &&
+            t.evidenceRef === `adopted-route:${String(leg.adoptedRouteId)}`,
+        ),
+    )
+  )
+    return false;
   return (
     anchor.schemaVersion === 'external-adopted-route-anchor-v1' &&
     isRecord(anchor.externalOrigin) &&
@@ -1608,6 +1663,32 @@ async function validateV5Corridor(
     previous.anchorFromNodeId !== delta.sourceRouteAnchorFromNodeId ||
     previous.anchorToNodeId !== delta.destinationNodeId ||
     current.anchorFromNodeId !== delta.materializedOriginNodeId
+  )
+    return false;
+  const groundEdges = await tx.transportEdge.findMany({
+    where: {
+      tripId,
+      adoptedRouteId: current.id,
+      mode: { in: ['RAIL', 'BUS'] },
+    },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  const groundFacts = await externalGroundTransitExecutionFacts(
+    tx,
+    tripId,
+    current.id,
+  );
+  if (
+    !sameArray(
+      groundEdges.map((edge) => edge.id),
+      [...delta.createdGroundTransitTransportEdgeIds].sort(),
+    ) ||
+    groundFacts.some(
+      (leg) => leg.tripId !== tripId || leg.adoptedRouteId !== current.id,
+    ) ||
+    hashExternalRouteAudit(groundFacts) !==
+      hashExternalRouteAudit(delta.afterGroundTransitLegFacts)
   )
     return false;
   if (

@@ -30,6 +30,7 @@ import { loadExternalOriginPlanningContext } from './prisma-external-execution-o
 import { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
 import {
   externalGeneratedNodeFacts,
+  externalGroundTransitExecutionFacts,
   hashExternalRouteAudit,
   lockExternalRouteMutationRows,
 } from './prisma-external-route-state.js';
@@ -509,6 +510,22 @@ export async function executeExternalRouteAdoption(
       tx,
       input.tripId,
       [...delta.createdNodeIds, ...delta.reusedNodeIds],
+    ),
+    createdGroundTransitTransportEdgeIds: (
+      await tx.transportEdge.findMany({
+        where: {
+          tripId: input.tripId,
+          adoptedRouteId: route.id,
+          mode: { in: ['RAIL', 'BUS'] },
+        },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+      })
+    ).map((edge) => edge.id),
+    afterGroundTransitLegFacts: await externalGroundTransitExecutionFacts(
+      tx,
+      input.tripId,
+      route.id,
     ),
     archivedSuffixHash: hashExternalRouteAudit(histories),
   };

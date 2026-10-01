@@ -734,6 +734,561 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       }),
     };
   }
+  async function externalExecutionAdoptFixture(
+    modes: readonly ('RAIL' | 'BUS' | 'WALKING')[] = ['RAIL'],
+  ) {
+    const f = await externalPreviewFixture();
+    const route = candidate(
+      '2030-10-01T10:30:00Z',
+      '2030-10-01T11:00:00Z',
+      'Asia/Tokyo',
+      'UTC',
+    );
+    const template = route.legs[0]!;
+    const transfer = {
+      name: 'SYNTHETIC R2 transfer',
+      latitude: 35.74,
+      longitude: 139.74,
+      providerHubRef: 'synthetic:r2:transfer',
+      providerPlaceRef: null,
+    };
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        {
+          ...route,
+          legs: modes.map((mode, index) => ({
+            ...template,
+            mode,
+            from: index === 0 ? template.from : transfer,
+            to: index === modes.length - 1 ? template.to : transfer,
+            departure:
+              index === 0
+                ? route.departure
+                : {
+                    instant: new Date('2030-10-01T10:45:00Z'),
+                    timeZone: 'UTC',
+                  },
+            arrival:
+              index === modes.length - 1
+                ? route.arrival
+                : {
+                    instant: new Date('2030-10-01T10:45:00Z'),
+                    timeZone: 'UTC',
+                  },
+            durationSeconds: 1800 / modes.length,
+            fixedService: false,
+            groundTransit:
+              mode === 'WALKING'
+                ? null
+                : {
+                    serviceClass: 'HIGH_FREQUENCY' as const,
+                    serviceIdentityKey: `synthetic:r2:service:${index}`,
+                    lineRef: `synthetic:r2:line:${index}`,
+                    lineName: 'SYNTHETIC R2 line',
+                    directionRef: 'synthetic:outbound',
+                    directionLabel: 'Outbound',
+                    boardingHubRef:
+                      index === 0
+                        ? f.origin.providerHubRef
+                        : transfer.providerHubRef,
+                    alightingHubRef:
+                      index === modes.length - 1
+                        ? 'synthetic:D'
+                        : transfer.providerHubRef,
+                    headwayMinSeconds: 120,
+                    headwayMaxSeconds: 300,
+                    minimumTransferSeconds: null,
+                  },
+          })),
+        },
+      ],
+    };
+    const queried = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+      headers: bearer(userA),
+      payload: { basisVersion: await readVersion(f.tripId), toNodeId: f.D.id },
+    });
+    expect(queried.statusCode, queried.body).toBe(200);
+    f.snapshotId = queried.json().candidates[0].candidateSnapshotId;
+    const preview = (
+      await previewFromExternalFixture(f)
+    ).json<RoutePreviewView>();
+    expect(preview).toMatchObject({ status: 'ACTIVE', adoptable: true });
+    const response = await adopt(
+      userA,
+      { ...f.first.trip, version: preview.basisVersion },
+      preview.previewId,
+      randomUUID(),
+    );
+    expect(response.statusCode, response.body).toBe(200);
+    const adopted = response.json<AdoptRoutePreviewResponse>();
+    return {
+      ...f,
+      adopted,
+      delta: adopted.operationReceipt.delta as RouteAdoptDeltaV5,
+    };
+  }
+
+  async function externalR2ObservationInput(
+    f: Awaited<ReturnType<typeof externalExecutionAdoptFixture>>,
+    legIndex = 0,
+  ) {
+    const leg = await managed.client.groundTransitLegExecution.findFirstOrThrow(
+      {
+        where: {
+          adoptedRouteId: f.adopted.operationReceipt.adoptedRouteId,
+          legIndex,
+        },
+      },
+    );
+    const repository = new PrismaGroundTransitRepository(managed.client);
+    const current = await repository.findCurrentOwned({
+      ownerUserId: userA.actor.userId,
+      tripId: f.tripId,
+      transportEdgeId: leg.transportEdgeId,
+    });
+    expect(current).not.toBeNull();
+    const result = await new SyntheticGroundTransitProvider(
+      'ON_TIME',
+      () => currentNow,
+    ).fetchObservation({ leg: current! });
+    if (result.status !== 'SUCCESS')
+      throw new Error('SYNTHETIC R2 observation unavailable');
+    return {
+      leg,
+      input: {
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+        transportEdgeId: leg.transportEdgeId,
+        observation: result.observation,
+        now: currentNow,
+      },
+    };
+  }
+  async function commitExternalR2Observation(
+    f: Awaited<ReturnType<typeof externalExecutionAdoptFixture>>,
+    legIndex = 0,
+  ) {
+    const { leg, input } = await externalR2ObservationInput(f, legIndex);
+    const committed = await new PrismaGroundTransitRepository(
+      managed.client,
+    ).commitObservation(input);
+    expect(committed.status).toBe('APPLIED');
+    return leg;
+  }
+
+  it('PR37 execution fence: real R2 Provider observation without TransportEdge ACTUAL blocks Undo with zero writes', async () => {
+    const f = await externalExecutionAdoptFixture();
+    const leg = await commitExternalR2Observation(f);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          transportEdgeId: { in: [...f.delta.createdTransportEdgeIds] },
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(0);
+    expect(await readVersion(f.tripId)).toBe(f.adopted.trip.version);
+    const before = await previewFormalState(f.tripId);
+    const history = await groundHistory(
+      f.adopted.operationReceipt.adoptedRouteId,
+    );
+    const response = await undo(
+      userA,
+      f.adopted.trip,
+      f.adopted.operationReceipt.id,
+      randomUUID(),
+    );
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'UNDO_CONFLICT' } });
+    expect(await previewFormalState(f.tripId)).toEqual(before);
+    expect(
+      await groundHistory(f.adopted.operationReceipt.adoptedRouteId),
+    ).toEqual(history);
+  });
+  it.each([
+    { modes: ['RAIL'] as const },
+    { modes: ['WALKING'] as const },
+    { modes: ['RAIL', 'BUS'] as const },
+  ])(
+    'PR37 execution fence: immediate Undo includes initial transitions for %j',
+    async ({ modes }) => {
+      const f = await externalExecutionAdoptFixture(modes);
+      const facts = f.delta.afterGroundTransitLegFacts;
+      expect(facts).toHaveLength(
+        modes.filter((mode) => mode !== 'WALKING').length,
+      );
+      expect(f.delta.createdGroundTransitTransportEdgeIds).toEqual(
+        facts.map((leg) => String(leg.transportEdgeId)).sort(),
+      );
+      for (const leg of facts)
+        expect(leg).toMatchObject({
+          adoptedRouteId: f.adopted.operationReceipt.adoptedRouteId,
+          tripId: f.tripId,
+          state: 'PENDING',
+          latestFetchedAt: null,
+          latestObservationId: null,
+          latestObservationHash: null,
+          latestObservation: null,
+          observations: [],
+          stateTransitions: [
+            {
+              fromState: null,
+              toState: 'PENDING',
+              source: 'ROUTE_ADOPT',
+              evidenceRef: `adopted-route:${f.adopted.operationReceipt.adoptedRouteId}`,
+            },
+          ],
+        });
+      await managed.client.groundTransitLegExecution.updateMany({
+        where: { adoptedRouteId: f.adopted.operationReceipt.adoptedRouteId },
+        data: { updatedAt: new Date('2031-01-01T00:00:00Z') },
+      });
+      const response = await undo(
+        userA,
+        f.adopted.trip,
+        f.adopted.operationReceipt.id,
+        randomUUID(),
+      );
+      expect(response.statusCode, response.body).toBe(200);
+      expect(
+        await managed.client.itineraryNode.count({
+          where: { id: f.delta.materializedOriginNodeId },
+        }),
+      ).toBe(0);
+    },
+  );
+  async function expectExecutionUndoConflict(
+    f: Awaited<ReturnType<typeof externalExecutionAdoptFixture>>,
+  ) {
+    expect(
+      await managed.client.temporalValue.count({
+        where: {
+          transportEdgeId: { in: [...f.delta.createdTransportEdgeIds] },
+          layer: 'ACTUAL',
+        },
+      }),
+    ).toBe(0);
+    const before = await previewFormalState(f.tripId);
+    const ground = await groundHistory(
+      f.adopted.operationReceipt.adoptedRouteId,
+    );
+    const response = await undo(
+      userA,
+      f.adopted.trip,
+      f.adopted.operationReceipt.id,
+      randomUUID(),
+    );
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'UNDO_CONFLICT' } });
+    expect(await previewFormalState(f.tripId)).toEqual(before);
+    expect(
+      await groundHistory(f.adopted.operationReceipt.adoptedRouteId),
+    ).toEqual(ground);
+  }
+  it.each([0, 1])(
+    'PR37 execution fence: observation on either multi-leg R2 leg %s blocks Undo',
+    async (index) => {
+      const f = await externalExecutionAdoptFixture(['RAIL', 'BUS']);
+      expect(f.delta.afterGroundTransitLegFacts).toHaveLength(2);
+      await commitExternalR2Observation(f, index);
+      await expectExecutionUndoConflict(f);
+    },
+  );
+  it('PR37 execution fence: incomplete multi-leg receipt audit cannot ignore a live R2 ground leg', async () => {
+    const f = await externalExecutionAdoptFixture(['RAIL', 'BUS']);
+    const omitted = f.delta.afterGroundTransitLegFacts[0]!;
+    await managed.client.operationReceipt.update({
+      where: { id: f.adopted.operationReceipt.id },
+      data: {
+        delta: {
+          ...f.delta,
+          afterGroundTransitLegFacts:
+            f.delta.afterGroundTransitLegFacts.slice(1),
+          createdGroundTransitTransportEdgeIds:
+            f.delta.createdGroundTransitTransportEdgeIds.filter(
+              (id) => id !== omitted.transportEdgeId,
+            ),
+        } as unknown as JsonInput,
+      },
+    });
+    await expectExecutionUndoConflict(f);
+  });
+
+  it('PR37 execution fence: real derived location state advancement without edge ACTUAL blocks Undo', async () => {
+    const f = await externalExecutionAdoptFixture();
+    await managed.client.tripAssistanceCapability.create({
+      data: {
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+        kind: 'LOCATION_ASSISTANCE',
+        state: 'ENABLED',
+        revision: 1,
+        enabledAt: currentNow,
+      },
+    });
+    await new PrismaGroundTransitRepository(
+      managed.client,
+    ).recordDerivedLocationTransition({
+      ownerUserId: userA.actor.userId,
+      tripId: f.tripId,
+      nodeId: f.delta.materializedOriginNodeId,
+      transition: 'DEPARTURE',
+      observedAt: currentNow,
+      expectedLocationCapabilityRevision: 1,
+    });
+    const ground = await groundHistory(
+      f.adopted.operationReceipt.adoptedRouteId,
+    );
+    expect(ground.observations).toHaveLength(0);
+    expect(ground.legs[0]).toMatchObject({ state: 'IN_PROGRESS' });
+    expect(ground.transitions).toHaveLength(2);
+    expect(
+      ground.transitions.some((t) => t.source === 'LOCATION_ASSISTANCE'),
+    ).toBe(true);
+    expect(await readVersion(f.tripId)).toBe(f.adopted.trip.version);
+    await expectExecutionUndoConflict(f);
+  });
+  it.each([
+    'delete',
+    'extra-leg',
+    'baseline',
+    'service-identity',
+    'transport-edge',
+    'state',
+    'provider',
+    'leg-index',
+    'latest-fetched',
+    'latest-id',
+    'latest-hash',
+    'latest-facts',
+    'deviation-start',
+    'deviation-count',
+    'next-check',
+    'transition-delete',
+    'transition-edit',
+    'transition-add',
+    'observation-delete',
+    'observation-edit',
+  ])(
+    'PR37 execution fence: %s tampering without version increment blocks Undo',
+    async (kind) => {
+      const f = await externalExecutionAdoptFixture();
+      const leg =
+        await managed.client.groundTransitLegExecution.findFirstOrThrow({
+          where: { adoptedRouteId: f.adopted.operationReceipt.adoptedRouteId },
+        });
+      if (kind === 'delete')
+        await managed.client.groundTransitLegExecution.delete({
+          where: { id: leg.id },
+        });
+      else if (kind === 'extra-leg') {
+        const { latestObservation: unused, ...copy } = leg;
+        void unused;
+        await managed.client.groundTransitLegExecution.create({
+          data: {
+            ...copy,
+            id: randomUUID(),
+            transportEdgeId: randomUUID(),
+            baseline: leg.baseline as JsonInput,
+          },
+        });
+      } else if (kind === 'transition-delete')
+        await managed.client.groundTransitStateTransition.deleteMany({
+          where: { legExecutionId: leg.id },
+        });
+      else if (kind === 'transition-edit')
+        await managed.client.groundTransitStateTransition.updateMany({
+          where: { legExecutionId: leg.id },
+          data: { evidenceRef: 'SYNTHETIC tampered' },
+        });
+      else if (kind === 'transition-add')
+        await managed.client.groundTransitStateTransition.create({
+          data: {
+            legExecutionId: leg.id,
+            fromState: 'PENDING',
+            toState: 'PENDING',
+            source: 'PROVIDER_OBSERVATION',
+            evidenceRef: 'SYNTHETIC additional transition',
+            occurredAt: currentNow,
+          },
+        });
+      else if (kind === 'observation-delete' || kind === 'observation-edit') {
+        await commitExternalR2Observation(f);
+        if (kind === 'observation-delete')
+          await managed.client.groundTransitObservation.deleteMany({
+            where: { legExecutionId: leg.id },
+          });
+        else
+          await managed.client.groundTransitObservation.updateMany({
+            where: { legExecutionId: leg.id },
+            data: {
+              factsHash: 'f'.repeat(64),
+              facts: { schema: 'SYNTHETIC tampered' },
+            },
+          });
+      } else {
+        const data =
+          kind === 'baseline'
+            ? { baseline: { schemaVersion: 'SYNTHETIC tampered' } }
+            : kind === 'service-identity'
+              ? { serviceIdentityKey: 'SYNTHETIC tampered' }
+              : kind === 'transport-edge'
+                ? { transportEdgeId: randomUUID() }
+                : kind === 'state'
+                  ? { state: 'IN_PROGRESS' as const }
+                  : kind === 'provider'
+                    ? { provider: 'SYNTHETIC_OTHER' }
+                    : kind === 'leg-index'
+                      ? { legIndex: 9 }
+                      : kind === 'latest-fetched'
+                        ? { latestFetchedAt: currentNow }
+                        : kind === 'latest-id'
+                          ? { latestObservationId: 'SYNTHETIC changed' }
+                          : kind === 'latest-hash'
+                            ? { latestObservationHash: 'f'.repeat(64) }
+                            : kind === 'latest-facts'
+                              ? {
+                                  latestObservation: {
+                                    provider: 'SYNTHETIC changed',
+                                  },
+                                }
+                              : kind === 'deviation-start'
+                                ? { deviationStartedAt: currentNow }
+                                : kind === 'deviation-count'
+                                  ? { deviationCount: 1 }
+                                  : { nextCheckAt: currentNow };
+        await managed.client.groundTransitLegExecution.update({
+          where: { id: leg.id },
+          data,
+        });
+      }
+      expect(await readVersion(f.tripId)).toBe(f.adopted.trip.version);
+      await expectExecutionUndoConflict(f);
+    },
+  );
+  function executionGate() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+  async function waitForOwnerLockWait() {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const rows = await managed.client.$queryRawUnsafe<{ count: number }[]>(
+        `SELECT count(*)::integer AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND position('pg_advisory_xact_lock' in query)>0 AND pid<>pg_backend_pid()`,
+      );
+      if ((rows[0]?.count ?? 0) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error(
+      'SYNTHETIC concurrent operation did not wait on owner lock',
+    );
+  }
+  it.each(['undo', 'observation'] as const)(
+    'PR37 execution fence: %s wins owner/Trip locks with no lost observation',
+    async (winner) => {
+      const f = await externalExecutionAdoptFixture();
+      const { input, leg } = await externalR2ObservationInput(f);
+      const held = executionGate();
+      const release = executionGate();
+      const extended = managed.client.$extends({
+        query: {
+          adoptedRoute: {
+            async updateMany({ args, query }) {
+              const result = await query(args);
+              if (winner === 'undo' && args.data.status === 'UNDONE') {
+                held.resolve();
+                await release.promise;
+              }
+              return result;
+            },
+          },
+          groundTransitObservation: {
+            async create({ args, query }) {
+              const result = await query(args);
+              if (winner === 'observation') {
+                held.resolve();
+                await release.promise;
+              }
+              return result;
+            },
+          },
+        },
+      });
+      const service = new RouteUndoService(
+        new PrismaRoutePlanningRepository(
+          extended as unknown as ManagedPrismaClient['client'],
+        ),
+        new TripService(tripRepository),
+        { now: () => currentNow },
+      );
+      const repository = new PrismaGroundTransitRepository(
+        extended as unknown as ManagedPrismaClient['client'],
+      );
+      const runUndo = () =>
+        service
+          .undoAdoption(userA.actor, f.tripId, f.adopted.operationReceipt.id, {
+            baseTripVersion: f.adopted.trip.version,
+            idempotencyKey: randomUUID(),
+          })
+          .then(
+            (response) => ({ status: 'SUCCESS', response }),
+            (error: { code: string }) => ({ status: error.code }),
+          );
+      let pendingUndo: ReturnType<typeof runUndo>;
+      let pendingObservation: ReturnType<typeof repository.commitObservation>;
+      try {
+        if (winner === 'undo') {
+          pendingUndo = runUndo();
+          await held.promise;
+          pendingObservation = repository.commitObservation(input);
+        } else {
+          pendingObservation = repository.commitObservation(input);
+          await held.promise;
+          pendingUndo = runUndo();
+        }
+        await waitForOwnerLockWait();
+      } finally {
+        release.resolve();
+      }
+      const [undoResult, observationResult] = await Promise.all([
+        pendingUndo!,
+        pendingObservation!,
+      ]);
+      expect(undoResult.status).toBe(
+        winner === 'undo' ? 'SUCCESS' : 'UNDO_CONFLICT',
+      );
+      expect(observationResult.status).toBe(
+        winner === 'undo' ? 'NOT_FOUND' : 'APPLIED',
+      );
+      expect(
+        await managed.client.groundTransitObservation.count({
+          where: { legExecutionId: leg.id },
+        }),
+      ).toBe(winner === 'undo' ? 0 : 1);
+      if (winner === 'observation') {
+        expect(
+          await managed.client.itineraryNode.count({
+            where: { id: f.delta.materializedOriginNodeId },
+          }),
+        ).toBe(1);
+        expect(
+          await managed.client.adoptedRoute.findUniqueOrThrow({
+            where: { id: f.adopted.operationReceipt.adoptedRouteId },
+          }),
+        ).toMatchObject({ status: 'ACTIVE' });
+      }
+    },
+  );
   function temporalEvidence(value: {
     id: string;
     nodeId: string | null;

@@ -56,6 +56,8 @@ function fixture(): RouteAdoptDeltaV5 {
     archivableProviderActualTransportEdgeIds: [id(31)],
     archivedSuffixHash: 'c'.repeat(64),
     afterGeneratedNodeFacts: [{ id: id(60) }],
+    createdGroundTransitTransportEdgeIds: [],
+    afterGroundTransitLegFacts: [],
     createdNodeIds: [id(60)],
     createdPlaceIds: [id(61)],
     createdDayOccurrenceIds: [],
@@ -81,8 +83,103 @@ function fixture(): RouteAdoptDeltaV5 {
   };
 }
 const parse = (value: unknown) =>
-  parseRouteAdoptDelta(value as Prisma.JsonValue);
+  parseRouteAdoptDelta(value as Prisma.JsonValue, id(80));
+function groundFixture() {
+  const delta = fixture();
+  return {
+    ...delta,
+    createdGroundTransitTransportEdgeIds: [id(71)],
+    afterGroundTransitLegFacts: [
+      {
+        id: id(81),
+        tripId: id(1),
+        adoptedRouteId: id(80),
+        transportEdgeId: id(71),
+        legIndex: 0,
+        provider: 'SYNTHETIC',
+        mode: 'RAIL',
+        serviceClass: null,
+        serviceIdentityKey: null,
+        baseline: {},
+        state: 'PENDING',
+        latestFetchedAt: null,
+        latestObservationId: null,
+        latestObservationHash: null,
+        latestObservation: null,
+        deviationStartedAt: null,
+        deviationCount: 0,
+        nextCheckAt: null,
+        observations: [],
+        stateTransitions: [
+          {
+            id: id(82),
+            legExecutionId: id(81),
+            fromState: null,
+            toState: 'PENDING',
+            source: 'ROUTE_ADOPT',
+            evidenceRef: `adopted-route:${id(80)}`,
+            occurredAt: '2030-10-01T10:00:00.000Z',
+          },
+        ],
+      },
+    ],
+  };
+}
 describe('external route receipt restoration relationships', () => {
+  it('accepts deterministic Adopt-created Ground Transit baseline and initial transition', () => {
+    expect(parse(groundFixture())).toEqual(groundFixture());
+  });
+  it.each([
+    'missing',
+    'not-array',
+    'not-record',
+    'invalid-leg-id',
+    'duplicate-leg',
+    'duplicate-edge',
+    'wrong-route',
+    'wrong-edge',
+    'missing-coverage',
+    'wrong-mode',
+    'post-adopt-observation',
+    'wrong-transition',
+  ])('rejects %s Ground Transit audit before restoration', (kind) => {
+    const d = groundFixture();
+    const leg = d.afterGroundTransitLegFacts[0]!;
+    let change: object;
+    if (kind === 'missing') change = { afterGroundTransitLegFacts: undefined };
+    else if (kind === 'not-array') change = { afterGroundTransitLegFacts: {} };
+    else if (kind === 'not-record')
+      change = { afterGroundTransitLegFacts: [null] };
+    else if (kind === 'duplicate-leg')
+      change = { afterGroundTransitLegFacts: [leg, leg] };
+    else if (kind === 'duplicate-edge')
+      change = { afterGroundTransitLegFacts: [leg, { ...leg, id: id(90) }] };
+    else if (kind === 'missing-coverage')
+      change = { afterGroundTransitLegFacts: [] };
+    else {
+      const edited =
+        kind === 'invalid-leg-id'
+          ? { id: 'invalid' }
+          : kind === 'wrong-route'
+            ? { adoptedRouteId: id(99) }
+            : kind === 'wrong-edge'
+              ? { transportEdgeId: id(99) }
+              : kind === 'wrong-mode'
+                ? { mode: 'WALKING' }
+                : kind === 'post-adopt-observation'
+                  ? { observations: [{}] }
+                  : {
+                      stateTransitions: [
+                        {
+                          ...leg.stateTransitions[0],
+                          source: 'LOCATION_ASSISTANCE',
+                        },
+                      ],
+                    };
+      change = { afterGroundTransitLegFacts: [{ ...leg, ...edited }] };
+    }
+    expect(parse({ ...d, ...change })).toBeNull();
+  });
   it('supports first-edge one-node prefix without inventing a divergence-to-E edge', () => {
     const delta = fixture();
     expect(parse(delta)).toEqual(delta);

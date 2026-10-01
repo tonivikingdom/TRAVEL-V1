@@ -4,7 +4,7 @@
 
 Starting main: `5653ad561f27a8a7b80bd8747f720871a6ef8f7c`.
 Branch: `feature/p5e2-external-origin-adopt-undo`.
-Delivery: new Draft PR; no Ready, Merge, or deployment.
+Delivery: continue Draft PR #37; no Ready, Merge, or deployment.
 
 ## Product behavior
 
@@ -60,11 +60,31 @@ Undo first marks R2 UNDONE and sets `anchorFromNodeId=null`, then removes create
 
 Same-key concurrent Adopt/Undo replay one receipt. Different-key devices commit once and receive VERSION_CONFLICT or UNDO_CONFLICT. A later handoff after Undo can expose externalQuery at the new version if E remains CURRENT; Query/Preview/Adopt always require fresh explicit actions.
 
+## PR #37 execution evidence fence repair
+
+Repair recommendation: GPT-6 Sol / High; no Astra required for this focused state/audit/concurrency repair. Actual session model configuration cannot be verified from the execution environment. Escalation is limited to a demonstrated lock/audit architecture problem; none was needed. Reviewed repair starting HEAD: `94638187ad6ed78613a03c6213882250769aa967`.
+
+External route Undo is available only before the adopted R2 accumulates execution evidence. A Ground Transit Provider observation or state transition is execution evidence even when no TransportEdge ACTUAL has yet been written.
+
+The reproduction committed a real SYNTHETIC ON_TIME observation through `PrismaGroundTransitRepository.commitObservation`: one observation, zero R2 edge ACTUAL, unchanged Trip.version. Before this repair, Undo incorrectly returned 200 and removed formal E. The repaired path returns 409 UNDO_CONFLICT and leaves the formal Trip, R1/R2, receipts, external origin and execution history unchanged.
+
+V5 now records `afterGroundTransitLegFacts` after all candidate edges and Adopt-created Ground Transit baselines exist. `externalGroundTransitExecutionFacts` selects leg identity, Trip/route/edge, index, provider/mode/service identity/class, baseline, state, latest observation/fetch fields, deviation state/count and nextCheckAt. It includes immutable observation IDs/identity/fetch/hash/facts and complete state transitions. Dates normalize to ISO JSON; records sort by ID and object keys use `hashExternalRouteAudit`. Leg/observation ORM createdAt/updatedAt are excluded. The original PENDING / ROUTE_ADOPT / adopted-route:R2 transition is the expected baseline, not post-Adopt execution.
+
+`createdGroundTransitTransportEdgeIds` records exact RAIL/BUS coverage. The V5 parser validates unique UUID leg/edge identities, receipt-target R2 ownership, created-edge membership, exact audit coverage and initial transition shape. Locked Undo also compares that coverage with actual live R2 RAIL/BUS edges, so removing both a fact and its coverage entry cannot silently omit a leg. Zero ground legs require empty coverage/facts arrays.
+
+V5 Undo holds FOR UPDATE on R2 GroundTransitLegExecution parents and existing GroundTransitObservation/StateTransition children before current-state validation. It reloads canonical facts and rejects every difference before teardown. Observation commit, derived location advancement, changed latest/deviation/scheduler fields, missing/extra/tampered legs and modified/deleted transitions or observations all conflict without needing an edge ACTUAL or Trip.version change. Existing edge-ACTUAL guards remain additive. Old R1 Provider ACTUAL remains archivable/restorable under its existing lifecycle rules.
+
+Real owner/Trip concurrency verifies both winners: an observation committed first fences Undo; Undo committed first makes the later normal Provider commit return NOT_FOUND because R2/edge is no longer current. Raw FK insertion tests for observations and transitions bypass the owner lock and prove that parent locks prevent insertion throughout validation/teardown. After Undo commits, a raw insert may append evidence to the retained historical leg; it cannot slip into the protected interval and no evidence is cascade-deleted. Historical legs intentionally survive Undo.
+
+This repair adds no migration and does not change migration 23 or migrations 1–22. Total remains 23. It does not alter node-route V2/V3/V4 semantics, external origin lifecycle, anchor snapshots, materialization rules or Provider ACTUAL archival policy.
+
+Repair cloud validation: frozen install, Prisma generate/validate, format, lint, full typecheck and build PASS; Unit **700/700** and PostgreSQL 17 integration **564/564** (86 persistence + 478 API). Clean 23 migrations and populated 22→23 deployment PASS; 19 existing tables preserved. Added repair coverage: 30 API PostgreSQL cases, two raw Ground Transit FK serialization cases and 13 receipt Unit cases. The original 5B2B defensive, legacy node/receipt, migration/anchor and immediate-Undo regressions remain green. API/Worker/Debug Web, Compose, P5B and final-head CI evidence are recorded in the Draft PR delivery report.
+
 ## Validation evidence
 
 Cloud focused PostgreSQL verifies first/middle/last edges, exact Provider ACTUAL archival/restoration, prefix hash stability, Node/Place deletion, detached historical anchor, read-only handoff restoration, same-key replay, different-key concurrency, departures, supersession/conflict, source/edge/leg/protection/metadata/time races, same-ID C reuse and new/repeated date-card restoration. Dedicated raw-FK concurrency tests prove new ACTUAL inserts block on parent locks and cannot be lost through cascade. Migration tests cover clean 23, populated 22→23 preservation and CHECK/same-Trip FK cases. Receipt unit tests cover V5 invariants and legacy V2/V3/V4 parsing.
 
-The final implementation passed the following cloud checks before Draft PR creation:
+The originally reviewed implementation passed the following cloud checks before Draft PR creation; repair validation is recorded separately below:
 
 | Check                          | Result                                                                                                                                                      |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |

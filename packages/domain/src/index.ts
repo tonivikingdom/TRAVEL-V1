@@ -182,3 +182,5 @@ export {
   classifyExternalReplacementTransportActual,
   type ExternalOriginReplacementCorridor,
 } from './external-origin-replacement-corridor.js';
+
+export * from './trusted-route-endpoints.js';

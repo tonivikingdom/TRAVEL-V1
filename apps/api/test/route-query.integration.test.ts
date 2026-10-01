@@ -14,6 +14,7 @@ import {
   type GroundTransitProvider,
   hashRoutePreviewPayload,
   hashRouteCandidateSnapshot,
+  hashExternalRouteCandidateSnapshot,
   buildExternalOriginPreviewPayload,
   RouteAdoptionService,
   RoutePreviewService,
@@ -88,6 +89,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
   let providerInputs: RouteProviderQueryInput[];
   let providerResult: RouteProviderResult;
   let currentNow: Date;
+  let externalEndpointFault:
+    'origin' | 'destination' | 'hub' | 'name' | undefined;
   let providerHook: (() => Promise<void>) | undefined;
   let tripRepository: PrismaTripRepository;
   let hubResolver: GroundTransitHubResolver;
@@ -107,6 +110,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     providerInputs = [];
     currentNow = NOW;
     providerHook = undefined;
+    externalEndpointFault = undefined;
     providerResult = {
       status: 'SUCCESS',
       candidates: [candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z')],
@@ -360,6 +364,51 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     await managed.close();
   });
 
+  // This test adapter returns the requested endpoints, like the synthetic production adapter.
+  // Fault injection deliberately contradicts them for malformed-response regressions.
+  function externalProviderResult(
+    input: RouteProviderQueryInput,
+  ): RouteProviderResult {
+    if (providerResult.status !== 'SUCCESS') return providerResult;
+    return {
+      ...providerResult,
+      candidates: providerResult.candidates.map((candidate) => ({
+        ...candidate,
+        legs: candidate.legs.map((leg, index) => ({
+          ...leg,
+          from:
+            index === 0
+              ? {
+                  ...input.origin,
+                  providerPlaceRef: null,
+                  providerHubRef: null,
+                  ...(externalEndpointFault === 'origin'
+                    ? { latitude: input.origin.latitude! + 1 }
+                    : {}),
+                  ...(externalEndpointFault === 'hub'
+                    ? { providerHubRef: 'synthetic:wrong-hub' }
+                    : {}),
+                  ...(externalEndpointFault === 'name'
+                    ? { latitude: null, longitude: null }
+                    : {}),
+                }
+              : leg.from,
+          to:
+            index === candidate.legs.length - 1
+              ? {
+                  ...input.destination,
+                  providerPlaceRef: null,
+                  providerHubRef: null,
+                  ...(externalEndpointFault === 'destination'
+                    ? { longitude: input.destination.longitude! + 1 }
+                    : {}),
+                }
+              : leg.to,
+        })),
+      })),
+    };
+  }
+
   async function externalFixture(
     changes: Parameters<typeof groundSequence>[0] = ['SHORT_TURN'],
   ) {
@@ -369,7 +418,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       new SyntheticRouteProvider(async (input) => {
         providerInputs.push(input);
         await providerHook?.();
-        return providerResult;
+        return externalProviderResult(input);
       }),
       groundSequence(changes),
     );
@@ -534,7 +583,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       new SyntheticRouteProvider(async (input) => {
         providerInputs.push(input);
         await providerHook?.();
-        return providerResult;
+        return externalProviderResult(input);
       }),
       groundSequence(changes),
     );
@@ -1101,6 +1150,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     'prefix-topology',
     'TTL',
     'snapshot-hash',
+    'destination-endpoint',
   ] as const)(
     'P5E2 5B2A: locked Preview revalidates race %s with zero writes',
     async (kind) => {
@@ -1130,7 +1180,16 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         context,
         now: currentNow,
       });
-      if (kind === 'departure') {
+      if (kind === 'destination-endpoint') {
+        const destination = trip.dayOccurrences
+          .flatMap((day) => day.nodes)
+          .find((node) => node.id === snapshot.toNodeId);
+        if (!destination?.place) throw new Error('missing destination');
+        await managed.client.place.update({
+          where: { id: destination.place.id },
+          data: { latitude: 0 },
+        });
+      } else if (kind === 'departure') {
         const response = await app.inject({
           method: 'POST',
           url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/depart`,
@@ -1589,6 +1648,99 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     providerInputs.length = 0;
     return { ...f, result, body, url };
   }
+  it.each(['origin', 'destination', 'hub', 'name'] as const)(
+    'rejects external Provider endpoint fault %s without writes',
+    async (fault) => {
+      const f = await confirmedExternalQueryFixture();
+      externalEndpointFault = fault;
+      const before = await externalDurableState(f.trip.id);
+      const response = await externalQuery(f);
+      expect(response.statusCode, response.body).toBe(503);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PROVIDER_UNAVAILABLE' },
+      });
+      expect(await externalDurableState(f.trip.id)).toEqual(before);
+    },
+  );
+
+  it('accepts external Query exact-coordinate fallback without structured refs', async () => {
+    const f = await confirmedExternalQueryFixture();
+    const response = await externalQuery(f);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().candidates[0].legs[0].from).toMatchObject({
+      latitude: f.result.origin.latitude,
+      longitude: f.result.origin.longitude,
+      providerPlaceRef: null,
+      providerHubRef: null,
+    });
+  });
+
+  it.each(['origin', 'destination'] as const)(
+    'rejects valid-hash persisted external candidate with wrong %s',
+    async (endpoint) => {
+      const f = await externalPreviewFixture();
+      const repository = new PrismaRoutePlanningRepository(managed.client);
+      const snapshot = await repository.findSnapshotOwned({
+        ownerUserId: userA.actor.userId,
+        tripId: f.tripId,
+        snapshotId: f.snapshotId,
+      });
+      if (!snapshot || snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN')
+        throw new Error('missing external snapshot');
+      const payload = {
+        ...snapshot.candidatePayload,
+        legs: snapshot.candidatePayload.legs.map((leg, index) => ({
+          ...leg,
+          from:
+            endpoint === 'origin' && index === 0
+              ? { ...leg.from, latitude: 0, providerHubRef: 'wrong' }
+              : leg.from,
+          to:
+            endpoint === 'destination' &&
+            index === snapshot.candidatePayload.legs.length - 1
+              ? {
+                  ...leg.to,
+                  longitude: 0,
+                  providerPlaceRef: null,
+                  providerHubRef: null,
+                }
+              : leg.to,
+        })),
+      };
+      const candidateHash = hashExternalRouteCandidateSnapshot({
+        tripId: f.tripId,
+        basisVersion: snapshot.basisVersion,
+        toNodeId: snapshot.toNodeId,
+        provider: snapshot.provider,
+        observedAt: snapshot.observedAt.toISOString(),
+        candidatePayload: payload,
+        externalOriginSnapshot: snapshot.origin.snapshot,
+      });
+      await managed.client.routeCandidateSnapshot.update({
+        where: { id: f.snapshotId },
+        data: {
+          candidatePayload: payload as unknown as JsonInput,
+          candidateHash,
+        },
+      });
+      const before = await previewFormalState(f.tripId);
+      const previewCount = await managed.client.routePreview.count({
+        where: { tripId: f.tripId },
+      });
+      const response = await previewFromExternalFixture(f);
+      expect(response.statusCode, response.body).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PREVIEW_STALE' },
+      });
+      expect(
+        await managed.client.routePreview.count({
+          where: { tripId: f.tripId },
+        }),
+      ).toBe(previewCount);
+      expect(await previewFormalState(f.tripId)).toEqual(before);
+    },
+  );
+
   async function readVersion(tripId: string) {
     return (
       await managed.client.trip.findUniqueOrThrow({ where: { id: tripId } })
@@ -1710,7 +1862,17 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           return {
             status: 'SUCCESS',
             candidates: [
-              candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z'),
+              {
+                ...candidate('2030-10-01T10:00:00Z', '2030-10-01T11:00:00Z'),
+                legs: candidate(
+                  '2030-10-01T10:00:00Z',
+                  '2030-10-01T11:00:00Z',
+                ).legs.map((leg) => ({
+                  ...leg,
+                  from: { ...input.origin, providerPlaceRef: null },
+                  to: { ...input.destination, providerPlaceRef: null },
+                })),
+              },
             ],
           };
         }),

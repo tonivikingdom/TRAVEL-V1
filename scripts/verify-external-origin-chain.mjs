@@ -262,6 +262,19 @@ export async function verifyExternalOriginChain({
     )) === '1',
     'external snapshot origin shape invalid',
   );
+  const externalCandidate = queried.candidates[0];
+  const firstEndpoint = externalCandidate.legs[0].from;
+  assert(
+    firstEndpoint.latitude === result.origin.latitude &&
+      firstEndpoint.longitude === result.origin.longitude,
+    'synthetic candidate does not start at trusted external E',
+  );
+  assert(
+    (await sql(
+      `SELECT count(*) FROM "RouteCandidateSnapshot" s JOIN "ItineraryNode" n ON n."id"=s."toNodeId" JOIN "Place" p ON p."id"=n."placeId" WHERE s."id"='${externalCandidate.candidateSnapshotId}' AND (s."candidatePayload"->'legs'->-1->'to'->>'latitude')::numeric=p."latitude" AND (s."candidatePayload"->'legs'->-1->'to'->>'longitude')::numeric=p."longitude";`,
+    )) === '1',
+    'synthetic candidate does not end at trusted itinerary D',
+  );
   const beforePreview = await footprint();
   const externalPreview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
     basisVersion: result.resultingTripVersion,

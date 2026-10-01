@@ -2,6 +2,7 @@ import type { ExternalOriginReplacementView } from '@travel/contracts';
 import {
   resolveExternalOriginReplacementCorridor,
   validateRouteCandidate,
+  validateExternalRouteCandidateEndpoints,
 } from '@travel/domain';
 import type { ExternalOriginPlanningContext } from './external-execution-origin-ports.js';
 import {
@@ -101,6 +102,23 @@ export function buildExternalOriginPreviewPayload(input: {
   } catch {
     throw stalePreview();
   }
+  const trustedDestination = nodes.find(
+    (node) => node.id === snapshot.toNodeId,
+  );
+  if (
+    !trustedDestination?.place ||
+    !validateExternalRouteCandidateEndpoints(
+      candidate,
+      { ...evidence, providerPlaceRef: null },
+      {
+        latitude: trustedDestination.place.latitude,
+        longitude: trustedDestination.place.longitude,
+        providerPlaceRef: trustedDestination.providerPlaceRef ?? null,
+        providerHubRef: trustedDestination.providerHubRef ?? null,
+      },
+    )
+  )
+    throw stalePreview();
   const downstream = externalRouteDestinationSchedule(trip, snapshot.toNodeId);
   const destinationProjection = downstream.schedule.nodes.find(
     (node) => node.nodeId === snapshot.toNodeId,

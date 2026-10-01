@@ -92,3 +92,11 @@ The first independent CI run exposed an existing cancellation/recovery fixture o
 Zero new migrations; 22 total. Prisma schema and all migration files are unchanged. No changes to AdoptedRoute anchors, route delta v2/v3/v4, Undo or external-origin persistence mapping.
 
 Batch 5B2B is not started. External Adopt/materialization/archival, delta v5 and external Undo remain unsupported. Automatic Query/Preview/Adopt, GPS confirmation/routing, real Hub Resolver, paid Provider, formal UI, Push, Staging and Production remain absent. F-05/F-06/F-07/F-08 remain open.
+
+## PR #36 trusted endpoint binding repair
+
+External Query and External Preview share the pure Domain `validateExternalRouteCandidateEndpoints` matcher. Comparable provider place references take priority, then comparable hub references; otherwise both latitude and longitude must exactly match. Contradictory structured identity rejects even with identical coordinates. Names and proximity do not establish endpoint identity.
+
+The origin is the copied trusted external execution origin evidence. The destination is the actual current itinerary destination node and Place. Query rejects a contradictory Provider response before snapshot writes. Preview independently rejects valid-hash historical or corrupted snapshots with `PREVIEW_STALE`; locked Preview recomputation repeats this check before insertion. Existing candidate hash formats, node-origin planning, Provider ACTUAL classification, schema and 22 migrations remain unchanged.
+
+Repair validation on the cloud environment: focused PostgreSQL/API 72 cases; focused matcher/Preview Unit 25 cases; full Unit 668; full PostgreSQL integration 476 (79 persistence + 397 API). Frozen install, Prisma generate/validate, format, lint, full typecheck, clean 22 migrations, populated 21→22 preservation, build, API/Worker/Debug Web, Docker Compose and P5B all pass. P5B: 5 users, 200 requests, zero isolation failures, unexpected 5xx or network failures. The synthetic Compose chain explicitly checks E/D endpoint coordinates before Preview. External Adopt remains controlled `422 PREVIEW_UNSUPPORTED`; no materialization, delta v5, Undo change, Batch 5B2B work or deployment.

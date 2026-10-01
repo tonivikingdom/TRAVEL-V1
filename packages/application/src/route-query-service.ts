@@ -21,6 +21,7 @@ import {
   ROUTE_QUERY_LOOKBACK_SECONDS,
   VALUE_EFFECTIVE_TIME_BASIS_POINTS,
   validateRouteCandidate,
+  validateExternalRouteCandidateEndpoints,
   type DwellPlanningAssessment,
   type NormalizedRouteCandidate,
   type RouteLocation,
@@ -354,6 +355,17 @@ export class RouteQueryService {
       basisVersion,
       arrival: null,
       fromNode: null,
+      validateEndpoints: (candidate) =>
+        validateExternalRouteCandidateEndpoints(
+          candidate,
+          { ...originSnapshot, providerPlaceRef: null },
+          {
+            latitude: destination.latitude,
+            longitude: destination.longitude,
+            providerPlaceRef: destinationNode.providerPlaceRef ?? null,
+            providerHubRef: destinationNode.providerHubRef ?? null,
+          },
+        ),
       hash: (facts) =>
         hashExternalRouteCandidateSnapshot({
           ...facts,
@@ -391,7 +403,9 @@ export class RouteQueryService {
     fromNode,
     hash,
     save,
+    validateEndpoints,
   }: {
+    validateEndpoints?: (candidate: NormalizedRouteCandidate) => boolean;
     origin: RouteProviderLocationInput;
     destination: RouteProviderLocationInput;
     time: NormalizedQueryTime;
@@ -448,6 +462,8 @@ export class RouteQueryService {
         throw invalidProviderResponse();
       }
       candidateIds.add(candidate.candidateId);
+      if (validateEndpoints && !validateEndpoints(candidate))
+        throw invalidProviderResponse();
       const validation = validateRouteCandidate(candidate, {
         earliestDeparture: time.earliestDeparture,
         latestArrival: time.latestArrival,

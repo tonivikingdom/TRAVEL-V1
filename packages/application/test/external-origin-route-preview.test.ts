@@ -194,6 +194,7 @@ function fixture() {
           ...location,
           name: 'SYNTHETIC D',
           latitude: 35.03,
+          longitude: 139,
           providerHubRef: null,
         },
         departure,

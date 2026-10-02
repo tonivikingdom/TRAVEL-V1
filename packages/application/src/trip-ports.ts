@@ -164,6 +164,7 @@ export interface TripAggregateRecord {
 }
 
 export interface AdoptedRouteRecord {
+  readonly savedLegs?: readonly import('@travel/contracts').RouteCandidateLegView[];
   readonly id: string;
   readonly tripId: string;
   readonly anchorFromNodeId: string | null;

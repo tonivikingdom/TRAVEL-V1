@@ -66,6 +66,7 @@ const tripInclude = {
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   },
   adoptedRoutes: {
+    include: { sourcePreview: { select: { previewPayload: true } } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   },
 } satisfies Prisma.TripInclude;
@@ -1453,7 +1454,16 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
       transportProjections: occurrence.transportProjections,
     })),
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
-    adoptedRoutes: trip.adoptedRoutes,
+    adoptedRoutes: trip.adoptedRoutes.map(({ sourcePreview, ...route }) => {
+      const payload =
+        sourcePreview.previewPayload as unknown as import('@travel/application').StoredRoutePreviewPayload;
+      return {
+        ...route,
+        ...(Array.isArray(payload.candidate?.legs)
+          ? { savedLegs: payload.candidate.legs }
+          : {}),
+      };
+    }),
     routeExecutionEvents: trip.executionEvents,
     externalExecutionFacts: trip.externalExecutionOrigins.flatMap((origin) => [
       origin.arrivedAt,

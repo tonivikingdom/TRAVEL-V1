@@ -530,6 +530,17 @@ function toTripView(record: TripAggregateRecord): TripView {
     updatedAt: record.updatedAt.toISOString(),
     days,
     connections: projectConnections(record),
+    savedRoutes: (record.adoptedRoutes ?? [])
+      .filter(
+        (route) => route.status === 'ACTIVE' && route.savedLegs !== undefined,
+      )
+      .map((route) => ({
+        adoptedRouteId: route.id,
+        transportEdgeIds: record.transportEdges
+          .filter((edge) => edge.adoptedRouteId === route.id)
+          .map((edge) => edge.id),
+        legs: route.savedLegs!,
+      })),
   };
 }
 

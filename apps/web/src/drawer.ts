@@ -71,6 +71,11 @@ export class DetailDrawer {
             `[${this.openerKey.attribute}="${CSS.escape(this.openerKey.value)}"]`,
           )
         : null;
-    target?.focus();
+    (
+      target ??
+      document.querySelector<HTMLElement>(
+        '#app [data-action=reload], #app #login input',
+      )
+    )?.focus();
   }
 }

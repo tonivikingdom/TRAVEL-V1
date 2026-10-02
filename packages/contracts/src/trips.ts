@@ -169,6 +169,12 @@ export interface TripView {
   readonly updatedAt: string;
   readonly days: readonly DayView[];
   readonly connections: readonly ConnectionView[];
+  /** Saved selected segments, read from owned adoption evidence; no Provider refresh. */
+  readonly savedRoutes?: readonly {
+    readonly adoptedRouteId: string;
+    readonly transportEdgeIds: readonly string[];
+    readonly legs: readonly import('./routes.js').RouteCandidateLegView[];
+  }[];
 }
 
 export interface TripListResponse {

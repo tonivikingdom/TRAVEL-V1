@@ -14,7 +14,7 @@ Production hosting is not configured or authorized by this batch. Any eventual h
 - `pnpm exec playwright install --with-deps chromium webkit`
 - `WEB_TEST_WEBKIT=true pnpm test:web`: browser contract fixtures, clearly SYNTHETIC. Chromium alone is the default for environments lacking WebKit.
 - Optional `WEB_TEST_CHROMIUM_PATH=/usr/bin/chromium` uses an installed Chromium. `WEB_TEST_SCREENSHOTS=true` captures review images.
-- `pnpm exec tsx scripts/p6a1-browser-postgres.ts`: actual HTTP/PostgreSQL/browser chain. Requires dev/test `DATABASE_URL` to a separately created local database named `travel_p6a1_browser_*`, with the 24 migrations deployed. Never use production or the integration suite's shared database. This creates synthetic private rows for evidence and stops its local API/Web processes. No real Provider calls.
+- `pnpm exec tsx --tsconfig scripts/p6a1-browser-tsconfig.json scripts/p6a1-browser-postgres.ts`: actual HTTP/PostgreSQL/browser chain. Requires dev/test `DATABASE_URL` to a separately created local database named `travel_p6a1_browser_*`, with the 24 migrations deployed. Never use production or the integration suite's shared database. This creates synthetic private rows for evidence and stops its local API/Web processes. No real Provider calls.
 
 ## Maps boundary
 

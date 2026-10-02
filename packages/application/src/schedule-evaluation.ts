@@ -135,3 +135,27 @@ export function externalRouteDestinationSchedule(
   };
   return { trip: retained, schedule: evaluateTripScheduleRecord(retained) };
 }
+
+/** Query/Preview of a replacement must not inherit the abandoned service's
+ * PLANNED anchors. User intents, node facts, retained services and all ACTUAL
+ * evidence remain in the existing authoritative evaluator. Formal projection
+ * is unchanged; this is a planning-only view of the same Trip. */
+export function evaluateRouteReplacementSchedule(
+  trip: TripAggregateRecord,
+  replacementTransportEdgeIds: readonly string[],
+): ScheduleEvaluationResult {
+  const replaced = new Set(replacementTransportEdgeIds);
+  return evaluateTripScheduleRecord({
+    ...trip,
+    transportEdges: trip.transportEdges.map((edge) =>
+      replaced.has(edge.id) && edge.source === 'ADOPTED_ROUTE'
+        ? {
+            ...edge,
+            timeValues: edge.timeValues.filter(
+              (value) => value.layer !== 'PLANNED',
+            ),
+          }
+        : edge,
+    ),
+  });
+}

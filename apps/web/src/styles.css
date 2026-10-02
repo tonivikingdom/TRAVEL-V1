@@ -672,7 +672,9 @@ form button {
 }
 
 /* Keep unsaved forms, never present cached schedule/maps as current while offline. */
-[data-unavailable] .sheet-body > :not(form):not(.edit):not(#save-status),
+[data-unavailable]
+  .sheet-body
+  > :not(form):not(.edit):not(#save-status):not(#draft-recovery),
 [data-unavailable] .edit > :not(form):not(summary) {
   display: none;
 }
@@ -681,4 +683,11 @@ form button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+#draft-recovery {
+  padding: 12px;
+  border: 1px solid #9bb6d4;
+  border-radius: 12px;
+  margin-bottom: 16px;
 }

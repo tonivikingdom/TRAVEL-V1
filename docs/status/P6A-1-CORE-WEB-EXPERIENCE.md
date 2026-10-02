@@ -21,7 +21,7 @@ The seven-file handoff was extracted; all six manifest entries matched their rec
 | Undo                    | Existing receipt/idempotency/version/fact guards             | “撤销刚才的路线修改”; neutral state-update explanation rather than claiming Provider refresh proves user execution                           |
 | Maps/navigation         | Trusted stored positions / selected candidate endpoints      | Coordinate-only official external URLs, no fake place IDs, notes, credentials, guessed positions or schematic routes                         |
 
-The one server adaptation edits an existing note field without schema/migration changes. No route/Undo/execution policy was relaxed. Query still rejects negative dwell; shortening an explicit minimum requires accepted server adjustments. UI defaults to the known departure / arrival-plus-dwell floor, without a global walking buffer or double-counted candidate access legs. A focused PostgreSQL regression verifies the reported 13:00/10:45 issue, one-hour dwell, unaccepted shortening rejection, persisted notes, edited-version Adopt rejection and foreign-owner rejection.
+The initial server adaptation edits an existing note field. The first review repair additionally exposes saved selected legs in the owner-scoped Trip read projection and excludes abandoned ADOPTED_ROUTE PLANNED anchors from replacement Query/Preview schedule evaluation. It reuses the authoritative evaluator and does not change the formal schedule, ACTUAL protection, independent user requirements, Adopt/Undo guards or schema/migrations. Query still rejects negative dwell; shortening an explicit minimum requires accepted server adjustments. UI search defaults use arrival-plus-dwell and independent departure requirements; candidate acceptance uses server bounds, without a global walking buffer or double-counted candidate access legs. A focused PostgreSQL regression verifies the reported 13:00/10:45 issue, one-hour dwell, unaccepted shortening rejection, persisted notes, edited-version Adopt rejection and foreign-owner rejection.
 
 ## Data and map boundaries
 
@@ -31,7 +31,7 @@ External place/navigation/route-query links are implemented using reliable coord
 
 **Embedded place/route maps: PARTIAL.** No authorized embedded map Provider/configuration/license or route geometry was found. The UI offers honest external exits; no photo/placeholder/polyline pretends to be a map. The missing map configuration was raised while independent development continued. Official Google Maps URLs, Apple Unified Maps/Map Links and Codex frontend-reference URLs returned HTTP 403 in this cloud network; live external map rendering was not verified. URL construction/target safety was tested separately.
 
-## Verification evidence
+## Initial delivery verification (`dfa001a`)
 
 - Frozen pnpm 11.19.0 install; Prisma generate/validate; format, lint, full typecheck, Unit, build: passed. Node 24.19.0.
 - Unit: **735 passed**. PostgreSQL 17 integration: **102 persistence + 479 API = 581 passed**. Existing migration/route/execution/history/owner-isolation regressions retained.
@@ -44,12 +44,47 @@ External place/navigation/route-query links are implemented using reliable coord
 
 Docker first encountered an unwritable default config directory, then disk exhaustion from repeated build contexts. Recovery used a writable task-owned Docker config and removed only this task's failed build container/intermediate images. Existing databases/user data were retained; only disposable, inactive synthetic CI image caches and this task's obsolete images were removed. Format/lint/typecheck/Unit/build and browser checks were rerun after recovery. Cloud Compose requires a task-local host-network/proxy build override outside Git; TLS verification remains enabled and the repository acceptance scripts are unchanged.
 
+## First-review repair
+
+The original repository code failed three Chromium regressions: note, time and dwell edits made after submitting A were overwritten or acknowledged as saved although only A was submitted. The original PostgreSQL replacement chain also failed when an old fixed 15:00 service contaminated the replacement window. These were reproduced before repairs, without resetting the branch or modifying main.
+
+| Review issue                                 | Repair and authority                                                                                                                                                                                                                                                                                       | Regression                                                                                                                                                                                                    |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Save response races                          | The accepted submitted FormData snapshot is the saved baseline. New edits and unrelated form drafts stay dirty. The accepted command is acknowledged before schedule evaluation; a failed later read is reported separately.                                                                               | Delayed command and delayed evaluation; note/time/dwell; independent drafts; accepted write followed by failed evaluation.                                                                                    |
+| Old departure versus independent constraints | Replacement Query/Preview exclude only replaced ADOPTED_ROUTE PLANNED anchors. Existing evaluator retains all ACTUAL, user intents and retained transport constraints. Frontend never treats effective old departure/window as a new user requirement.                                                     | Real 15:00 adopted projection → 14:15 Query/Preview/Adopt; 10:45 rejected; shortening protected one-hour dwell requires acceptance; protected NOT_BEFORE/EXACT 15:00 rejects 14:15.                           |
+| Saved transport navigation                   | Additive `TripView.savedRoutes` returns owned active selected legs from immutable adoption Preview evidence. Reopened transport shows boarding/alighting names and reliable coordinates without Provider calls.                                                                                            | Adopt → close/reload → saved bus/rail/walking/driving links; no new planning writes/calls; unknown original origin is not silently dropped.                                                                   |
+| Recoverable drafts                           | Recovery/login controls are inside the modal. `/me` must match the original draft owner; the same Trip/node is reread at current version. Server note/requirements are displayed and explicit review is required before a later save. Drafts are memory-only; unavailable readonly Trip data is concealed. | Version conflict, offline, core-service failure, expired session and other-account rejection; real HTTP/PG delayed writes, concurrent note recovery, session revocation → Magic Link consume → review → save. |
+| Timezone/UI burden                           | Known timezone is used server-consistently and shown as local time; an expandable region selector handles changes/unknown zones. Arrival/departure/dwell and independent requirements remain distinct.                                                                                                     | 320/375/390/430 widths, enlarged text, landscape, Chromium/WebKit checks; desktop/mobile screenshots opened for visual inspection.                                                                            |
+
+Public-transport walking to boarding is separate from segment travel. Walking/driving targets the segment endpoint with its corresponding mode. Whole-route lookup retains both reliable endpoints and an appropriate known mode; an unknown mode is explicitly left for the external map to choose. No service/date/fare guarantee, execution evidence, GPS authorization or route adoption comes from opening a map link. Legacy/manual public transport without saved boarding evidence does not invent a boarding navigation target.
+
+The real HTTP/browser harness uses `scripts/p6a1-browser-tsconfig.json` to apply the same workspace source aliases as repository integration tests, a separately owned local PostgreSQL database, synthetic Provider data and real persisted commands/adoptions. Its network recovery uses actual browser offline mode; its expired-session recovery uses a revoked real Session and a test-only seeded Magic Link consumed by the real API. No credentials are printed or included in screenshots.
+
+Embedded map remains **PARTIAL**. Minimum remaining configuration: an approved map Provider/license for the intended display, explicitly authorized API/billing scope, a restricted browser key (when required) and allowed development/formal-client origins. Route drawing also needs legitimately supplied geometry; stop coordinates do not authorize a guessed path. No real paid call or public deployment was enabled. Real timetable/fare validation and iPhone touch/soft-keyboard acceptance remain separate unverified gates.
+
+Final repair checks and final-HEAD GitHub CI are recorded in the PR report; the initial counts above are historical evidence, not a claim about this revision. Schema/migrations are unchanged (**24 total**).
+
+### Repair cloud verification
+
+- Frozen install, Prisma generate/validate, format, lint, full typecheck, Unit and build passed.
+- **737 Unit**, **102 persistence + 482 API = 584 PostgreSQL integration**, **33 Chromium browser cases** passed on the repaired code. No assertions were removed to bypass a failure; selectors were made specific for the new optional timezone controls, and unavailable-opener focus recovery is explicitly asserted.
+- Real PostgreSQL + HTTP + Chromium acceptance passed: normalized accepted note A/new draft B, delayed note/time/dwell responses, actual offline recovery, concurrent server-note/version recovery, revoked session/Magic Link recovery, saved navigation with zero new planning calls, 15:00 old fixed route → 14:15 replacement, explicit Adopt and Undo.
+- The complete browser contract suite separately verifies accepted writes followed by failed schedule evaluation; that controlled 503 case is not claimed as a real PostgreSQL/API fault-injection run.
+- P5B passed: **5 users, 200 requests, 0 isolation failures, 0 unexpected 5xx, 0 network failures**.
+- Empty isolated PostgreSQL database: all **24 migrations** deployed. Schema/migration/lockfile/CI configuration diffs: **0**.
+- Compose passed, including API/Worker and existing route/execution/object-storage chains. Debug Web HTTP smoke returned 200. The first local Compose attempt rejected synthetic fixture timestamps with six decimal places; only task-local env fixtures were corrected to the existing three-digit UTC format, then acceptance was rerun. Provider validation and repository Compose scripts were not weakened.
+- Cloud WebKit download remains blocked by the previously verified HTTP 403 restriction; final-HEAD GitHub CI independently runs Chromium and WebKit. Real iPhone/touch/keyboard remains unverified.
+
 ## Review screenshots
 
 All data shown is labeled SYNTHETIC; no credentials/private production content appears.
 
 - [Mobile day, real PostgreSQL](assets/p6a-1/postgres-mobile-day.png)
 - [Desktop day, real PostgreSQL](assets/p6a-1/postgres-desktop-day.png)
+- [Saved transport, real PostgreSQL](assets/p6a-1/postgres-mobile-saved-transport.png)
+- [Draft/version recovery, real PostgreSQL](assets/p6a-1/postgres-mobile-draft-recovery.png)
+- [Mobile saved bus navigation](assets/p6a-1/mobile-saved-bus.png)
+- [Desktop saved bus navigation](assets/p6a-1/desktop-saved-bus.png)
 - [Mobile after explicit adoption](assets/p6a-1/postgres-mobile-adopted.png)
 - [Place detail](assets/p6a-1/mobile-place.png)
 - [Route candidates](assets/p6a-1/mobile-candidates.png)

@@ -32,15 +32,25 @@ export function placeMap(location: MapLocation, apple = false): string | null {
 export function navigation(
   destination: MapLocation,
   origin?: MapLocation,
-  mode = 'walking',
+  mode: string | null = 'walking',
 ): string | null {
   const point = coordinates(destination);
   if (!point) return null;
   const url = new URL('https://www.google.com/maps/dir/');
   url.searchParams.set('api', '1');
   url.searchParams.set('destination', point);
-  url.searchParams.set('travelmode', mode);
+  if (mode) url.searchParams.set('travelmode', mode);
   const from = origin ? coordinates(origin) : null;
+  if (origin && !from) return null;
   if (from) url.searchParams.set('origin', from);
   return url.toString();
+}
+
+export function mapMode(
+  mode: string,
+): 'walking' | 'driving' | 'transit' | null {
+  if (mode === 'WALKING') return 'walking';
+  if (mode === 'DRIVING' || mode === 'TAXI') return 'driving';
+  if (['RAIL', 'BUS', 'FERRY'].includes(mode)) return 'transit';
+  return null;
 }

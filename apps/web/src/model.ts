@@ -97,14 +97,21 @@ export function departureFloor(
   node: ItineraryNodeView,
   projection?: ScheduleNodeProjectionView,
 ): string | null {
-  const { arrival, departure } = times(node, projection);
+  // A search default, not a second constraint engine. Provider acceptance and
+  // Preview are authoritative. Old selected-service results never become intent.
+  const { arrival } = times(node, projection);
   const minimum =
     node.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ??
     null;
   const points = [
     arrival?.instant,
-    departure?.instant,
-    projection?.departure.requirementWindow.earliest,
+    ...node.timeIntents
+      .filter(
+        (i) =>
+          i.pointKind === 'DEPARTURE' &&
+          ['EXACT', 'NOT_BEFORE'].includes(i.operator),
+      )
+      .map((i) => i.instant),
   ];
   if (arrival && minimum !== null)
     points.push(

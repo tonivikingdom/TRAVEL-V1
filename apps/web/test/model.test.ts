@@ -11,7 +11,7 @@ import {
   temporalLabel,
   transportTime,
 } from '../src/model.js';
-import { coordinates, navigation, placeMap } from '../src/maps.js';
+import { coordinates, navigation, placeMap, mapMode } from '../src/maps.js';
 import { fixtureCandidate, fixtureTrip } from './fixture.js';
 import { TravelApi, WebError, errorText } from '../src/api.js';
 describe('formal itinerary time and location adapters', () => {
@@ -216,4 +216,34 @@ it('groups a current adopted corridor for presentation, keeping user-modified st
   ]);
   expect(isFoldedTransfer(value, middle)).toBe(true);
   expect(isFoldedTransfer(value, { ...middle, note: 'important' })).toBe(false);
+});
+
+it('an old adopted-route departure result cannot prohibit an earlier replacement', () => {
+  const n = fixtureTrip().days[0]!.nodes[0]!;
+  const old = {
+    ...n,
+    timeValues: n.timeValues.map((v) =>
+      v.pointKind === 'DEPARTURE'
+        ? {
+            ...v,
+            instant: '2030-10-01T06:00:00Z',
+            sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+          }
+        : v,
+    ),
+  };
+  expect(departureFloor(old)).toBe('2030-10-01T05:00:00.000Z');
+});
+
+it('explicit original route lookup never silently drops an unknown origin', () => {
+  const p = fixtureTrip().days[0]!.nodes[0]!.place!;
+  expect(navigation(p, { ...p, latitude: null })).toBeNull();
+  expect(mapMode('DRIVING')).toBe('driving');
+  expect(mapMode('RAIL')).toBe('transit');
+  expect(mapMode('BUS')).toBe('transit');
+  expect(mapMode('WALKING')).toBe('walking');
+  expect(mapMode('OTHER')).toBeNull();
+  expect(new URL(navigation(p, p, null)!).searchParams.has('travelmode')).toBe(
+    false,
+  );
 });

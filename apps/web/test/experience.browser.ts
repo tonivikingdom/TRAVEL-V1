@@ -14,7 +14,9 @@ let calls: string[];
 let failSave = false;
 let delayQuery = false;
 let failQuery = false;
-const candidate = fixtureCandidate();
+let releaseSave: (() => void) | null = null;
+let holdSave = false;
+let candidate = fixtureCandidate();
 function preview(): RoutePreviewView {
   return {
     previewId: tripId,
@@ -64,11 +66,14 @@ async function screenshot(page: Page, name: string) {
 }
 test.beforeEach(async ({ page }) => {
   trip = fixtureTrip();
+  candidate = fixtureCandidate();
   commands = [];
   calls = [];
   failSave = false;
   delayQuery = false;
   failQuery = false;
+  holdSave = false;
+  releaseSave = null;
   await page.addInitScript(() =>
     sessionStorage.setItem('travel.web.session', 'SYNTHETIC_BROWSER_ONLY'),
   );
@@ -82,12 +87,17 @@ test.beforeEach(async ({ page }) => {
         contentType: 'application/json',
         body: JSON.stringify(data),
       });
+    if (path === '/me') return send({ id: tripId });
     if (path === '/trips') return send({ trips: [trip] });
     if (path === `/trips/${tripId}`) return send(trip);
     if (path.endsWith('/schedule/evaluate')) return send(fixtureSchedule(trip));
     if (path.endsWith('/commands')) {
       const body = req.postDataJSON();
       commands.push(body);
+      if (holdSave)
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
       if (failSave)
         return send(
           { error: { code: 'VERSION_CONFLICT', message: 'stale' } },
@@ -131,7 +141,40 @@ test.beforeEach(async ({ page }) => {
     }
     if (path.endsWith('/previews')) return send(preview(), 201);
     if (path.endsWith('/adopt')) {
-      trip = { ...trip, version: trip.version + 1 };
+      trip = {
+        ...trip,
+        version: trip.version + 1,
+        connections: [
+          {
+            fromNodeId: fromId,
+            toNodeId: toId,
+            state: 'ACTIVE',
+            transport: {
+              id: tripId,
+              fromNodeId: fromId,
+              toNodeId: toId,
+              mode: candidate.legs[0]!.mode,
+              fixedService: candidate.legs[0]!.fixedService,
+              serviceLabel: candidate.legs[0]!.serviceLabel,
+              note: null,
+              source: 'ADOPTED_ROUTE',
+              adoptedRouteId: tripId,
+              provider: 'SYNTHETIC',
+              providerRef: null,
+              createdAt: trip.createdAt,
+              updatedAt: trip.updatedAt,
+              timeValues: [],
+            },
+          },
+        ],
+        savedRoutes: [
+          {
+            adoptedRouteId: tripId,
+            transportEdgeIds: [tripId],
+            legs: candidate.legs,
+          },
+        ],
+      };
       return send({
         trip,
         operationReceipt: {
@@ -189,7 +232,7 @@ test('place detail saves notes via API and rereads after reload', async ({
   await page.getByRole('button', { name: '关闭详情' }).click();
   await expect(page.locator(`[data-node="${fromId}"]`)).toBeFocused();
 });
-test('dirty failure survives X and Escape, clean close returns focus', async ({
+test('dirty failure survives X and Escape; closing returns focus to recovery when the old opener is unavailable', async ({
   page,
 }) => {
   await enter(page);
@@ -207,7 +250,10 @@ test('dirty failure survives X and Escape, clean close returns focus', async ({
   await page.locator('textarea').fill('');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await expect(opener).toBeFocused();
+  await expect(page.locator('.timeline')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: '重新载入', exact: true }),
+  ).toBeFocused();
 });
 test('drag threshold and short bounce; input interaction does not drag', async ({
   page,
@@ -236,7 +282,7 @@ test('native modal contains focus and background interaction, scrollable body', 
   await page.setViewportSize({ width: 390, height: 650 });
   await enter(page);
   await page.locator('[data-node]').first().click();
-  await page.locator('summary').click();
+  await page.locator('.edit > summary').click();
   await page.keyboard.press('Shift+Tab');
   expect(
     await page.evaluate(() =>
@@ -370,7 +416,7 @@ for (const width of [320, 375, 390, 430])
     await page.setViewportSize({ width, height: 844 });
     await enter(page);
     await page.locator('[data-node]').first().click();
-    await page.locator('summary').click();
+    await page.locator('.edit > summary').click();
     const overflow = await page.evaluate(() => ({
       page: document.documentElement.scrollWidth > innerWidth,
       dialog:
@@ -399,10 +445,17 @@ test('offline hides stale formal itinerary; recovery requires server reload', as
   await expect(page.locator('.message')).toContainText('无网');
   await page.evaluate(() => dispatchEvent(new Event('online')));
   await expect(page.locator('.message')).toContainText('重新载入');
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '关闭详情' }).click();
-  await page.getByRole('button', { name: '重新载入' }).click();
-  await expect(page.getByRole('button', { name: '东京慢旅行' })).toBeVisible();
+  await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
+  await expect(page.locator('textarea')).toHaveValue(
+    'SYNTHETIC preserved offline draft',
+  );
+  await expect(page.getByRole('dialog').locator('.times')).toBeVisible();
+  await page.getByRole('button', { name: '已核对，保留草稿继续编辑' }).click();
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText('已保存');
+  expect(commands.at(-1)).toMatchObject({
+    command: { note: 'SYNTHETIC preserved offline draft' },
+  });
 });
 
 test('401 allows fresh login without discarding failed modal draft', async ({
@@ -428,13 +481,34 @@ test('401 allows fresh login without discarding failed modal draft', async ({
   expect(
     await page.evaluate(() => sessionStorage.getItem('travel.web.session')),
   ).toBeNull();
+  await page.unroute('**/api/**/commands');
+  await page.route('**/api/auth/magic-link/consume', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        credential: 'SYNTHETIC_NEW_SESSION',
+        user: { id: tripId },
+      }),
+    }),
+  );
+  await page
+    .locator('#recovery-consume input')
+    .fill('http://127.0.0.1:5174/login/magic#token=SYNTHETIC_LINK');
+  await page.getByRole('button', { name: '恢复登录并读取草稿' }).click();
+  await expect(page.locator('textarea')).toHaveValue(
+    'SYNTHETIC unsaved after expiry',
+  );
+  await page.getByRole('button', { name: '已核对，保留草稿继续编辑' }).click();
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText('已保存');
 });
 test('saving one form does not clear another form dirty protection', async ({
   page,
 }) => {
   await enter(page);
   await page.locator('[data-node]').first().click();
-  await page.locator('summary').click();
+  await page.locator('.edit > summary').click();
   await page.locator('#time-edit input[name=when]').fill('2030-10-01T18:00');
   await page.locator('textarea').fill('saved note');
   await page.getByRole('button', { name: '保存备注' }).click();
@@ -503,9 +577,14 @@ test('ARRIVE_BY submits explicit date and timezone without becoming DEPART_AT', 
 }) => {
   await enter(page);
   await page.locator('.connection').click();
-  await page.locator('#route-search select').selectOption('ARRIVE_BY');
+  await page
+    .locator('#route-search select[name=type]')
+    .selectOption('ARRIVE_BY');
   await page.locator('#route-search input[name=when]').fill('2030-10-02T00:30');
-  await page.locator('#route-search input[name=zone]').fill('Asia/Tokyo');
+  await page.locator('#route-search [data-zone]').selectOption('Asia/Tokyo');
+  await expect(page.locator('#route-search input[name=zone]')).toHaveValue(
+    'Asia/Tokyo',
+  );
   const request = page.waitForRequest((r) => r.url().endsWith('/routes/query'));
   await page.getByRole('button', { name: '搜索路线' }).click();
   expect((await request).postDataJSON()).toMatchObject({
@@ -525,7 +604,7 @@ test('landscape and enlarged text remain usable with a scrollable narrow sheet',
   await page.setViewportSize({ width: 740, height: 390 });
   await enter(page);
   await page.locator('[data-node]').first().click();
-  await page.locator('summary').click();
+  await page.locator('.edit > summary').click();
   await page.addStyleTag({ content: ':root{font-size:22px}' });
   await page.locator('textarea').fill('SYNTHETIC landscape draft');
   expect(
@@ -553,4 +632,229 @@ test('core service outage conceals old itinerary without treating Provider failu
   await page.getByRole('button', { name: '重新载入' }).click();
   await expect(page.locator('.timeline')).toHaveCount(0);
   await expect(page.locator('.message')).toContainText('核心服务暂时不可用');
+});
+
+for (const [formId, field, first, later, button] of [
+  ['note-edit', 'note', 'submitted A', 'new B', '保存备注'],
+  ['time-edit', 'when', '2030-10-01T15:00', '2030-10-01T16:00', '保存时间要求'],
+  ['dwell-edit', 'minutes', '60', '90', '保存停留要求'],
+] as const) {
+  test(`submitted ${formId} snapshot preserves edits while saving`, async ({
+    page,
+  }) => {
+    await enter(page);
+    await page.locator('[data-node]').first().click();
+    await page.locator('.edit').evaluate((el) => el.setAttribute('open', ''));
+    const input = page.locator(`#${formId} [name=${field}]`);
+    await input.fill(first);
+
+    holdSave = true;
+    await page.getByRole('button', { name: button, exact: true }).click();
+    await expect.poll(() => releaseSave !== null).toBe(true);
+    await input.fill(later);
+    releaseSave!();
+    await expect(page.locator('#save-status')).toContainText('已保存');
+    await expect(input).toHaveValue(later);
+    await expect(page.locator('#save-status')).toContainText('未保存');
+    let prompted = false;
+    page.once('dialog', async (dialog) => {
+      prompted = true;
+      await dialog.dismiss();
+    });
+    await page.getByRole('button', { name: '关闭详情' }).click();
+    expect(prompted).toBe(true);
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+}
+test('draft recovers a version conflict inside the open detail', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('textarea').fill('retained draft');
+  failSave = true;
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText('已变化');
+  failSave = false;
+  trip = { ...trip, version: trip.version + 1 };
+  await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
+  await expect(page.locator('textarea')).toHaveValue('retained draft');
+  await expect(page.locator('#save-status')).toContainText('请核对');
+  await page.locator('.edit > summary').click();
+  const writesBeforeReview = commands.length;
+  await page.locator('.remove-intent').first().click();
+  await expect(page.locator('#save-status')).toContainText('先重新读取并核对');
+  expect(commands).toHaveLength(writesBeforeReview);
+  await page.getByRole('button', { name: '已核对，保留草稿继续编辑' }).click();
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText('已保存');
+  expect(commands.at(-1)?.baseTripVersion).toBe(trip.version - 1);
+});
+
+test('accepted write and failed evaluation are reported separately and recover without discarding', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('textarea').fill('accepted write');
+  await page.route('**/api/**/schedule/evaluate', (r) =>
+    r.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE' } }),
+    }),
+  );
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText(
+    '本次提交已保存到服务器',
+  );
+  await expect(page.locator('#save-status')).toContainText(
+    '后续读取/核对未完成',
+  );
+  expect(trip.days[0]!.nodes[0]!.note).toBe('accepted write');
+  await page.locator('textarea').fill('next draft');
+  await page.unroute('**/api/**/schedule/evaluate');
+  await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
+  await expect(page.locator('#draft-recovery')).toContainText('accepted write');
+  await expect(page.locator('textarea')).toHaveValue('next draft');
+  await page.getByRole('button', { name: '已核对，保留草稿继续编辑' }).click();
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText('已保存');
+  expect(trip.days[0]!.nodes[0]!.note).toBe('next draft');
+});
+test('recovery cannot transfer a private draft to another authenticated account', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('textarea').fill('private original draft');
+  await page.evaluate(() => dispatchEvent(new Event('offline')));
+  await page.route('**/api/me', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ id: fromId }),
+    }),
+  );
+  const reads = calls.filter((p) => p === `/trips/${tripId}`).length;
+  await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
+  await expect(page.locator('#save-status')).toContainText('原账户');
+  expect(calls.filter((p) => p === `/trips/${tripId}`)).toHaveLength(reads);
+  expect(commands).toHaveLength(0);
+  await expect(page.locator('textarea')).toHaveValue('private original draft');
+});
+for (const [mode, action, navMode, target] of [
+  ['BUS', '步行到上车点', 'walking', 'from'],
+  ['RAIL', '步行到上车点', 'walking', 'from'],
+  ['WALKING', '步行到分段终点', 'walking', 'to'],
+  ['DRIVING', '驾车到分段终点', 'driving', 'to'],
+] as const) {
+  test(`adopted ${mode} navigation survives close/reload without a new planning call`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    candidate = {
+      ...candidate,
+      legs: candidate.legs.map((l) => ({ ...l, mode })),
+    };
+    await enter(page);
+    await route(page);
+    await page.locator('.candidate').click();
+    await page.getByRole('button', { name: '使用这条路线' }).click();
+    await expect(page.locator('.undo')).toBeVisible();
+    await page.reload();
+    await page.locator('[data-trip]').click();
+    const queries = calls.filter((p) => /query|previews|adopt/u.test(p));
+    await page.locator('.connection').click();
+    const link = page
+      .locator('.saved-legs')
+      .getByRole('link', { name: action });
+    await expect(link).toBeVisible();
+    const url = new URL((await link.getAttribute('href'))!);
+    const endpoint = candidate.legs[0]![target];
+    expect(url.searchParams.get('destination')).toBe(
+      `${endpoint.latitude},${endpoint.longitude}`,
+    );
+    expect(url.searchParams.get('travelmode')).toBe(navMode);
+    await expect(
+      page.locator('.saved-legs').getByRole('link', { name: '打开终点地点' }),
+    ).toBeVisible();
+    expect(calls.filter((p) => /query|previews|adopt/u.test(p))).toEqual(
+      queries,
+    );
+    await screenshot(page, `mobile-saved-${mode.toLowerCase()}`);
+    if (mode === 'BUS') {
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await screenshot(page, 'desktop-saved-bus');
+    }
+  });
+}
+test('unknown saved boarding coordinates cannot masquerade as original-route navigation', async ({
+  page,
+}) => {
+  candidate = {
+    ...candidate,
+    legs: candidate.legs.map((l) => ({
+      ...l,
+      mode: 'BUS',
+      from: { ...l.from, latitude: null, longitude: null },
+    })),
+  };
+  await enter(page);
+  await route(page);
+  await page.locator('.candidate').click();
+  await page.getByRole('button', { name: '使用这条路线' }).click();
+  await expect(page.locator('.undo')).toBeVisible();
+  trip = {
+    ...trip,
+    days: trip.days.map((d) => ({
+      ...d,
+      nodes: d.nodes.map((n) =>
+        n.id === fromId
+          ? {
+              ...n,
+              place: n.place
+                ? ({
+                    ...n.place,
+                    latitude: null,
+                    longitude: null,
+                  } as unknown as typeof n.place)
+                : null,
+            }
+          : n,
+      ),
+    })),
+  };
+  await page.reload();
+  await page.locator('[data-trip]').click();
+  await page.locator('.connection').click();
+  await expect(page.locator('.saved-legs')).toContainText('起点位置未知');
+  await expect(page.locator('.saved-legs .segment-navigation')).toHaveCount(0);
+  await expect(page.locator('.whole-route-map')).toHaveCount(0);
+});
+
+test('new typing during evaluation stays dirty after the submitted command has already succeeded', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('textarea').fill('accepted A');
+  let release: (() => void) | undefined;
+  await page.route('**/api/**/schedule/evaluate', async (r) => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(fixtureSchedule(trip)),
+    });
+  });
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect.poll(() => !!release).toBe(true);
+  expect(trip.days[0]!.nodes[0]!.note).toBe('accepted A');
+  await page.locator('textarea').fill('new B during evaluation');
+  release!();
+  await expect(page.locator('#save-status')).toContainText('未保存');
+  await expect(page.locator('textarea')).toHaveValue('new B during evaluation');
 });

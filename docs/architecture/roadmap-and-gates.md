@@ -1,35 +1,67 @@
 # 阶段计划、闸门与未决项
 
-| 阶段         | 计划交付                                             | 当前状态                                                                                                           | 进入条件 / 关联未决项                                                                               |
-| ------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| P0           | 蓝图、workspace、API/Worker 健康、Compose、CI        | 已合并 main；main CI Run `35294938746` 通过                                                                        | 已完成                                                                                              |
-| P1A          | 邀请、Magic Link、可撤销多设备 Session、集中授权     | 已 Squash Merge；main CI Run `35309420185` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                                  |
-| P1B1         | 持久 Job、Worker 执行框架、Magic Link 异步邮件       | 已 Squash Merge；main CI Run `35322043421` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                                  |
-| P1B2         | NotificationEvent、ObjectStorage 边界                | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过            | 只含站内通知基础与私有本地测试存储，不进入 P2                                                       |
-| P2A          | Trip/DateOwnership/Place/Visit/FreeAction、版本      | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过            | 已完成；O-03/O-07 不阻塞当前基础自然日能力                                                          |
-| P2B          | Transport、失效历史、resolved 三层时间基础           | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过            | 已完成；O-03/O-07 不阻塞已交付的基础边界                                                            |
-| P3A          | DayOccurrence identity、sequence 与节点日期卡归属    | 已 Squash Merge；main commit `330f9f2d469f5ff1eda7a98d45457f9c21c7265f`；main CI Run `35409984734` 通过            | 已完成 foundation；solver、跨日 Transport 投影与 DST 输入 UI 仍后置                                 |
-| P3B1         | UserTimeIntent、最低停留、lock 与只读约束评估        | 已 Squash Merge；main commit `d4fb0f59b9bd0775bc0f35e801acde262cec0d8d`；main CI Run `35415523541` 通过            | 已完成当前状态评估基础；不自动改时间或推荐                                                          |
-| P3B2         | 确定性时间上下界传播、来源与客观冲突                 | 已 Squash Merge；main commit `0c5fcbdfe09b049c5fbbf77abe20ec296ded4383`；main CI Run `35418153790` 通过            | 已完成只读传播；不写 PLANNED、不查询 Provider、不生成推荐                                           |
-| P3B+         | 完整路线求解、候选与推荐衔接                         | 未授权、未实现                                                                                                     | P3B2 只产出要求窗口；P4 路线候选、Preview/Adopt 与 RecommendationPolicy 仍须单独授权                |
-| P4A1         | Provider-neutral Route Query、候选归一化与二次校验   | 已通过 PR #12 Squash Merge；main commit `4a50beb711e2c56679b9b846ca6a4d9ff56403cb`；main CI Run `35420894762` 通过 | 仅 SYNTHETIC 测试适配器；真实/付费 Provider 未接入                                                  |
-| P4B1         | 服务端 Candidate Snapshot 与持久 Preview foundation  | 已通过 PR #13 Squash Merge；main commit `9ec780d010257f0c98dba58928a68920bfa4308c`；main CI Run `35423819550` 通过 | immutable snapshot/preview foundation 已完成；真实/付费 Provider 仍未接入                           |
-| P4B2         | Adopt、事务/幂等、正式节点与交通写入                 | 已通过 PR #14 Squash Merge；main commit `66ffaed90acaa08798dd3afe6ff62c13d80cb667`；main CI Run `35430697966` 通过 | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox 已完成                               |
-| P4B3         | Route Adopt 单步 Undo                                | 已通过 PR #15 Squash Merge；main `d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`；CI `35434086597` 通过                 | 已完成短时单步前向补偿；不包含 Undo stack 或 Redo                                                   |
-| P5A          | Dev/Test Debug Web 薄测试台                          | 已通过 PR #16 合并；main `cbf9fe2a727011e4708585ef259c3324c05b4362`；CI `35435976817` 通过                         | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、Debug Web 自动轮询、原生 Push 或离线编辑 |
-| P5B          | Development/Test 内部验收与环境闸门                  | 已通过 PR #17 合并；main `49a76517ef7917678c8d2133977435a1854edd07`；CI `35439640209` 三个核心 job 通过            | ≤5 synthetic 用户跨层验收完成；不是性能容量认证、Staging 许可或 Production readiness                |
-| P5C          | 停留/Buffer 策略、Route lookback、候选排序与可逆调整 | 已通过 PR #18 Squash Merge；main `7b069707ed67fe539adea373b642041cce1820ac`；CI `35479025186` 三个核心 job 通过    | 确定性 planning policy 已完成；真实 Provider、Push 与 Production 仍未授权                           |
-| P5D1         | 确定性执行风险、持久生命周期与通知抑制               | 已完成；PR #20 已 Squash Merge 至 main `83ce12780879c563470ff3dc98a72e6f68a3fe00`                                  | P5D1 当时仅显式评估 foundation；后续服务端监控见 P5D3/P5E2，原生 Push/后台定位仍未实现              |
-| P5D2         | Flight operational facts 与手工刷新                  | 已通过 PR #21 Squash Merge；main `ddfa4cb558ea4dabec032189f2f66129f1f6f0f8`                                        | AeroDataBox 适配器、FlightBinding、事实排序与风险重评已完成                                         |
-| P5D3         | Flight monitoring 与重要变化通知 V1                  | 已通过 PR #24 Squash Merge；main `990c6420d2fc4018569f827786c3316324715aa9`；CI `35529228227` 三个核心 job 通过    | 持久 Job、重要变化聚合与行李短轮询；不含 Push、定位、自动换班或 Production                          |
-| P5E1         | Execution Location 与 Arrival Detection V1           | 已进入 main；后续审计修复 F-03/F-13 已合并                                                                         | 只处理执行事实、最小派生状态与显式 Undo；不保存轨迹、不含原生定位或 Push                            |
-| P5E2 Batch 1 | Ground Transit Execution Foundation                  | `feature/p5e2-ground-transit-execution-foundation` 开发中，尚未完成 main 合并                                      | Adopted RAIL/BUS、合成 Provider、持久 Job 与执行证据；真实 Provider/Batch 2 不在本轮                |
-| P5E+         | 后续执行采集、提醒投递与正式客户端能力               | 未授权、未实现                                                                                                     | 根据内部验收结果另行决定；O-09 上线配置仍 Deferred                                                  |
+## 2026-10-02 当前产品方向
+
+权威范围：[V1 产品边界冻结 v1.0](../10_V1产品边界冻结_v1.0.md)。正式起点 main 为
+`14023af41910ead94d09c7bb2eab8b1c94bb6360`，main CI Run `36945716887` 的 verify、Compose verification、P5B acceptance 均 completed / success；24 migrations。
+
+P0–P5 + P5E2 已形成充分 backend foundation。下一步以真实用户主流程为准：
+创建旅行 → 安排每天地点/活动 → 设置交通 → 查看/选择路线 → 查看航班 → 出行 → 必要提醒 → 必要时重新规划。
+优先 usable product > simple interaction > real-world validation > additional infrastructure completeness。
+
+P-SIMPLE-01～06 生效：细的工程边界保留，内部状态机不变成用户步骤；默认只显示当前需要处理的信息，高级扩展由真实需求触发。
+正式核心概念只有旅行、日期、地点 / 活动、交通、航班、提醒；路线交互最多 1 次查看 + 1 次确认。
+
+| 项目                      | 当前状态 / 下一步                                                                                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| P5E2                      | COMPLETE / FREEZE；保留已实现 monitoring、execution、internal/external-origin planning 与安全 Undo，不继续扩展高级 backend。 |
+| P5 Audit Repair F-07/F-08 | COMPLETE；两项 CLOSED，PR #38 已合并至正式起点。                                                                             |
+| F-05                      | OPEN / FROZEN；只有即将连接具体 Provider/account/plan 才重新验证 retention/entitlement 等条件。                              |
+| F-06                      | OPEN / FROZEN；具体 Provider/account 确定后再决定 Webhook/Polling/Query，禁止预建通用 webhook。                              |
+| NEXT                      | P6A — Formal V1 User Experience Foundation；待单独授权，当前文档批不开始。                                                   |
+
+P6A 第一版只做旅行列表/详情、Day itinerary、Place / FreeAction editing、Transport summary、Flight summary、Notifications；
+Route/replanning 以最小入口接入。Debug Web 保留工程测试台，正式 Desktop/Mobile 另开 surface，独立布局并共享契约、Design Tokens 与 SVG。
+可视内容及 icon + text 整体视觉居中，左右 padding 对称，尺寸变化重新计算视觉中心。
+
+Native Push、附件产品、协作与高级定位 DEFERRED；不是为了补齐 backend 而启动的任务。
+automatic Query/Preview/Adopt、GPS-origin、onboard/mid-edge、自动 hub confirmation、任意 internal-node rerouting、Undo stack/Redo 和 workflow engine 冻结。
+严格并发、证据、执行历史、Provider ACTUAL、Undo audit、topology、owner isolation、idempotency 和 migration safety 保持。
+真实 Provider、付费调用、Staging/Production deployment 均不由本批授权。F-05/F-06 仍是对应真实服务启用前的硬闸门，公共文档不能关闭它们。
+
+## 阶段交付记录
+
+| 阶段              | 计划交付                                                                        | 当前状态                                                                                                           | 进入条件 / 关联未决项                                                                               |
+| ----------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| P0                | 蓝图、workspace、API/Worker 健康、Compose、CI                                   | 已合并 main；main CI Run `35294938746` 通过                                                                        | 已完成                                                                                              |
+| P1A               | 邀请、Magic Link、可撤销多设备 Session、集中授权                                | 已 Squash Merge；main CI Run `35309420185` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                                  |
+| P1B1              | 持久 Job、Worker 执行框架、Magic Link 异步邮件                                  | 已 Squash Merge；main CI Run `35322043421` 通过                                                                    | 已完成；真实邮件 provider 仍未配置                                                                  |
+| P1B2              | NotificationEvent、ObjectStorage 边界                                           | 已 Squash Merge；main commit `ddd6b83b5c0c903f8291969aba6fee7a0f47a953`；main CI Run `35332091867` 通过            | 只含站内通知基础与私有本地测试存储，不进入 P2                                                       |
+| P2A               | Trip/DateOwnership/Place/Visit/FreeAction、版本                                 | 已 Squash Merge；main commit `59e82dae31c49457fafb53351b5fe0d48e8330c8`；main CI Run `35342774635` 通过            | 已完成；O-03/O-07 不阻塞当前基础自然日能力                                                          |
+| P2B               | Transport、失效历史、resolved 三层时间基础                                      | 已 Squash Merge；main commit `50866c4aa4ec122e4522920dcf2e53b551de7dfb`；main CI Run `35353581612` 通过            | 已完成；O-03/O-07 不阻塞已交付的基础边界                                                            |
+| P3A               | DayOccurrence identity、sequence 与节点日期卡归属                               | 已 Squash Merge；main commit `330f9f2d469f5ff1eda7a98d45457f9c21c7265f`；main CI Run `35409984734` 通过            | 已完成 foundation；solver、跨日 Transport 投影与 DST 输入 UI 仍后置                                 |
+| P3B1              | UserTimeIntent、最低停留、lock 与只读约束评估                                   | 已 Squash Merge；main commit `d4fb0f59b9bd0775bc0f35e801acde262cec0d8d`；main CI Run `35415523541` 通过            | 已完成当前状态评估基础；不自动改时间或推荐                                                          |
+| P3B2              | 确定性时间上下界传播、来源与客观冲突                                            | 已 Squash Merge；main commit `0c5fcbdfe09b049c5fbbf77abe20ec296ded4383`；main CI Run `35418153790` 通过            | 已完成只读传播；不写 PLANNED、不查询 Provider、不生成推荐                                           |
+| P3B+              | 独立完整求解与推荐扩展                                                          | DEFERRED；P4/P5C 现有查询与排序已完成                                                                              | 只有明确 V1 use case 才重新授权，不把底座完整性作为下一目标                                         |
+| P4A1              | Provider-neutral Route Query、候选归一化与二次校验                              | 已通过 PR #12 Squash Merge；main commit `4a50beb711e2c56679b9b846ca6a4d9ff56403cb`；main CI Run `35420894762` 通过 | 仅 SYNTHETIC 测试适配器；真实/付费 Provider 未接入                                                  |
+| P4B1              | 服务端 Candidate Snapshot 与持久 Preview foundation                             | 已通过 PR #13 Squash Merge；main commit `9ec780d010257f0c98dba58928a68920bfa4308c`；main CI Run `35423819550` 通过 | immutable snapshot/preview foundation 已完成；真实/付费 Provider 仍未接入                           |
+| P4B2              | Adopt、事务/幂等、正式节点与交通写入                                            | 已通过 PR #14 Squash Merge；main commit `66ffaed90acaa08798dd3afe6ff62c13d80cb667`；main CI Run `35430697966` 通过 | Preview v2、AdoptedRoute、跨日投影、OperationReceipt 与 outbox 已完成                               |
+| P4B3              | Route Adopt 单步 Undo                                                           | 已通过 PR #15 Squash Merge；main `d00c053f7bafdc0c6cbf8b2e03fe7682fe08cc4c`；CI `35434086597` 通过                 | 已完成短时单步前向补偿；不包含 Undo stack 或 Redo                                                   |
+| P5A               | Dev/Test Debug Web 薄测试台                                                     | 已通过 PR #16 合并；main `cbf9fe2a727011e4708585ef259c3324c05b4362`；CI `35435976817` 通过                         | 只串联真实 API；非正式客户端，不包含 RecommendationPolicy、Debug Web 自动轮询、原生 Push 或离线编辑 |
+| P5B               | Development/Test 内部验收与环境闸门                                             | 已通过 PR #17 合并；main `49a76517ef7917678c8d2133977435a1854edd07`；CI `35439640209` 三个核心 job 通过            | ≤5 synthetic 用户跨层验收完成；不是性能容量认证、Staging 许可或 Production readiness                |
+| P5C               | 停留/Buffer 策略、Route lookback、候选排序与可逆调整                            | 已通过 PR #18 Squash Merge；main `7b069707ed67fe539adea373b642041cce1820ac`；CI `35479025186` 三个核心 job 通过    | 确定性 planning policy 已完成；真实 Provider、Push 与 Production 仍未授权                           |
+| P5D1              | 确定性执行风险、持久生命周期与通知抑制                                          | 已完成；PR #20 已 Squash Merge 至 main `83ce12780879c563470ff3dc98a72e6f68a3fe00`                                  | P5D1 当时仅显式评估 foundation；后续服务端监控见 P5D3/P5E2，原生 Push/后台定位仍未实现              |
+| P5D2              | Flight operational facts 与手工刷新                                             | 已通过 PR #21 Squash Merge；main `ddfa4cb558ea4dabec032189f2f66129f1f6f0f8`                                        | AeroDataBox 适配器、FlightBinding、事实排序与风险重评已完成                                         |
+| P5D3              | Flight monitoring 与重要变化通知 V1                                             | 已通过 PR #24 Squash Merge；main `990c6420d2fc4018569f827786c3316324715aa9`；CI `35529228227` 三个核心 job 通过    | 持久 Job、重要变化聚合与行李短轮询；不含 Push、定位、自动换班或 Production                          |
+| P5E1              | Execution Location 与 Arrival Detection V1                                      | 已进入 main；后续审计修复 F-03/F-13 已合并                                                                         | 只处理执行事实、最小派生状态与显式 Undo；不保存轨迹、不含原生定位或 Push                            |
+| P5E2 Batch 1      | Ground Transit Execution Foundation                                             | 已通过 PR #30 合并至 main `e4685c5f729e27b2f1a8cab65c8c76393a01178d`                                               | foundation COMPLETE；仅合成 Provider，真实 Provider 未启用                                          |
+| P5E2 Batch 2–5B2B | Operational changes、handoff、internal/external-origin Query/Preview/Adopt/Undo | COMPLETE；PR #37 main `1fe6f8bba5a438c2ec11616d6296abaa567f4455`                                                   | source binding、endpoint binding、history、execution-aware Undo 与并发保护保留                      |
+| P5E+              | 后续高级执行采集与投递扩展                                                      | FREEZE / DEFERRED                                                                                                  | 真实 V1 需求触发后单独授权；Native Push/后台定位当前不扩展                                          |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。
 
-## O-00 当前事实
+## O-00 初始阶段事实与后续交付记录（历史）
 
 - 目标远程：`https://github.com/tonivikingdom/TRAVEL-V1.git`
 - 已获一次性 bootstrap 授权；main 初始化提交为

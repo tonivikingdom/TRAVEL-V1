@@ -1,6 +1,7 @@
 import {
   ApplicationError,
   type StoredObjectRecord,
+  type StoredObjectCleanupClaim,
   type StoredObjectRepository,
 } from '@travel/application';
 
@@ -16,6 +17,104 @@ interface AdvisoryLockRow {
 
 export class PrismaStoredObjectRepository implements StoredObjectRepository {
   constructor(private readonly client: PrismaClient) {}
+
+  async claimCleanupBatch(
+    input: Parameters<StoredObjectRepository['claimCleanupBatch']>[0],
+  ): Promise<readonly StoredObjectCleanupClaim[]> {
+    if (
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 100
+    )
+      throw new Error('Cleanup batch size must be from 1 to 100');
+    return this.client.$queryRaw<StoredObjectCleanupClaim[]>(Prisma.sql`
+      WITH candidates AS (
+        SELECT "id" FROM "StoredObject"
+        WHERE "storageDeletedAt" IS NULL
+          AND (("state" = 'PENDING' AND "createdAt" <= ${input.pendingBefore})
+            OR "state" IN ('FAILED', 'DELETED'))
+          AND ("cleanupNextAttemptAt" IS NULL OR "cleanupNextAttemptAt" <= ${input.now})
+        ORDER BY "createdAt", "id"
+        LIMIT ${input.limit} FOR UPDATE SKIP LOCKED
+      )
+      UPDATE "StoredObject" AS object
+      SET "state" = CASE WHEN object."state" = 'PENDING'
+            THEN 'FAILED'::"StoredObjectState" ELSE object."state" END,
+          "cleanupAttempts" = object."cleanupAttempts" + 1,
+          "cleanupNextAttemptAt" = ${input.leaseUntil}
+      FROM candidates WHERE object."id" = candidates."id"
+      RETURNING object."id", object."ownerUserId", object."storageKey", object."cleanupAttempts"
+    `);
+  }
+
+  async claimObjectCleanup(
+    input: Parameters<StoredObjectRepository['claimObjectCleanup']>[0],
+  ): Promise<StoredObjectCleanupClaim | null> {
+    const rows = await this.client.$queryRaw<
+      StoredObjectCleanupClaim[]
+    >(Prisma.sql`
+      UPDATE "StoredObject" SET "cleanupAttempts" = "cleanupAttempts" + 1,
+        "storageDeletedAt" = NULL, "cleanupNextAttemptAt" = ${input.leaseUntil}
+      WHERE "id" = ${input.id}::uuid AND "ownerUserId" = ${input.ownerUserId}::uuid
+        AND "state" IN ('FAILED', 'DELETED')
+      RETURNING "id", "ownerUserId", "storageKey", "cleanupAttempts"
+    `);
+    return rows[0] ?? null;
+  }
+
+  async completeCleanup(
+    input: Parameters<StoredObjectRepository['completeCleanup']>[0],
+  ): Promise<boolean> {
+    const updated = await this.client.storedObject.updateMany({
+      where: {
+        id: input.claim.id,
+        ownerUserId: input.claim.ownerUserId,
+        storageKey: input.claim.storageKey,
+        cleanupAttempts: input.claim.cleanupAttempts,
+        state: { in: ['FAILED', 'DELETED'] },
+        storageDeletedAt: null,
+      },
+      data: {
+        storageDeletedAt: input.now,
+        cleanupNextAttemptAt: null,
+        cleanupLastErrorCode: null,
+      },
+    });
+    return updated.count === 1;
+  }
+
+  async failCleanup(
+    input: Parameters<StoredObjectRepository['failCleanup']>[0],
+  ): Promise<boolean> {
+    const allowed = new Set([
+      'INVALID_OBJECT_KEY',
+      'OBJECT_EXISTS',
+      'OBJECT_NOT_FOUND',
+      'PATH_UNSAFE',
+      'SIZE_MISMATCH',
+      'SIZE_LIMIT_EXCEEDED',
+      'WRITE_FAILED',
+      'DELETE_FAILED',
+      'PERSISTENCE_UNAVAILABLE',
+    ]);
+    const updated = await this.client.storedObject.updateMany({
+      where: {
+        id: input.claim.id,
+        ownerUserId: input.claim.ownerUserId,
+        storageKey: input.claim.storageKey,
+        cleanupAttempts: input.claim.cleanupAttempts,
+        state: { in: ['FAILED', 'DELETED'] },
+        storageDeletedAt: null,
+      },
+      data: {
+        cleanupNextAttemptAt: input.retryAt,
+        cleanupLastErrorCode: allowed.has(input.errorCode)
+          ? input.errorCode
+          : 'DELETE_FAILED',
+      },
+    });
+    return updated.count === 1;
+  }
 
   async reserve(input: {
     readonly id: string;

@@ -5,6 +5,10 @@ import { StorageError, type ObjectStorage } from '@travel/storage';
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
 import type { StoredObjectRecord, StoredObjectRepository } from './ports.js';
+import {
+  cleanupStoredObjectClaim,
+  DEFAULT_OBJECT_CLEANUP_CONFIG,
+} from './stored-object-reconciliation-service.js';
 
 export interface ObjectServiceConfig {
   readonly maxFileBytes: number;
@@ -109,10 +113,12 @@ export class ObjectService {
         }),
       );
     } catch (error) {
-      await Promise.allSettled([
-        this.storage.delete(reserved.storageKey),
-        this.repository.markFailed(reserved.id),
-      ]);
+      try {
+        await this.repository.markFailed(reserved.id);
+        await this.cleanup(reserved.id, reserved.ownerUserId);
+      } catch {
+        // Preserve the original upload error; durable state remains retryable.
+      }
       throw storageApplicationError(error);
     }
   }
@@ -153,11 +159,31 @@ export class ObjectService {
       throw new ApplicationError('NOT_FOUND', '存储对象不存在。', 404);
     }
     try {
-      await this.storage.delete(object.storageKey);
+      const result = await this.cleanup(object.id, object.ownerUserId);
+      if (result === 'FAILED')
+        throw new Error('Physical storage cleanup unavailable');
     } catch (error) {
       throw storageApplicationError(error);
     }
     return toStoredObjectView(deleted);
+  }
+
+  private async cleanup(id: string, ownerUserId: string) {
+    const claim = await this.repository.claimObjectCleanup({
+      id,
+      ownerUserId,
+      leaseUntil: new Date(
+        this.now().getTime() + DEFAULT_OBJECT_CLEANUP_CONFIG.leaseMs,
+      ),
+    });
+    if (claim === null) return 'FENCED';
+    return cleanupStoredObjectClaim(
+      this.repository,
+      this.storage,
+      claim,
+      this.now,
+      DEFAULT_OBJECT_CLEANUP_CONFIG,
+    );
   }
 
   private async requireOwned(

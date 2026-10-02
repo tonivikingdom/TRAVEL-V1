@@ -1,3 +1,4 @@
+import { debugMonitoringCopy } from './monitoring-copy.js';
 import type {
   AdoptRoutePreviewResponse,
   DayOccurrenceTargetInput,
@@ -820,7 +821,7 @@ function createTripForm(): string {
 
 function notificationList(): string {
   if (state.notifications.length === 0) {
-    return '<p>当前没有站内通知。</p><p class="muted">P5D1 风险通知仅由显式执行评估产生；后台实时监控、Push 尚未实现。</p>';
+    return `<p>当前没有站内通知。</p><p class="muted">${esc(debugMonitoringCopy.notifications)}</p>`;
   }
   return `${state.notifications
     .map(
@@ -847,7 +848,7 @@ function tripWorkspace(trip: TripView): string {
       <section class="panel"><h2>测试事实输入</h2>${temporalForm(trip)}</section>
       <section class="panel"><h2>UserTimeIntent</h2>${intentForms(trip)}</section>
       <section class="panel span-2"><h2>Schedule Projection</h2><button data-action="evaluate">重新评估时间约束</button>${scheduleView()}</section>
-      <section class="panel span-2"><h2>Execution Risk（P5D1 手工测试）</h2><button data-action="evaluate-execution">触发执行风险评估</button>${executionRiskView()}</section>
+      <section class="panel span-2"><h2>Execution Risk（手动测试触发）</h2><button data-action="evaluate-execution">触发执行风险评估</button>${executionRiskView()}</section>
       <section class="panel span-2"><h2>Flight Operational Facts（P5D2 手工测试）</h2>${flightPanel(trip)}</section>
       <section class="panel span-2"><h2>Route Query / Candidate</h2>${routeQueryForm(trip)}${candidateView()}</section>
       <section class="panel span-2"><h2>Preview / Adopt / Undo</h2>${previewForm()}${previewView()}${receiptView(trip)}</section>
@@ -857,9 +858,9 @@ function tripWorkspace(trip: TripView): string {
 
 function executionRiskView(): string {
   if (state.executionRisks.length === 0) {
-    return '<p class="muted">当前没有活动执行风险。此处不会后台轮询，也不会伪造风险。</p>';
+    return `<p class="muted">当前没有活动执行风险。</p><p class="muted">${esc(debugMonitoringCopy.risk)}</p>`;
   }
-  return `<div class="stack-form">${state.executionRisks
+  return `<p class="muted">${esc(debugMonitoringCopy.risk)}</p><div class="stack-form">${state.executionRisks
     .map(
       (risk) =>
         `<article class="notification"><strong>${esc(risk.kind)} · ${esc(risk.severity)}</strong><small>${esc(risk.status)} · last seen ${esc(risk.lastSeenAt)}</small><pre>${esc(JSON.stringify({ sourceNodeId: risk.sourceNodeId, sourceTransportEdgeId: risk.sourceTransportEdgeId, protectedNodeId: risk.protectedNodeId, protectedTransportEdgeId: risk.protectedTransportEdgeId, evidenceRefs: risk.evidenceRefs, requiresRouteReevaluation: risk.requiresRouteReevaluation, acknowledgedAt: risk.acknowledgedAt, snoozedUntil: risk.snoozedUntil }, null, 2))}</pre><div class="actions"><button data-action="acknowledge-risk" data-id="${attr(risk.id)}">确认风险</button><button data-action="snooze-risk" data-id="${attr(risk.id)}">暂停提醒 15 分钟</button></div></article>`,
@@ -883,7 +884,7 @@ function flightPanel(trip: TripView): string {
         `<option value="${attr(edge.id)}">${esc(edge.id.slice(0, 8))} ${esc(edge.serviceLabel ?? 'FLIGHT')}</option>`,
     )
     .join('');
-  return `<div class="synthetic-banner">真实 AeroDataBox 调用只在服务端显式启用；本面板不显示凭证，不后台轮询。</div>
+  return `<div class="synthetic-banner">${esc(debugMonitoringCopy.flight)}</div>
     <form id="flight-search-form" class="inline-form"><label>航班号<input name="flightNumber" placeholder="NH53" required /></label><label>服务日期<input type="date" name="date" required /></label><button type="submit">搜索航班</button></form>
     ${candidates === '' ? '<p class="muted">尚无航班候选。</p>' : `<form id="flight-adopt-form" class="inline-form"><label>候选<select name="candidateIndex">${candidates}</select></label><label>FLIGHT TransportEdge<select name="transportEdgeId">${edges}</select></label><button type="submit" ${edges === '' ? 'disabled' : ''}>绑定到已有 FLIGHT 交通段</button></form>`}
     ${state.flightBinding === null ? '' : `<article class="candidate"><h3>${esc(state.flightBinding.displayFlightNumber)} · ${esc(state.flightBinding.status)}</h3><p>binding ${esc(state.flightBinding.id)} · refreshed ${esc(state.flightBinding.lastRefreshedAt)}</p><button data-action="refresh-flight">手工刷新运行事实</button><pre>${esc(JSON.stringify({ latestSnapshot: state.flightBinding.latestSnapshot, refreshResult: state.flightRefresh }, null, 2))}</pre></article>`}`;

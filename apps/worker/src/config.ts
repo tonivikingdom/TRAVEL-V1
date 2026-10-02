@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+import type { StoredObjectCleanupConfig } from '@travel/application';
+
 import type { JobRunnerConfig } from './job-runner.js';
 
 const SYNTHETIC_TOKEN_KEY =
@@ -17,6 +19,7 @@ export interface WorkerConfig {
   readonly mailCaptureFile: string;
   readonly runner: JobRunnerConfig;
   readonly workerId: string;
+  readonly objectCleanup: StoredObjectCleanupConfig;
 }
 
 export function readWorkerConfig(environment: NodeJS.ProcessEnv): WorkerConfig {
@@ -111,6 +114,38 @@ export function readWorkerConfig(environment: NodeJS.ProcessEnv): WorkerConfig {
       environment.MAIL_CAPTURE_FILE ??
       '/tmp/travel-mail-capture/messages.ndjson',
     runner,
+    objectCleanup: {
+      pendingStaleMs: cleanupInteger(
+        environment.OBJECT_PENDING_STALE_MS,
+        1_800_000,
+        60_000,
+        604_800_000,
+      ),
+      batchSize: cleanupInteger(
+        environment.OBJECT_CLEANUP_BATCH_SIZE,
+        25,
+        1,
+        100,
+      ),
+      leaseMs: cleanupInteger(
+        environment.OBJECT_CLEANUP_LEASE_MS,
+        60_000,
+        1_000,
+        600_000,
+      ),
+      retryBaseMs: cleanupInteger(
+        environment.OBJECT_CLEANUP_RETRY_BASE_MS,
+        5_000,
+        100,
+        60_000,
+      ),
+      retryMaxMs: cleanupInteger(
+        environment.OBJECT_CLEANUP_RETRY_MAX_MS,
+        3_600_000,
+        60_000,
+        86_400_000,
+      ),
+    },
     workerId: environment.WORKER_ID ?? `worker-${process.pid}-${randomUUID()}`,
   };
 }
@@ -224,5 +259,21 @@ function integer(
       `Worker duration must be an integer from ${minimum} to ${maximum}`,
     );
   }
+  return parsed;
+}
+
+function cleanupInteger(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  if (value !== undefined && !/^[1-9]\d*$/u.test(value))
+    throw new Error('Object cleanup configuration must be a positive integer');
+  const parsed = value === undefined ? fallback : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum)
+    throw new Error(
+      `Object cleanup configuration must be from ${minimum} to ${maximum}`,
+    );
   return parsed;
 }

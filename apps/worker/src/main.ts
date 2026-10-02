@@ -6,12 +6,14 @@ import {
   GroundTransitService,
   FlightService,
   MagicLinkEmailHandler,
+  StoredObjectReconciliationService,
   UnconfiguredMailSender,
 } from '@travel/application';
 import {
   createPostgresReadiness,
   createPrismaClient,
   PrismaJobRepository,
+  PrismaStoredObjectRepository,
   PrismaExecutionRiskRepository,
   PrismaFlightMonitoringRepository,
   PrismaGroundTransitRepository,
@@ -27,6 +29,12 @@ import {
   createGroundTransitProvider,
 } from '@travel/providers';
 
+import {
+  LocalFilesystemObjectStorage,
+  readObjectStorageConfig,
+} from '@travel/storage';
+import { runStorageReconciliation } from './storage-reconciliation.js';
+
 import { readWorkerConfig } from './config.js';
 import { FileCapturedMailSender } from './file-captured-mail-sender.js';
 import { createWorkerHeartbeat } from './heartbeat.js';
@@ -37,6 +45,14 @@ const config = readWorkerConfig(process.env);
 const managedProbe = createPostgresReadiness(config.databaseUrl);
 const managedPrisma = createPrismaClient(config.databaseUrl);
 const jobRepository = new PrismaJobRepository(managedPrisma.client);
+const objectStorageConfig = readObjectStorageConfig(process.env);
+const objectReconciliation = objectStorageConfig.enabled
+  ? new StoredObjectReconciliationService(
+      new PrismaStoredObjectRepository(managedPrisma.client),
+      new LocalFilesystemObjectStorage(objectStorageConfig.root),
+      config.objectCleanup,
+    )
+  : null;
 const tripRepository = new PrismaTripRepository(managedPrisma.client);
 const groundTransitRepository = new PrismaGroundTransitRepository(
   managedPrisma.client,
@@ -136,6 +152,11 @@ async function heartbeat(): Promise<void> {
   if (database.status === 'READY') {
     await flightMonitoringService.ensureEligibleMonitoring();
     await groundTransitService.ensureEligibleMonitoring();
+    await runStorageReconciliation(objectReconciliation, (event) => {
+      process.stdout.write(
+        `${JSON.stringify({ service: 'worker', ...event })}\n`,
+      );
+    });
   }
 }
 

@@ -39,3 +39,11 @@ P1B2 需要在没有 Trip/P2、正式 Attachment API、Push 或云对象存储�
 - 当前 P1B2 没有公开上传入口；PENDING reconciliation 不在本轮扩展实现，但不得在缺少该机制时
   开放正式 Attachment/upload 或 Staging/Production 存储。
 - 本 ADR 不授权 P2、正式 Attachment API、文件解析、Push、真实云 provider 或 Production。
+
+## 后续实现记录：P5 Audit Repair Batch 4
+
+上述 P1B2 未实现 reconciliation 的记录保留为历史决策依据。后续 F-07 修复新增 DB cleanup metadata、
+bounded SKIP LOCKED claim、stale PENDING → FAILED quota 释放、lease/attempt fencing 和物理删除重试。
+本地 partial 文件绑定 reservation UUID，Worker 只删除 DB 记录对应的精确 object/partial，不扫描未知文件。
+真实存储、正式 Attachment 产品与部署授权均不由该维护能力推出；详见
+[P5-AUDIT-REPAIR-4](../status/P5-AUDIT-REPAIR-4.md)。

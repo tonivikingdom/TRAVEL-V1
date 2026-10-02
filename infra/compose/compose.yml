@@ -111,12 +111,21 @@ services:
       WORKER_HEARTBEAT_INTERVAL_MS: ${WORKER_HEARTBEAT_INTERVAL_MS}
       WORKER_HEARTBEAT_MAX_AGE_MS: ${WORKER_HEARTBEAT_MAX_AGE_MS}
       WORKER_SHUTDOWN_TIMEOUT_MS: ${WORKER_SHUTDOWN_TIMEOUT_MS:-10000}
+      OBJECT_STORAGE_ROOT: /var/lib/travel-objects
+      OBJECT_PENDING_STALE_MS: ${OBJECT_PENDING_STALE_MS:-1800000}
+      OBJECT_CLEANUP_BATCH_SIZE: ${OBJECT_CLEANUP_BATCH_SIZE:-25}
+      OBJECT_CLEANUP_LEASE_MS: ${OBJECT_CLEANUP_LEASE_MS:-60000}
+      OBJECT_CLEANUP_RETRY_BASE_MS: ${OBJECT_CLEANUP_RETRY_BASE_MS:-5000}
+      OBJECT_CLEANUP_RETRY_MAX_MS: ${OBJECT_CLEANUP_RETRY_MAX_MS:-3600000}
     healthcheck:
       test: ['CMD', 'node', 'scripts/check-worker-health.mjs']
       interval: 5s
       timeout: 3s
       retries: 12
     restart: unless-stopped
+
+    volumes:
+      - object-storage-data:/var/lib/travel-objects
 
   migrate:
     build:

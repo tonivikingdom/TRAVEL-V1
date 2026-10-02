@@ -608,6 +608,52 @@ async function verifyCompose(compose, composeQuiet, env) {
   }
 
   await compose('stop', '--timeout', '10', 'worker');
+  const staleStorage = parseLastJsonLine(
+    await composeQuiet(
+      'exec',
+      '--no-TTY',
+      '-e',
+      storageOwnerEnvironment,
+      'api',
+      'pnpm',
+      'tsx',
+      'scripts/verify-object-storage.ts',
+      'seed-stale',
+    ),
+    'Synthetic stale storage reservation',
+  );
+  if (typeof staleStorage.objectId !== 'string' || staleStorage.quotaBytes <= 0)
+    throw new Error('Synthetic stale storage fixture is missing');
+  await compose('start', 'worker');
+  await waitFor(
+    'bounded Worker storage reconciliation after restart',
+    async () => {
+      try {
+        const result = parseLastJsonLine(
+          await composeQuiet(
+            'exec',
+            '--no-TTY',
+            '-e',
+            storageOwnerEnvironment,
+            'api',
+            'pnpm',
+            'tsx',
+            'scripts/verify-object-storage.ts',
+            'verify-reconciled',
+            staleStorage.objectId,
+          ),
+          'Synthetic storage reconciliation',
+        );
+        return result.cleanupCompleted === true && result.quotaBytes === 0;
+      } catch {
+        return false;
+      }
+    },
+  );
+  process.stdout.write(
+    'F-07 Worker storage reconciliation: stale PENDING -> FAILED; quota released; physical orphan removed\n',
+  );
+  await compose('stop', '--timeout', '10', 'worker');
   const recoveryKey = `synthetic-lease-recovery-${Date.now()}`;
   await compose(
     'exec',

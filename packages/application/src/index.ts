@@ -210,3 +210,11 @@ export {
   EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
   LEGACY_EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
 } from './external-origin-route-preview.js';
+
+export {
+  StoredObjectReconciliationService,
+  DEFAULT_OBJECT_CLEANUP_CONFIG,
+  type StoredObjectCleanupConfig,
+  type StorageReconciliationSummary,
+} from './stored-object-reconciliation-service.js';
+export type { StoredObjectCleanupClaim } from './ports.js';

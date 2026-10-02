@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   ApplicationError,
@@ -49,6 +49,71 @@ try {
   );
 
   switch (action) {
+    case 'seed-stale': {
+      // Only an explicitly SYNTHETIC owner and a DB-reserved exact key.
+      // Worker is stopped by Compose while this crash fixture is prepared.
+      const content = Buffer.from('SYNTHETIC stale orphan');
+      const pending = await new PrismaStoredObjectRepository(
+        managed.client,
+      ).reserve({
+        id: randomUUID(),
+        ownerUserId: actor.userId,
+        storageKey: randomUUID(),
+        displayName: 'SYNTHETIC stale orphan.txt',
+        mediaType: 'text/plain',
+        declaredByteSize: content.length,
+        maxUserTotalBytes: config.maxUserTotalBytes,
+        now: new Date(Date.now() - 604_800_001),
+      });
+      await storage.put({
+        objectKey: pending.storageKey,
+        source: singleChunk(content),
+        declaredByteSize: content.length,
+        maxByteSize: config.maxFileBytes,
+      });
+      const quota = await managed.client.storedObject.aggregate({
+        where: {
+          ownerUserId: actor.userId,
+          state: { in: ['PENDING', 'READY'] },
+        },
+        _sum: { declaredByteSize: true },
+      });
+      if (Number(quota._sum.declaredByteSize) !== content.length)
+        throw new Error('Synthetic stale reservation did not occupy quota');
+      writeResult({ action, objectId: pending.id, quotaBytes: content.length });
+      break;
+    }
+    case 'verify-reconciled': {
+      const record = await managed.client.storedObject.findFirstOrThrow({
+        where: { id: requiredObjectId(objectId), ownerUserId: actor.userId },
+      });
+      const quota = await managed.client.storedObject.aggregate({
+        where: {
+          ownerUserId: actor.userId,
+          state: { in: ['PENDING', 'READY'] },
+        },
+        _sum: { declaredByteSize: true },
+      });
+      if (
+        record.state !== 'FAILED' ||
+        record.storageDeletedAt === null ||
+        record.cleanupAttempts < 1 ||
+        (await storage.exists(record.storageKey)) ||
+        Number(quota._sum.declaredByteSize ?? 0n) !== 0
+      )
+        throw new Error(
+          'Synthetic stale reservation is not yet physically reconciled',
+        );
+      writeResult({
+        action,
+        objectId: record.id,
+        state: record.state,
+        quotaBytes: 0,
+        physicalObjectPresent: false,
+        cleanupCompleted: true,
+      });
+      break;
+    }
     case 'write': {
       const content = Buffer.from(
         'SYNTHETIC P1B2 PRIVATE OBJECT - NOT REAL USER DATA',

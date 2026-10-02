@@ -20,7 +20,9 @@ const splitMigrations = new Set([
 describe('P5E2 5B2B external adopted-route anchor migration', () => {
   it('applies exactly 23 migrations on empty PostgreSQL 17 and preserves composite Restrict FK', async () => {
     await withDatabase('external_adopt_clean', async (client) => {
-      const names = await migrationNames();
+      const names = (await migrationNames()).filter(
+        (name) => name <= migration,
+      );
       expect(names).toHaveLength(23);
       for (const name of names) await applyMigration(client, name);
       const result = await client.query(

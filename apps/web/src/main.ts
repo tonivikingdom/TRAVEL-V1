@@ -140,11 +140,12 @@ function render() {
   const day =
     trip.days.find((d) => d.dayOccurrenceId === dayId) ?? trip.days[0];
   dayId = day?.dayOccurrenceId ?? '';
+  const shownNodes =
+    day?.nodes.filter((n) => !isFoldedTransfer(trip!, n)) ?? [];
   const days = [...trip.days].sort((a, b) => a.sequence - b.sequence);
-  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header><main class="workspace"><aside class="date-sidebar"><p class="eyebrow">这次旅行</p><h1>${esc(trip.name)}</h1><p class="muted">${trip.defaultPeopleCount} 人 · ${esc(trip.effectiveStartDate ?? trip.planningAnchorDate)}</p><nav aria-label="旅行日期">${days.map((d, i) => `<button data-day="${d.dayOccurrenceId}" class="${d.dayOccurrenceId === dayId ? 'selected' : ''}">${icon('calendar')}<span>第 ${i + 1} 天<small>${esc(d.localDate)}</small></span></button>`).join('')}</nav></aside><section class="itinerary"><div class="page-heading"><div><p class="eyebrow">按计划查看</p><h2>${esc(day?.localDate ?? '日程')}</h2><p class="mobile-trip">${esc(trip.name)}</p></div><span class="badge">${day?.nodes.length ?? 0} 个安排</span></div>${banner()}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo">撤销刚才的路线修改</button></div>' : ''}<div class="timeline">${
-    day?.nodes.length
-      ? day.nodes
-          .filter((n) => !isFoldedTransfer(trip!, n))
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header><main class="workspace"><aside class="date-sidebar"><p class="eyebrow">这次旅行</p><h1>${esc(trip.name)}</h1><p class="muted">${trip.defaultPeopleCount} 人 · ${esc(trip.effectiveStartDate ?? trip.planningAnchorDate)}</p><nav aria-label="旅行日期">${days.map((d, i) => `<button data-day="${d.dayOccurrenceId}" class="${d.dayOccurrenceId === dayId ? 'selected' : ''}">${icon('calendar')}<span>第 ${i + 1} 天<small>${esc(d.localDate)}</small></span></button>`).join('')}</nav></aside><section class="itinerary"><div class="page-heading"><div><p class="eyebrow">按计划查看</p><h2>${esc(day?.localDate ?? '日程')}</h2><p class="mobile-trip">${esc(trip.name)}</p></div><span class="badge">${shownNodes.length} 个安排</span></div>${banner()}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo">撤销刚才的路线修改</button></div>' : ''}<div class="timeline">${
+    shownNodes.length
+      ? shownNodes
           .map((n) => {
             const chain = routeConnections(trip!, n.id);
             const connection = chain[0]
@@ -153,7 +154,7 @@ function render() {
             return `<article class="place-card"><button class="place-open" data-node="${n.id}"><span class="place-icon">${icon('pin')}</span><span><strong>${esc(nodeTitle(n))}</strong><small>${esc(n.place?.address ?? (n.place ? '地址未提供' : '未指定地点'))}</small></span><span aria-hidden="true">›</span></button>${timeGrid(n)}${requirements(n)}${projection(n.id)?.status === 'VIOLATED' || projection(n.id)?.status === 'CONFLICT' ? '<p class="warning">当前安排与重要时间要求有冲突，请查看详情。</p>' : ''}</article>${connection ? connectionCard(connection) : ''}`;
           })
           .join('')
-      : '<div class="empty">这一天还没有安排。</div>'
+      : `<div class="empty">${day?.nodes.length ? '这一天没有单独的地点安排；跨日交通请查看出发日的交通详情。' : '这一天还没有安排。'}</div>`
   }</div></section><aside class="desktop-hint"><span class="large-pin">${icon('pin')}</span><h3>查看安排详情</h3><p>选择地点查看时间与资料。选择交通查看路线，或主动更换方案。</p><p class="muted">位置未知时，按计划查看；不会推测你已到达。</p></aside></main>`;
 }
 function connectionCard(c: ConnectionView) {

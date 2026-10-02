@@ -327,6 +327,9 @@ function validateCommand(command: TripCommandInput): RepositoryTripCommand {
         position: nonnegativeInteger(command.position, 'position'),
         note: optionalText(command.note, 'note', 2_000),
       };
+    case 'SET_NODE_NOTE':
+      requireUuid(command.nodeId, 'nodeId');
+      return { ...command, note: optionalText(command.note, 'note', 2_000) };
     case 'DELETE_NODE':
       requireUuid(command.nodeId, 'nodeId');
       return command;

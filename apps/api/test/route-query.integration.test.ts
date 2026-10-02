@@ -9498,6 +9498,151 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     return response.json() as TripView;
   }
 
+  it('P6A-1: hotel arrival and dwell fence impossible routes, protected dwell adoption and edited versions', async () => {
+    let trip = await tripWithVisits(userA, [
+      'SYNTHETIC Hotel',
+      'SYNTHETIC Station',
+    ]);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    const temporal = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T13:00:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(temporal.statusCode).toBe(200);
+    trip = temporal.json() as TripView;
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: from!.id,
+      durationSeconds: 3600,
+      locked: true,
+    });
+    const count = await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: trip.id },
+    });
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T10:45:00Z', '2030-10-01T12:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const impossible = await query(userA, trip, from!.id, to!.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:45:00Z',
+      timeZone: 'UTC',
+    });
+    expect(impossible.json()).toMatchObject({
+      error: { code: 'NO_MATCHING_CANDIDATE' },
+    });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(count);
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T13:45:00Z', '2030-10-01T15:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const shortened = await query(userA, trip, from!.id, to!.id, null);
+    expect(shortened.statusCode).toBe(200);
+    const shortenedPreview = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: shortened.json().candidates[0].candidateSnapshotId,
+      },
+    });
+    expect(shortenedPreview.statusCode).toBe(201);
+    const unaccepted = await adopt(
+      userA,
+      trip,
+      shortenedPreview.json().previewId,
+      `p6a-dwell-${randomUUID()}`,
+    );
+    expect(unaccepted.json()).toMatchObject({
+      error: { code: 'USER_ADJUSTMENT_REQUIRED' },
+    });
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T14:00:00Z', '2030-10-01T15:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const valid = await query(userA, trip, from!.id, to!.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T14:00:00Z',
+      timeZone: 'UTC',
+    });
+    expect(valid.statusCode).toBe(200);
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: valid.json().candidates[0].candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    const oldVersion = trip.version;
+    trip = await command(userA, trip, {
+      type: 'SET_NODE_NOTE',
+      nodeId: from!.id,
+      note: 'SYNTHETIC persisted front-end note',
+    });
+    expect(trip.version).toBe(oldVersion + 1);
+    expect(
+      (
+        await managed.client.itineraryNode.findUniqueOrThrow({
+          where: { id: from!.id },
+        })
+      ).note,
+    ).toBe('SYNTHETIC persisted front-end note');
+    const reread = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(reread.json().days[0].nodes[0].note).toBe(
+      'SYNTHETIC persisted front-end note',
+    );
+    const stale = await adopt(
+      userA,
+      { ...trip, version: oldVersion },
+      previewResponse.json().previewId,
+      `p6a-stale-${randomUUID()}`,
+    );
+    expect(stale.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    const foreign = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/commands`,
+      headers: bearer(userB),
+      payload: {
+        baseTripVersion: trip.version,
+        command: { type: 'SET_NODE_NOTE', nodeId: from!.id, note: 'foreign' },
+      },
+    });
+    expect(foreign.statusCode).toBe(404);
+    expect(
+      await managed.client.adoptedRoute.count({ where: { tripId: trip.id } }),
+    ).toBe(0);
+  });
+
   async function tripWithVisits(
     identity: SyntheticIdentity,
     names: readonly string[],

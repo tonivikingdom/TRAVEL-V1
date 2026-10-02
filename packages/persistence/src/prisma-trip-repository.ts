@@ -407,6 +407,23 @@ async function applyCommand(
         'ADJACENCY_CHANGED',
       );
       return;
+    case 'SET_NODE_NOTE': {
+      const node = await requireTripNode(
+        transaction,
+        input.tripId,
+        input.command.nodeId,
+      );
+      await transaction.itineraryNode.update({
+        where: { id: node.id },
+        data: {
+          note: input.command.note,
+          ...(node.source === 'ROUTE_GENERATED'
+            ? { autoReplaceable: false, userModifiedAt: new Date() }
+            : {}),
+        },
+      });
+      return;
+    }
     case 'DELETE_NODE': {
       const node = await requireTripNode(
         transaction,

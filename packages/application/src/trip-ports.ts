@@ -202,6 +202,11 @@ export type RepositoryTripCommand =
       readonly position: number;
       readonly note: string | null;
     }
+  | {
+      readonly type: 'SET_NODE_NOTE';
+      readonly nodeId: string;
+      readonly note: string | null;
+    }
   | { readonly type: 'DELETE_NODE'; readonly nodeId: string }
   | {
       readonly type: 'MOVE_NODE';

@@ -47,6 +47,12 @@ jobs:
       - run: pnpm test
       - run: pnpm test:integration
       - run: pnpm build
+      - name: Install formal Web browsers
+        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Verify formal Web interactions on Chromium and WebKit
+        run: pnpm test:web
+        env:
+          WEB_TEST_WEBKIT: 'true'
 
   compose-verify:
     name: Compose verification

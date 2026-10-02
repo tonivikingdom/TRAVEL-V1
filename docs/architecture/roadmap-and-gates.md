@@ -1,33 +1,36 @@
 # 阶段计划、闸门与未决项
 
-## 2026-10-02 当前产品方向
+## 2026-10-02 当前产品方向与推荐交付
 
-权威范围：[V1 产品边界冻结 v1.0](../10_V1产品边界冻结_v1.0.md)。正式起点 main 为
-`14023af41910ead94d09c7bb2eab8b1c94bb6360`，main CI Run `36945716887` 的 verify、Compose verification、P5B acceptance 均 completed / success；24 migrations。
+权威文件：[V1 产品设计与交付边界 v1.1](../10_V1产品设计与交付边界_v1.1.md)，替代本PR的v1.0草案；用户最新指令 → v1.1 → 未明确修改的规则/保护 → 历史蓝图。
+正式main起点 `14023af41910ead94d09c7bb2eab8b1c94bb6360`，24 migrations，起点main CI `36945716887`成功。工程完成不代表正式UI、真实Provider或部署完成。
 
-P0–P5 + P5E2 已形成充分 backend foundation。下一步以真实用户主流程为准：
-创建旅行 → 安排每天地点/活动 → 设置交通 → 查看/选择路线 → 查看航班 → 出行 → 必要提醒 → 必要时重新规划。
-优先 usable product > simple interaction > real-world validation > additional infrastructure completeness。
+产品覆盖安排、出行、临时调整、回顾；每项须说明减少什么操作或避免什么损失，并经完整场景试用校准。已开发backend保留复用，不无目的扩张，不以冻结为由拒修安全/数据/并发/主流程缺陷。
 
-P-SIMPLE-01～06 生效：细的工程边界保留，内部状态机不变成用户步骤；默认只显示当前需要处理的信息，高级扩展由真实需求触发。
-正式核心概念只有旅行、日期、地点 / 活动、交通、航班、提醒；路线交互最多 1 次查看 + 1 次确认。
+| 事项                      | 当前状态                                                                                                                      |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| P5E2                      | COMPLETE；保留时间/事实、监控/风险、起点验证、路线替换、Adopt/Undo及并发/历史保护。                                           |
+| P5 Audit Repair F-07/F-08 | COMPLETE / CLOSED；不代表凭证产品或Push已开放。                                                                               |
+| F-05                      | OPEN，无具体任务时未排期；实际使用前核验具体Provider/account-plan的字段、留存、归因、删除、费用/覆盖/entitlement。            |
+| F-06                      | OPEN；R7方向已确认：供应商Push/Webhook优先、Polling补充、Query按需，待验证具体账号与fallback。                                |
+| 受控自动辅助              | 保留产品方向；自动Query/Preview当前未启用，后续按场景单独授权触发、请求/费用限额、去重/缓存/取消/过期/停止。静默Adopt不允许。 |
+| Undo产品解释              | observation与用户执行分开；现有守卫不改，中性文案与安全撤回/重选旧方案登记专项复议。                                          |
 
-| 项目                      | 当前状态 / 下一步                                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| P5E2                      | COMPLETE / FREEZE；保留已实现 monitoring、execution、internal/external-origin planning 与安全 Undo，不继续扩展高级 backend。 |
-| P5 Audit Repair F-07/F-08 | COMPLETE；两项 CLOSED，PR #38 已合并至正式起点。                                                                             |
-| F-05                      | OPEN / FROZEN；只有即将连接具体 Provider/account/plan 才重新验证 retention/entitlement 等条件。                              |
-| F-06                      | OPEN / FROZEN；具体 Provider/account 确定后再决定 Webhook/Polling/Query，禁止预建通用 webhook。                              |
-| NEXT                      | P6A — Formal V1 User Experience Foundation；待单独授权，当前文档批不开始。                                                   |
+### 推荐顺序（未交付，不自动连续施工）
 
-P6A 第一版只做旅行列表/详情、Day itinerary、Place / FreeAction editing、Transport summary、Flight summary、Notifications；
-Route/replanning 以最小入口接入。Debug Web 保留工程测试台，正式 Desktop/Mobile 另开 surface，独立布局并共享契约、Design Tokens 与 SVG。
-可视内容及 icon + text 整体视觉居中，左右 padding 对称，尺寸变化重新计算视觉中心。
+| 阶段                    | 完整用户任务                                                                                         | 验收重点                                                                                 |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| P6A：一趟旅行能安排出来 | 列表进入、地点/自由行动、日期/排序、重要时间、时间影响、选择交通并保存；首个迭代考虑桌面和手机布局。 | 不接触ID/经纬度表单/工程状态机即可安排酒店/活动/交通；保存失败明确，真实数据按闸门验收。 |
+| P6B：拿手机能实际出行   | 今天/下一步、交通换乘、导航、航班/住宿、轻量资料与静态备份；基础手机查看不等待本阶段才出现。         | 不开定位也可查看；实时未知如实显示，资料易找，备份标生成时间。                           |
+| P6C：计划变了能少操心   | 延长停留、跳过活动、交通变化；局部最小改动，少量可靠方案由用户选择。                                 | 不覆盖事实、不隐藏费用、不强迫重做整天；拒绝后不反复催，起点/候选不足不伪确定。          |
 
-Native Push、附件产品、协作与高级定位 DEFERRED；不是为了补齐 backend 而启动的任务。
-automatic Query/Preview/Adopt、GPS-origin、onboard/mid-edge、自动 hub confirmation、任意 internal-node rerouting、Undo stack/Redo 和 workflow engine 冻结。
-严格并发、证据、执行历史、Provider ACTUAL、Undo audit、topology、owner isolation、idempotency 和 migration safety 保持。
-真实 Provider、付费调用、Staging/Production deployment 均不由本批授权。F-05/F-06 仍是对应真实服务启用前的硬闸门，公共文档不能关闭它们。
+同一份行程事实按场景显示今天/全部日程；交通/航班/资料附于安排，提醒回到相关行程。内部状态机不建一级导航，工程pipeline不变成逐个按钮。
+最少必要操作，无两次硬上限，起点/费用/重要影响确认不省略；正常路线不主动打扰，详情保留主动更换。
+轻量资料先备注/链接，少量图片/PDF按存储与隐私闸门；静态备份优先，区分个人/公开白名单和实时离线系统。费用/历史/复制按试用反馈插入，不抢首次主流程。
+
+Debug Web保持工程台，正式Desktop/Mobile另开surface，独立布局，共享API/Domain/数据/Design Tokens/SVG。控件可见内容组视觉居中、左右平衡，正文按可读性对齐。
+Native Push有旅中价值但投递当前后置，和供应商webhook不同；不开GPS不妨碍基础查看，不开展轨迹完整率、通用坐标/车上重规划、万能Undo/Redo、订单改签、协作权限或运营平台。
+每个任务先标复用/薄适配/新能力，产品与工程验收并行；绿色CI不替代真实试用。无业务/部署授权，本轮Draft后停止。
 
 ## 阶段交付记录
 
@@ -56,7 +59,7 @@ automatic Query/Preview/Adopt、GPS-origin、onboard/mid-edge、自动 hub confi
 | P5E1              | Execution Location 与 Arrival Detection V1                                      | 已进入 main；后续审计修复 F-03/F-13 已合并                                                                         | 只处理执行事实、最小派生状态与显式 Undo；不保存轨迹、不含原生定位或 Push                            |
 | P5E2 Batch 1      | Ground Transit Execution Foundation                                             | 已通过 PR #30 合并至 main `e4685c5f729e27b2f1a8cab65c8c76393a01178d`                                               | foundation COMPLETE；仅合成 Provider，真实 Provider 未启用                                          |
 | P5E2 Batch 2–5B2B | Operational changes、handoff、internal/external-origin Query/Preview/Adopt/Undo | COMPLETE；PR #37 main `1fe6f8bba5a438c2ec11616d6296abaa567f4455`                                                   | source binding、endpoint binding、history、execution-aware Undo 与并发保护保留                      |
-| P5E+              | 后续高级执行采集与投递扩展                                                      | FREEZE / DEFERRED                                                                                                  | 真实 V1 需求触发后单独授权；Native Push/后台定位当前不扩展                                          |
+| P5E+              | 后续高级执行采集与投递扩展                                                      | 无具体用户需求的扩展后置                                                                                           | 按具体场景授权，保留受控自动辅助方向；不预建通用投递/执行平台                                       |
 
 O-09 保持 Deferred。O-11 的产品规则已确认，但正式回顾/分享 UI 与匿名访问仍未实现。协作、公众注册、
 原生客户端/Push、天气、预算、OCR、多人分摊、完整订单、完整审计和异地灾备均不在首轮批量开发范围。

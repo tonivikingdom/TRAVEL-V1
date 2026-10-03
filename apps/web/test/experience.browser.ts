@@ -1619,3 +1619,164 @@ test('transport refinement preserves ordered transfer segments and their distinc
   expect(calls).toEqual(reads);
   await screenshot(page, 'ui-mobile-transfer');
 });
+
+test('mobile keyboard viewport keeps focused note and save reachable and restores sheet bounds', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('.edit > summary').click();
+  await page.locator('textarea').fill('SYNTHETIC keyboard draft');
+  await page.evaluate(() => {
+    const viewport = window.visualViewport!;
+    Object.defineProperty(viewport, 'height', {
+      configurable: true,
+      value: 360,
+    });
+    Object.defineProperty(viewport, 'offsetTop', {
+      configurable: true,
+      value: 40,
+    });
+    viewport.dispatchEvent(new Event('resize'));
+  });
+  await expect
+    .poll(
+      async () =>
+        (await page.locator('#detail').boundingBox())!.y +
+        (await page.locator('#detail').boundingBox())!.height,
+    )
+    .toBeLessThanOrEqual(401);
+  const note = await page.locator('textarea').boundingBox();
+  expect(note!.y).toBeGreaterThanOrEqual(40);
+  expect(note!.y + note!.height).toBeLessThanOrEqual(401);
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#save-status')).toContainText('已保存');
+  await page.evaluate(() => {
+    delete (window.visualViewport as unknown as { height?: number }).height;
+    delete (window.visualViewport as unknown as { offsetTop?: number })
+      .offsetTop;
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect
+    .poll(
+      async () =>
+        (await page.locator('#detail').boundingBox())!.y +
+        (await page.locator('#detail').boundingBox())!.height,
+    )
+    .toBeGreaterThan(800);
+});
+
+test('losing handle pointer capture cancels the drag without dismissing or retaining translation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  const box = (await page.locator('.handle').boundingBox())!;
+  await page.mouse.move(box.x + 15, box.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 15, box.y + 60, { steps: 4 });
+  await page
+    .locator('#detail')
+    .dispatchEvent('lostpointercapture', { pointerId: 1 });
+  await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+  await page.mouse.up();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('sheet title and close control allow native touch scrolling outside handle', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await expect(page.locator('.sheet-title')).toHaveCSS('touch-action', 'auto');
+  await expect(page.locator('[data-close]')).toHaveCSS(
+    'touch-action',
+    'manipulation',
+  );
+});
+
+test('handle drag obeys discard confirmation and content scroll never dismisses a draft', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 650 });
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('.edit > summary').click();
+  await page.locator('textarea').fill('SYNTHETIC protected drag draft');
+  await page
+    .locator('textarea')
+    .evaluate((element) => element.scrollIntoView());
+  await page.mouse.wheel(0, 180);
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.locator('#detail').evaluate((element) => (element.scrollTop = 0));
+  const box = (await page.locator('.handle').boundingBox())!;
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.mouse.move(box.x + 15, box.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 15, box.y + 140, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('textarea')).toHaveValue(
+    'SYNTHETIC protected drag draft',
+  );
+  await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+  expect(commands).toHaveLength(0);
+});
+
+test.describe('SYNTHETIC mobile touch and text quality', () => {
+  test.use({ hasTouch: true, isMobile: true });
+  for (const width of [320, 375, 390, 430]) {
+    test(`${width}px large text touch place and authoring remain scrollable`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 740 });
+      await enter(page);
+      await page.addStyleTag({ content: ':root { font-size: 24px; }' });
+      await page.locator('[data-node]').first().tap();
+      expect(
+        (await page.locator('[data-close]').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        (await page.locator('[data-drag]').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      await page.locator('.edit > summary').tap();
+      await page.locator('textarea').fill('SYNTHETIC long note '.repeat(12));
+      await page.locator('textarea').focus();
+      await expect(page.locator('textarea')).toHaveCSS('font-size', '24px');
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      expect(
+        await page
+          .locator('#detail')
+          .evaluate((e) => e.scrollWidth <= e.clientWidth),
+      ).toBe(true);
+      await page.getByRole('button', { name: '保存备注' }).tap();
+      await expect(page.locator('#save-status')).toContainText('已保存');
+      if (process.env.WEB_TEST_SCREENSHOTS === 'true')
+        await page.screenshot({
+          path: `docs/status/assets/mobile-hardening/mobile-${width}-large-text.png`,
+        });
+      await page.locator('[data-close]').tap();
+      await page.locator('[data-action=add-arrangement]').tap();
+      await page.getByRole('button', { name: '自由行动', exact: true }).tap();
+      await page
+        .locator('[name=title]')
+        .fill('SYNTHETIC long mobile arrangement');
+      await page.locator('[name=title]').focus();
+      expect(
+        await page
+          .locator('#detail')
+          .evaluate((e) => e.scrollWidth <= e.clientWidth),
+      ).toBe(true);
+      await expect(
+        page.getByRole('button', { name: '添加自由行动', exact: true }),
+      ).toBeVisible();
+    });
+  }
+});

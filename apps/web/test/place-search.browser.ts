@@ -423,3 +423,105 @@ test('core failure during search uses existing recovery and preserves draft rath
   await search(page);
   expect(writes).toBe(0);
 });
+
+test.describe('SYNTHETIC Place Search with integrated mobile touch hardening', () => {
+  test.use({ hasTouch: true, isMobile: true });
+  for (const width of [320, 375, 390, 430]) {
+    test(`${width}px search draft retains touch, large text and keyboard protections until explicit authoring`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 740 });
+      await open(page);
+      await page.addStyleTag({ content: ':root { font-size: 24px; }' });
+      await search(page);
+      await expect(page.locator('[data-candidate="2"]')).toBeDisabled();
+      await page.locator('[data-candidate="1"]').tap();
+      const note = page.locator('textarea[name=note]');
+      await note.fill('SYNTHETIC 東京駅の長い住所と保存前の草稿');
+      await expect(page.locator('[data-place-query]')).toHaveCSS(
+        'font-size',
+        '24px',
+      );
+      expect(
+        (await page.locator('[data-drag]').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        (await page.locator('[data-close]').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      expect(writes).toBe(0);
+      expect(searches).toBe(1);
+
+      await page
+        .locator('#detail')
+        .evaluate((element) => (element.scrollTop = 0));
+      let handle = (await page.locator('.handle').boundingBox())!;
+      await page.mouse.move(handle.x + 15, handle.y + 2);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + 15, handle.y + 60, { steps: 4 });
+      await page
+        .locator('#detail')
+        .dispatchEvent('lostpointercapture', { pointerId: 1 });
+      await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+      await page.mouse.up();
+      await expect(page.getByRole('dialog')).toBeVisible();
+
+      handle = (await page.locator('.handle').boundingBox())!;
+      page.once('dialog', (dialog) => dialog.dismiss());
+      await page.mouse.move(handle.x + 15, handle.y + 2);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + 15, handle.y + 140, { steps: 8 });
+      await page.mouse.up();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(note).toHaveValue(
+        'SYNTHETIC 東京駅の長い住所と保存前の草稿',
+      );
+      await expect(page.locator('select[name=place]')).toHaveValue(
+        'search:SYNTHETIC-token-1',
+      );
+
+      await note.focus();
+      await page.evaluate(() => {
+        const viewport = window.visualViewport!;
+        Object.defineProperty(viewport, 'height', {
+          configurable: true,
+          value: 360,
+        });
+        Object.defineProperty(viewport, 'offsetTop', {
+          configurable: true,
+          value: 40,
+        });
+        viewport.dispatchEvent(new Event('resize'));
+      });
+      await expect
+        .poll(async () => {
+          const box = (await page.locator('#detail').boundingBox())!;
+          return box.y + box.height;
+        })
+        .toBeLessThanOrEqual(401);
+      const submit = page.locator('#authoring-add button.primary');
+      await submit.scrollIntoViewIfNeeded();
+      await expect(submit).toBeInViewport();
+      expect(
+        await page
+          .locator('#detail')
+          .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      expect(writes).toBe(0);
+      await page.evaluate(() => {
+        delete (window.visualViewport as unknown as { height?: number }).height;
+        delete (window.visualViewport as unknown as { offsetTop?: number })
+          .offsetTop;
+        window.visualViewport!.dispatchEvent(new Event('resize'));
+      });
+      await submit.tap();
+      await expect.poll(() => writes).toBe(1);
+      expect(submitted.selectionToken).toBe('SYNTHETIC-token-1');
+      expect(submitted.note).toBe('SYNTHETIC 東京駅の長い住所と保存前の草稿');
+    });
+  }
+});

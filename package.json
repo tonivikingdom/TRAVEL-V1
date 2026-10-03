@@ -29,10 +29,13 @@
     "prisma:validate": "prisma validate",
     "test": "vitest run",
     "test:integration": "pnpm --filter @travel/persistence test:integration && pnpm --filter @travel/api test:integration",
-    "typecheck": "pnpm prisma:generate && tsc --noEmit -p scripts/tsconfig.json && pnpm -r --if-present typecheck"
+    "typecheck": "pnpm prisma:generate && tsc --noEmit -p scripts/tsconfig.json && pnpm -r --if-present typecheck",
+    "dev:web": "pnpm --filter @travel/web dev",
+    "test:web": "playwright test --config scripts/p6a1.playwright.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.58.2",
     "@types/node": "24.13.5",
     "eslint": "10.10.0",
     "globals": "17.12.0",

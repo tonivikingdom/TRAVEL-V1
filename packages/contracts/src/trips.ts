@@ -169,6 +169,17 @@ export interface TripView {
   readonly updatedAt: string;
   readonly days: readonly DayView[];
   readonly connections: readonly ConnectionView[];
+  /** Saved selected segments, read from owned adoption evidence; no Provider refresh. */
+  readonly savedRoutes?: readonly {
+    readonly adoptedRouteId: string;
+    readonly transportEdgeIds: readonly string[];
+    readonly legs: readonly import('./routes.js').RouteCandidateLegView[];
+    /** Explicit adoption provenance; absent/unmatched legs have no current-edge claim. */
+    readonly legTransportEdges?: readonly {
+      readonly legIndex: number;
+      readonly transportEdgeId: string;
+    }[];
+  }[];
 }
 
 export interface TripListResponse {
@@ -214,6 +225,11 @@ export type TripCommandInput =
       readonly targetDay: DayOccurrenceTargetInput;
       readonly position: number;
       readonly note?: string | null;
+    }
+  | {
+      readonly type: 'SET_NODE_NOTE';
+      readonly nodeId: string;
+      readonly note: string | null;
     }
   | { readonly type: 'DELETE_NODE'; readonly nodeId: string }
   | {

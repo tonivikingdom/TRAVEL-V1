@@ -12,7 +12,7 @@ import {
   type StoredRoutePreviewPayload,
 } from './route-planning-ports.js';
 import { hashRoutePreviewPayload } from './route-snapshot.js';
-import { evaluateTripScheduleRecord } from './schedule-evaluation.js';
+import { evaluateRouteReplacementSchedule } from './schedule-evaluation.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
 import type { ExternalExecutionOriginRepository } from './external-execution-origin-ports.js';
 import {
@@ -129,7 +129,10 @@ export class RoutePreviewService {
     const candidate = validateSnapshot(snapshot);
     const corridor = requireCurrentCorridor(trip, snapshot);
     const { fromNode, toNode } = corridor;
-    const schedule = evaluateTripScheduleRecord(trip);
+    const schedule = evaluateRouteReplacementSchedule(
+      trip,
+      corridor.replacementTransportEdgeIds,
+    );
     if (schedule.conflicts.length > 0) throw stalePreview();
     const fromProjection = schedule.nodes.find(
       (node) => node.nodeId === fromNode.id,

@@ -231,6 +231,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       departure: '2030-10-01T10:00:00Z',
       arrival: '2030-10-01T11:00:00Z',
     },
+    mode: 'RAIL' | 'BUS' = 'RAIL',
   ) {
     currentNow = new Date(schedule.now);
     const trip = await tripWithVisits(userA, [
@@ -249,7 +250,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           legs: [
             {
               ...base.legs[0]!,
-              mode: 'RAIL',
+              mode,
               groundTransit: {
                 serviceClass: 'FIXED_SERVICE',
                 serviceIdentityKey: 'synthetic:operational:1',
@@ -9497,6 +9498,477 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     expect(response.statusCode).toBe(201);
     return response.json() as TripView;
   }
+
+  for (const mode of ['RAIL', 'BUS'] as const) {
+    for (const layer of ['ESTIMATED', 'ACTUAL'] as const) {
+      it(`P6A-1 second review R3: ${mode} ${layer} retains exact saved-leg identity and current provider facts`, async () => {
+        const f = await adoptedFixedGroundTrip(
+          {
+            now: '2030-10-01T13:50:00Z',
+            departure: '2030-10-01T14:00:00Z',
+            arrival: '2030-10-01T15:00:00Z',
+          },
+          mode,
+        );
+        const route = await managed.client.adoptedRoute.findUniqueOrThrow({
+          where: { id: f.adopted.operationReceipt.adoptedRouteId },
+        });
+        const oldPreview = await managed.client.routePreview.findUniqueOrThrow({
+          where: { id: route.sourcePreviewId },
+        });
+        const oldSnapshot =
+          await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+            where: { id: route.candidateSnapshotId },
+          });
+        const beforeCounts = await Promise.all([
+          managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.trip.id },
+          }),
+          managed.client.routePreview.count({ where: { tripId: f.trip.id } }),
+          managed.client.operationReceipt.count({
+            where: { tripId: f.trip.id },
+          }),
+          managed.client.executionEvent.count({ where: { tripId: f.trip.id } }),
+        ]);
+        currentNow = new Date('2030-10-01T14:25:00Z');
+        await app.close();
+        const base = new SyntheticGroundTransitProvider(
+          'FIXED_DELAY',
+          () => currentNow,
+        );
+        app = buildTestApi(
+          new SyntheticRouteProvider(async () => {
+            throw new Error('reading selected transport must not query routes');
+          }),
+          {
+            name: 'SYNTHETIC',
+            async fetchObservation(input) {
+              const result = await base.fetchObservation(input);
+              if (result.status !== 'SUCCESS') return result;
+              return {
+                ...result,
+                observation: {
+                  ...result.observation,
+                  estimatedDeparture:
+                    layer === 'ESTIMATED'
+                      ? new Date('2030-10-01T14:20:00Z')
+                      : null,
+                  actualDeparture:
+                    layer === 'ACTUAL'
+                      ? new Date('2030-10-01T14:20:00Z')
+                      : null,
+                },
+              };
+            },
+          },
+        );
+        const refreshed = await app.inject({
+          method: 'POST',
+          url: `/trips/${f.trip.id}/execution/ground-transit/${f.leg.transportEdgeId}/refresh`,
+          headers: bearer(userA),
+        });
+        expect(refreshed.statusCode, refreshed.body).toBe(200);
+        const reopened = await app.inject({
+          method: 'GET',
+          url: `/trips/${f.trip.id}`,
+          headers: bearer(userA),
+        });
+        expect(reopened.statusCode).toBe(200);
+        const view = reopened.json<TripView>();
+        expect(view.savedRoutes?.[0]).toMatchObject({
+          legTransportEdges: [
+            { legIndex: 0, transportEdgeId: f.leg.transportEdgeId },
+          ],
+        });
+        expect(view.savedRoutes?.[0]?.legs[0]?.departure?.instant).toBe(
+          '2030-10-01T14:00:00.000Z',
+        );
+        expect(view.connections[0]?.transport?.timeValues).toContainEqual(
+          expect.objectContaining({
+            layer,
+            pointKind: 'DEPARTURE',
+            sourceKind: 'PROVIDER_OBSERVATION',
+            instant: '2030-10-01T14:20:00.000Z',
+          }),
+        );
+        expect(
+          await managed.client.routePreview.findUniqueOrThrow({
+            where: { id: route.sourcePreviewId },
+          }),
+        ).toEqual(oldPreview);
+        expect(
+          await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+            where: { id: route.candidateSnapshotId },
+          }),
+        ).toEqual(oldSnapshot);
+        expect(
+          await Promise.all([
+            managed.client.routeCandidateSnapshot.count({
+              where: { tripId: f.trip.id },
+            }),
+            managed.client.routePreview.count({ where: { tripId: f.trip.id } }),
+            managed.client.operationReceipt.count({
+              where: { tripId: f.trip.id },
+            }),
+            managed.client.executionEvent.count({
+              where: { tripId: f.trip.id },
+            }),
+          ]),
+        ).toEqual(beforeCounts);
+        // Lost adoption provenance cannot be reconstructed by edge order/name/time.
+        await managed.client.temporalValue.updateMany({
+          where: { transportEdgeId: f.leg.transportEdgeId, layer: 'PLANNED' },
+          data: { sourceRef: 'SYNTHETIC:unmatched' },
+        });
+        const unmatched = await app.inject({
+          method: 'GET',
+          url: `/trips/${f.trip.id}`,
+          headers: bearer(userA),
+        });
+        expect(unmatched.json().savedRoutes[0].legTransportEdges).toEqual([]);
+        expect(unmatched.json().savedRoutes[0].legs).toEqual(
+          view.savedRoutes![0]!.legs,
+        );
+      });
+    }
+  }
+
+  it('P6A-1 repair: old 15:00 selected service is not an independent departure constraint', async () => {
+    let trip = await tripWithVisits(userA, [
+      'SYNTHETIC Hotel',
+      'SYNTHETIC Destination',
+    ]);
+    const [from, to] = trip.days[0]!.nodes;
+    const arrival = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T13:00:00Z',
+          timeZone: 'UTC',
+        },
+      },
+    });
+    expect(arrival.statusCode).toBe(200);
+    trip = arrival.json();
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: from!.id,
+      durationSeconds: 3600,
+      locked: true,
+    });
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T15:00:00Z', '2030-10-01T16:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const firstPreview = await createPreview(userA, trip, from!.id, to!.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T15:00:00Z',
+      timeZone: 'UTC',
+    });
+    const first = await adoptSuccessfully(
+      userA,
+      trip,
+      firstPreview.previewId,
+      `p6a-old-${randomUUID()}`,
+    );
+    trip = first.trip;
+    const projection = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/schedule/evaluate`,
+      headers: bearer(userA),
+      payload: { basisVersion: trip.version },
+    });
+    const origin = projection
+      .json()
+      .nodes.find((n: { nodeId: string }) => n.nodeId === from!.id);
+    expect(origin.departure.effective.value.instant).toBe(
+      '2030-10-01T15:00:00.000Z',
+    );
+    expect(origin.departure.requirementWindow.earliest).toBe(
+      '2030-10-01T15:00:00.000Z',
+    );
+    expect(
+      origin.departure.requirementWindow.earliestBasis.some(
+        (b: { ruleId: string }) => b.ruleId === 'FIXED_TRANSPORT_PLANNED',
+      ),
+    ).toBe(true);
+    const queryTime = async (time: string) => {
+      providerResult = {
+        status: 'SUCCESS',
+        candidates: [
+          candidate(
+            `2030-10-01T${time}:00Z`,
+            '2030-10-01T16:00:00Z',
+            'UTC',
+            'UTC',
+          ),
+        ],
+      };
+      return query(userA, trip, from!.id, to!.id, {
+        type: 'DEPART_AT',
+        instant: `2030-10-01T${time}:00Z`,
+        timeZone: 'UTC',
+      });
+    };
+    const beforeCount = await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: trip.id },
+    });
+    const impossible = await queryTime('10:45');
+    expect(impossible.json()).toMatchObject({
+      error: { code: 'NO_MATCHING_CANDIDATE' },
+    });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(beforeCount);
+    const tooShort = await queryTime('13:45');
+    expect(tooShort.statusCode).toBe(200);
+    const shortPreview = await previewFromSnapshot(
+      userA,
+      trip,
+      tooShort.json().candidates[0].candidateSnapshotId,
+    );
+    expect(
+      (
+        await adopt(
+          userA,
+          trip,
+          shortPreview.previewId,
+          `p6a-shorten-${randomUUID()}`,
+        )
+      ).json(),
+    ).toMatchObject({ error: { code: 'USER_ADJUSTMENT_REQUIRED' } });
+    const earlier = await queryTime('14:15');
+    expect(earlier.statusCode).toBe(200);
+    expect(earlier.json().timeCondition.hardEarliestDeparture).not.toBe(
+      '2030-10-01T15:00:00.000Z',
+    );
+    const replacement = await previewFromSnapshot(
+      userA,
+      trip,
+      earlier.json().candidates[0].candidateSnapshotId,
+    );
+    expect(replacement.adoptable).toBe(true);
+    const adopted = await adoptSuccessfully(
+      userA,
+      trip,
+      replacement.previewId,
+      `p6a-earlier-${randomUUID()}`,
+    );
+    expect(
+      adopted.trip.connections[0]!.transport!.timeValues.find(
+        (v) => v.pointKind === 'DEPARTURE',
+      )!.instant,
+    ).toBe('2030-10-01T14:15:00.000Z');
+    expect(adopted.trip.savedRoutes?.[0]?.legs[0]?.from).toEqual(
+      replacement.candidate.legs[0]!.from,
+    );
+    const callsBeforeRead = providerInputs.length;
+    const reopened = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(reopened.json().savedRoutes[0].legs).toEqual(
+      replacement.candidate.legs,
+    );
+    expect(providerInputs).toHaveLength(callsBeforeRead);
+  });
+  for (const operator of ['NOT_BEFORE', 'EXACT'] as const) {
+    it(`P6A-1 repair: independent protected ${operator} 15:00 still prevents 14:15`, async () => {
+      let trip = await tripWithVisits(userA, ['SYNTHETIC A', 'SYNTHETIC D']);
+      const [from, to] = trip.days[0]!.nodes;
+      trip = await command(userA, trip, {
+        type: 'SET_TIME_INTENT',
+        nodeId: from!.id,
+        pointKind: 'DEPARTURE',
+        operator,
+        instant: '2030-10-01T15:00:00Z',
+        timeZone: 'UTC',
+        locked: true,
+      });
+      providerResult = {
+        status: 'SUCCESS',
+        candidates: [
+          candidate(
+            '2030-10-01T14:15:00Z',
+            '2030-10-01T16:00:00Z',
+            'UTC',
+            'UTC',
+          ),
+        ],
+      };
+      const before = await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      });
+      const result = await query(userA, trip, from!.id, to!.id, {
+        type: 'DEPART_AT',
+        instant: '2030-10-01T14:15:00Z',
+        timeZone: 'UTC',
+      });
+      expect(result.json()).toMatchObject({
+        error: { code: 'NO_MATCHING_CANDIDATE' },
+      });
+      expect(
+        await managed.client.routeCandidateSnapshot.count({
+          where: { tripId: trip.id },
+        }),
+      ).toBe(before);
+    });
+  }
+  it('P6A-1: hotel arrival and dwell fence impossible routes, protected dwell adoption and edited versions', async () => {
+    let trip = await tripWithVisits(userA, [
+      'SYNTHETIC Hotel',
+      'SYNTHETIC Station',
+    ]);
+    const [from, to] = trip.days.flatMap((day) => day.nodes);
+    const temporal = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/temporal-values`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: trip.version,
+        subject: { type: 'NODE', nodeId: from!.id },
+        value: {
+          layer: 'PLANNED',
+          pointKind: 'ARRIVAL',
+          instant: '2030-10-01T13:00:00Z',
+          timeZone: 'UTC',
+          sourceKind: 'USER_VALUE',
+        },
+      },
+    });
+    expect(temporal.statusCode).toBe(200);
+    trip = temporal.json() as TripView;
+    trip = await command(userA, trip, {
+      type: 'SET_MIN_DWELL',
+      nodeId: from!.id,
+      durationSeconds: 3600,
+      locked: true,
+    });
+    const count = await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: trip.id },
+    });
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T10:45:00Z', '2030-10-01T12:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const impossible = await query(userA, trip, from!.id, to!.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T10:45:00Z',
+      timeZone: 'UTC',
+    });
+    expect(impossible.json()).toMatchObject({
+      error: { code: 'NO_MATCHING_CANDIDATE' },
+    });
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(count);
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T13:45:00Z', '2030-10-01T15:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const shortened = await query(userA, trip, from!.id, to!.id, null);
+    expect(shortened.statusCode).toBe(200);
+    const shortenedPreview = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: shortened.json().candidates[0].candidateSnapshotId,
+      },
+    });
+    expect(shortenedPreview.statusCode).toBe(201);
+    const unaccepted = await adopt(
+      userA,
+      trip,
+      shortenedPreview.json().previewId,
+      `p6a-dwell-${randomUUID()}`,
+    );
+    expect(unaccepted.json()).toMatchObject({
+      error: { code: 'USER_ADJUSTMENT_REQUIRED' },
+    });
+    providerResult = {
+      status: 'SUCCESS',
+      candidates: [
+        candidate('2030-10-01T14:00:00Z', '2030-10-01T15:00:00Z', 'UTC', 'UTC'),
+      ],
+    };
+    const valid = await query(userA, trip, from!.id, to!.id, {
+      type: 'DEPART_AT',
+      instant: '2030-10-01T14:00:00Z',
+      timeZone: 'UTC',
+    });
+    expect(valid.statusCode).toBe(200);
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        candidateSnapshotId: valid.json().candidates[0].candidateSnapshotId,
+      },
+    });
+    expect(previewResponse.statusCode).toBe(201);
+    const oldVersion = trip.version;
+    trip = await command(userA, trip, {
+      type: 'SET_NODE_NOTE',
+      nodeId: from!.id,
+      note: 'SYNTHETIC persisted front-end note',
+    });
+    expect(trip.version).toBe(oldVersion + 1);
+    expect(
+      (
+        await managed.client.itineraryNode.findUniqueOrThrow({
+          where: { id: from!.id },
+        })
+      ).note,
+    ).toBe('SYNTHETIC persisted front-end note');
+    const reread = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}`,
+      headers: bearer(userA),
+    });
+    expect(reread.json().days[0].nodes[0].note).toBe(
+      'SYNTHETIC persisted front-end note',
+    );
+    const stale = await adopt(
+      userA,
+      { ...trip, version: oldVersion },
+      previewResponse.json().previewId,
+      `p6a-stale-${randomUUID()}`,
+    );
+    expect(stale.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+    const foreign = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/commands`,
+      headers: bearer(userB),
+      payload: {
+        baseTripVersion: trip.version,
+        command: { type: 'SET_NODE_NOTE', nodeId: from!.id, note: 'foreign' },
+      },
+    });
+    expect(foreign.statusCode).toBe(404);
+    expect(
+      await managed.client.adoptedRoute.count({ where: { tripId: trip.id } }),
+    ).toBe(0);
+  });
 
   async function tripWithVisits(
     identity: SyntheticIdentity,

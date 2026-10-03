@@ -8,7 +8,7 @@
 
 - 仓库：`tonivikingdom/TRAVEL-V1`。
 - 分支：`feat/google-consumer-transit-cloud-dev`。
-- 起点：重新 fetch 并核对的 `origin/main@d5350fc051bd4a3ff7b50c1aae5605007e0a3ab2`。继续既有本地分支，没有重新创建或依赖 PR #40。
+- 起点：重新 fetch 并核对的 `origin/main@d5350fc051bd4a3ff7b50c1aae5605007e0a3ab2`。继续既有本地分支，没有重新创建或依赖 PR #40 未合并代码。交付前 main 更新到 `6871aa1f88964f8590ca61e3d368bb4da67072d3`，仅将已合并基线同步进本分支，解决 `.gitignore` 和锁文件两处配置冲突；PR 相对该 main 的 apps、packages、schema、CI 差异为空。
 - 新服务版本：`@travel/google-consumer-transit@0.1.0`。精确交付 HEAD 与 Draft PR 由最终回复提供，避免文档自引用提交。
 - 原 Travel 适配器路径：`packages/providers/src/google-consumer-transit-route-provider.ts`，引入提交 `34b25db8a7235fae8b94c837c9705e1e1ca35192`，最后修改提交 `bd693619016969e6b950491e9a6811735bc7c92d`。本批未修改它或其校验。
 
@@ -70,10 +70,10 @@ DEPART_AT 15:00 Query 返回 6 候选；选取真实七段路线，Snapshot 入�
 
 - 改动前相关基线：8 files／138 tests PASS；全仓基线 60 files／720 tests PASS。
 - 新服务：3 files／56 tests PASS。覆盖输入、DST、跨日、模式混淆、错首响应、端点／时区不匹配、空结果证据、结构破坏、鉴权／关闭／未开放／BUSY、错误分类、超时、真实 HTTP 取消、锁释放、匿名 Context 回收和延后出现的 challenge。
-- 最终全仓单测：63 files／776 tests PASS。
+- 同步更新后的 main 前，全仓单测：63 files／776 tests PASS。
 - `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm format:check`、`pnpm prisma:validate` PASS。
 - 隔离 PostgreSQL 17 原有 24 migrations deploy PASS；`pnpm test:integration`：持久化 23 files／102 tests，API 9 files／478 tests，全通过。未 skip 或修改断言。
-- CI 由 Draft PR 触发，最终状态见 PR／最终回复，不将本地结果写成 CI 已通过。未让 CI 执行 Google live 查询。
+- 独立 [Draft PR #41](https://github.com/tonivikingdom/TRAVEL-V1/pull/41) 已提交。main 同步后的本地依赖复验遇到 npm registry HTTP 503；未关闭依赖策略或假称复验通过。CI 最终状态见 PR／最终回复，不将此前本地结果写成 CI 已通过。未让 CI 执行 Google live 查询。
 
 PostgreSQL 测试输出仍含既有 pg 并发 query 弃用提示，不影响本轮通过；本批未扩张为数据库修复任务。
 

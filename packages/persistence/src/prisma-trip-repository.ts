@@ -66,6 +66,7 @@ const tripInclude = {
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   },
   adoptedRoutes: {
+    include: { sourcePreview: { select: { previewPayload: true } } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   },
 } satisfies Prisma.TripInclude;
@@ -407,6 +408,23 @@ async function applyCommand(
         'ADJACENCY_CHANGED',
       );
       return;
+    case 'SET_NODE_NOTE': {
+      const node = await requireTripNode(
+        transaction,
+        input.tripId,
+        input.command.nodeId,
+      );
+      await transaction.itineraryNode.update({
+        where: { id: node.id },
+        data: {
+          note: input.command.note,
+          ...(node.source === 'ROUTE_GENERATED'
+            ? { autoReplaceable: false, userModifiedAt: new Date() }
+            : {}),
+        },
+      });
+      return;
+    }
     case 'DELETE_NODE': {
       const node = await requireTripNode(
         transaction,
@@ -1436,7 +1454,44 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
       transportProjections: occurrence.transportProjections,
     })),
     transportEdges: trip.transportEdges.map(toTransportEdgeRecord),
-    adoptedRoutes: trip.adoptedRoutes,
+    adoptedRoutes: trip.adoptedRoutes.map(({ sourcePreview, ...route }) => {
+      const payload =
+        sourcePreview.previewPayload as unknown as import('@travel/application').StoredRoutePreviewPayload;
+      return {
+        ...route,
+        ...(Array.isArray(payload.candidate?.legs)
+          ? {
+              savedLegs: payload.candidate.legs,
+              // Only an explicit Preview leg identity can identify the matching
+              // adoption sourceRef. Never infer it from current edge order.
+              savedLegSources: (
+                payload.changeSummary?.proposedSegments ?? []
+              ).flatMap((segment) => {
+                const legIndex = segment.legIndex;
+                if (
+                  legIndex === undefined ||
+                  !Number.isSafeInteger(legIndex) ||
+                  legIndex < 0
+                )
+                  return [];
+                const leg = payload.candidate.legs[legIndex];
+                if (
+                  !leg ||
+                  leg.mode !== segment.mode ||
+                  leg.providerRef !== segment.providerRef
+                )
+                  return [];
+                return [
+                  {
+                    legIndex,
+                    sourceRef: `snapshot:${route.candidateSnapshotId}/candidate:${payload.candidate.candidateId}/leg:${legIndex}`,
+                  },
+                ];
+              }),
+            }
+          : {}),
+      };
+    }),
     routeExecutionEvents: trip.executionEvents,
     externalExecutionFacts: trip.externalExecutionOrigins.flatMap((origin) => [
       origin.arrivedAt,

@@ -1264,6 +1264,12 @@ function parseTripCommand(value: unknown): TripCommandInput {
           ? { note: optionalNullableString(command, 'note') }
           : {}),
       };
+    case 'SET_NODE_NOTE':
+      return {
+        type,
+        nodeId: requiredString(command, 'nodeId'),
+        note: optionalNullableString(command, 'note') ?? null,
+      };
     case 'DELETE_NODE':
       return { type, nodeId: requiredString(command, 'nodeId') };
     case 'MOVE_NODE':

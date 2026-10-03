@@ -164,6 +164,11 @@ export interface TripAggregateRecord {
 }
 
 export interface AdoptedRouteRecord {
+  readonly savedLegs?: readonly import('@travel/contracts').RouteCandidateLegView[];
+  readonly savedLegSources?: readonly {
+    readonly legIndex: number;
+    readonly sourceRef: string;
+  }[];
   readonly id: string;
   readonly tripId: string;
   readonly anchorFromNodeId: string | null;
@@ -200,6 +205,11 @@ export type RepositoryTripCommand =
       readonly type: 'ADD_FREE_ACTION';
       readonly targetDay: RepositoryDayOccurrenceTarget;
       readonly position: number;
+      readonly note: string | null;
+    }
+  | {
+      readonly type: 'SET_NODE_NOTE';
+      readonly nodeId: string;
       readonly note: string | null;
     }
   | { readonly type: 'DELETE_NODE'; readonly nodeId: string }

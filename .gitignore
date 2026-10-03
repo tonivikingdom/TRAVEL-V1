@@ -18,3 +18,7 @@ infra/compose/object-storage/
 .travel-object-storage/
 artifacts/provider-probe/
 artifacts/google-consumer-transit/
+
+# Formal Web browser artifacts (review screenshots are explicitly committed)
+test-results/
+playwright-report/

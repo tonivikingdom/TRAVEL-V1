@@ -1,6 +1,6 @@
 # Formal Place Search / Geocoding Foundation
 
-Recommendation: GPT-5.6 Sol / High; fallback GPT-6.1 Sol / High. Runtime model was not changed or claimed. Starting main: `77b37ac1931b5ffe653bc147eebf90949258e94c`. Branch: `feat/place-search-geocoding`. Draft only; no merge or deployment.
+Recommendation: GPT-5.6 Sol / High; fallback GPT-6.1 Sol / High. Runtime model was not changed or claimed. Starting main: `77b37ac1931b5ffe653bc147eebf90949258e94c`. Branch: `feat/place-search-geocoding`. Integration base: `f407765675b3290a6aac01fbfd90506c150943bb`. Draft only; no merge or deployment.
 
 ## Architecture matrix
 
@@ -60,7 +60,7 @@ Selection is local draft state. Search input/language/cancel never creates a Pla
 
 Maps/navigation use the selected Place's stored reliable coordinates through existing helpers. No embedded SDK, automatic authoring, geolocation, Query/Preview/Adopt, hotel guessing, recommendations, booking, photos/reviews, OCR/attachments, P6C or Google Transit work.
 
-## Validation evidence
+## Previous fixture-only validation evidence (historical)
 
 All test inputs/captures explicitly **SYNTHETIC**. Public-doc research is not a live Provider test.
 
@@ -91,13 +91,25 @@ Focused regression: five Unit cases include immediately before/after Tokyo midni
 
 Repair delta is confined to acceptance fixtures/helpers/regressions and documentation. Production application/Domain/Provider/Web code and Prisma are unchanged relative to the reviewed product. Migration total remains **26**, schema/migration delta **0/0**. Real Geoapify/F-05 stay **OPEN/PARTIAL**, disabled by default, with no live/paid call.
 
-Main advanced during this task to `f407765675b3290a6aac01fbfd90506c150943bb` (mobile Safari/touch hardening). PR #46 has Web conflicts with this later batch. No rebase or integration is performed without scope clarification; fixture validation does not claim that later-main integration passed. Final exact HEAD, CI and validation results are recorded in PR #46.
+The previous fixture-only delivery (`61733cd808a374826359db4e9b94d72979867838`) was blocked by later main Safari/touch changes and therefore was not marked RESOLVED. The user has now explicitly authorized integration of that exact main. Historical local results are not final integrated-head CI evidence.
 
-Validated repair HEAD: `0f49f2e3b9a75cf2c9844cd67ff0a7e84575d659`. Frozen install, Prisma generate/validate, format/lint/typecheck/build, Unit **773/69 files**, PostgreSQL **627 (106 persistence + 521 API)**, Chromium **152**, WebKit **152**, clean migration deploy **26**, and full Compose **PASS** locally. The eight PostgreSQL boundary regressions pass within the complete API suite; the two original-fixture negative controls retain their exact Preview errors. Full Compose passes Ground/handoff/suffix and trusted external-origin Query/Preview/Adopt/Undo, along with the existing lifecycle, persistence, outage/recovery and private-storage checks. An initial local run failed earlier in F-09 location with HTTP 503, before reaching Ground; this is recorded as nonpassing evidence, and the frozen-source full run passes all assertions. No test or TLS change was made. P5B **PASS**: 5 users, 200 observed requests, 0 isolation failures, 0 unexpected 5xx and 0 network failures.
+## Safari/touch integration — final acceptance in progress
 
-**NOT RESOLVED / CI BLOCKED:** GitHub confirms `CONFLICTING / DIRTY` against the later Safari/touch main commit. No Actions run/checks exists for the repair HEAD. Earlier green runs are historical only. Do not claim final-head CI PASS or later-main integration; the active CURRENT-TASK remains until the requested successful final CI is possible. A documentation-only follow-up records completed local evidence; its exact final SHA is recorded in PR #46. All runtime/fixture/test files remain identical to the validated repair HEAD.
+Integration base: **`f407765675b3290a6aac01fbfd90506c150943bb`**. Merge commit `cae31e36f5f8d6aaff98ac83b7df441627a37566` retains both the existing feature parent and the main parent. No rebase, cherry-pick, ours/theirs whole-file replacement, main/PR #47/PR #41 change or migration.
+
+The only content conflict was `apps/web/src/styles.css`, where both branches appended rules. Resolve the closing braces and preserve both full blocks: Place Search width/min-width, 44px search controls, wrapping candidate names/addresses and attribution safe-area; followed by main's scalable minimum 16px touch inputs, root-scaled labels/titles and header-aware scroll padding. All main viewport/vh/dvh/safe-area rules elsewhere in the file are retained. There is no input-font override in the Place Search block, so the inherited touch minimum applies to search fields too.
+
+`drawer.ts` is identical to main, retaining the 44px dedicated handle, primary-pointer gate, cancellation/lost-capture reset, unchanged unsaved-draft close callback, VisualViewport fitting/offsets and focus reveal. `main.ts` retains main's dedicated `.drag-zone` frame while also retaining the feature's Place Search authoring bridge and source credits. `authoring.ts` has no integration delta. No new production behavior is implemented beyond preserving the two existing branches.
+
+Four additive **SYNTHETIC** browser cases test Place Search with mobile touch and 24px root text at 320/375/390/430: explicit ambiguous selection, missing-coordinate disabled candidate, 44px handle/close controls, lost capture reset, drag discard cancellation retaining the note and signed-candidate choice, keyboard viewport resize with reachable submit, no overflow, zero writes throughout reading/selection/gestures, and exactly one explicit authoring submission. Existing Place Search/authoring/draft/owner/recovery tests and all inherited mobile/desktop interaction tests remain.
+
+Canonical midnight fixture files and all 13 boundary regression cases are byte-for-byte unchanged from `61733cd`: Tokyo-preferred bounded synthetic context, complete UTC-day minute sweep, exact old-fixture guard failures, trusted Tokyo external hub context and explicit cross-day endpoints. Production Preview/Domain guards are unchanged. Schema/migration delta **0/0**, total **26**.
+
+Integrated validation is running. Unit **773/69 files** and frozen install/Prisma/format/lint/typecheck/build have passed; PostgreSQL, full Chromium, Compose/P5B and final CI remain pending. The four focused joined Chromium cases passed. Final HEAD/CI and complete totals are recorded in PR #46. CURRENT-TASK remains ACTIVE until all final-head CI jobs succeed. Geoapify/F-05 remain **OPEN/PARTIAL**, with real calls disabled and no paid call.
 
 ## Visual review
+
+Integrated Safari/Place Search visuals were regenerated from frozen source: all 11 PNG originals and the nine-panel JPEG contact sheet (**1488 × 4835**, no overflow) were actually opened. Fixtures remain SYNTHETIC.
 
 Committed artifacts: [review-contact-sheet.jpg](assets/place-search/review-contact-sheet.jpg), nine proportion-preserved titled panels, SYNTHETIC, no screenshot crop. Individual captures: mobile-search, mobile-results, mobile-ambiguous, mobile-selected, mobile-provider-unavailable, mobile-saved-fallback, mobile-320, mobile-375, mobile-430, mobile-enlarged, desktop. mobile-results uses 390px. Final originals and the contact sheet are actually opened for review before delivery. The selected confirmation shows name/address/coordinates before addition; primary submit and complete sheet remain scroll reachable.
 

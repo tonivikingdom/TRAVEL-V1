@@ -40,6 +40,7 @@ import {
   validateIanaTimeZoneInput,
 } from './time-input.js';
 import type {
+  AdoptedRouteRecord,
   ItineraryNodeRecord,
   PlaceRecord,
   RepositoryPlaceInput,
@@ -540,8 +541,40 @@ function toTripView(record: TripAggregateRecord): TripView {
           .filter((edge) => edge.adoptedRouteId === route.id)
           .map((edge) => edge.id),
         legs: route.savedLegs!,
+        legTransportEdges: savedLegTransportEdges(record, route),
       })),
   };
+}
+
+/** A read projection of proven adoption identity, not a timetable synchronizer. */
+function savedLegTransportEdges(
+  record: TripAggregateRecord,
+  route: AdoptedRouteRecord,
+) {
+  const sources = route.savedLegSources ?? [];
+  return sources.flatMap(({ legIndex, sourceRef }) => {
+    if (sources.filter((source) => source.legIndex === legIndex).length !== 1)
+      return [];
+    const leg = route.savedLegs?.[legIndex];
+    if (!leg) return [];
+    const matches = record.transportEdges.filter((edge) => {
+      const evidence = edge.timeValues.filter(
+        (v) =>
+          v.layer === 'PLANNED' && v.sourceKind === 'ADOPTED_TRANSPORT_FACT',
+      );
+      return (
+        edge.source === 'ADOPTED_ROUTE' &&
+        edge.adoptedRouteId === route.id &&
+        edge.mode === leg.mode &&
+        edge.fixedService === leg.fixedService &&
+        evidence.length > 0 &&
+        evidence.every((v) => v.sourceRef === sourceRef)
+      );
+    });
+    return matches.length === 1
+      ? [{ legIndex, transportEdgeId: matches[0]!.id }]
+      : [];
+  });
 }
 
 function projectDays(record: TripAggregateRecord): readonly DayView[] {

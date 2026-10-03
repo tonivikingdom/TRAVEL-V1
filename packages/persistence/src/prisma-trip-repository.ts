@@ -1460,7 +1460,35 @@ function toTripRecord(trip: TripWithProjectionData): TripAggregateRecord {
       return {
         ...route,
         ...(Array.isArray(payload.candidate?.legs)
-          ? { savedLegs: payload.candidate.legs }
+          ? {
+              savedLegs: payload.candidate.legs,
+              // Only an explicit Preview leg identity can identify the matching
+              // adoption sourceRef. Never infer it from current edge order.
+              savedLegSources: (
+                payload.changeSummary?.proposedSegments ?? []
+              ).flatMap((segment) => {
+                const legIndex = segment.legIndex;
+                if (
+                  legIndex === undefined ||
+                  !Number.isSafeInteger(legIndex) ||
+                  legIndex < 0
+                )
+                  return [];
+                const leg = payload.candidate.legs[legIndex];
+                if (
+                  !leg ||
+                  leg.mode !== segment.mode ||
+                  leg.providerRef !== segment.providerRef
+                )
+                  return [];
+                return [
+                  {
+                    legIndex,
+                    sourceRef: `snapshot:${route.candidateSnapshotId}/candidate:${payload.candidate.candidateId}/leg:${legIndex}`,
+                  },
+                ];
+              }),
+            }
           : {}),
       };
     }),

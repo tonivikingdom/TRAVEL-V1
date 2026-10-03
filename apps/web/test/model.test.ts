@@ -10,6 +10,7 @@ import {
   isFoldedTransfer,
   temporalLabel,
   transportTime,
+  savedLegTransport,
 } from '../src/model.js';
 import { coordinates, navigation, placeMap, mapMode } from '../src/maps.js';
 import { fixtureCandidate, fixtureTrip } from './fixture.js';
@@ -246,4 +247,69 @@ it('explicit original route lookup never silently drops an unknown origin', () =
   expect(new URL(navigation(p, p, null)!).searchParams.has('travelmode')).toBe(
     false,
   );
+});
+
+it('saved segment timing uses explicit identity and never current edge array position', () => {
+  const trip = fixtureTrip();
+  const candidate = fixtureCandidate();
+  const edge = {
+    id: trip.id,
+    fromNodeId: trip.days[0]!.nodes[0]!.id,
+    toNodeId: trip.days[0]!.nodes[1]!.id,
+    mode: candidate.legs[0]!.mode,
+    fixedService: false,
+    serviceLabel: null,
+    note: null,
+    source: 'ADOPTED_ROUTE' as const,
+    adoptedRouteId: trip.id,
+    provider: 'SYNTHETIC',
+    providerRef: null,
+    createdAt: trip.createdAt,
+    updatedAt: trip.updatedAt,
+    timeValues: [],
+  };
+  const connection = {
+    fromNodeId: edge.fromNodeId,
+    toNodeId: edge.toNodeId,
+    state: 'ACTIVE' as const,
+    transport: edge,
+  };
+  const route = {
+    adoptedRouteId: trip.id,
+    transportEdgeIds: [edge.id],
+    legs: candidate.legs,
+    legTransportEdges: [{ legIndex: 0, transportEdgeId: edge.id }],
+  };
+  expect(
+    savedLegTransport(route, 0, [
+      { ...connection, transport: { ...edge, id: 'unrelated' } },
+      connection,
+    ]),
+  ).toEqual(edge);
+  expect(
+    savedLegTransport({ ...route, legTransportEdges: [] }, 0, [connection]),
+  ).toBeNull();
+  expect(
+    savedLegTransport(
+      {
+        ...route,
+        legTransportEdges: [
+          ...route.legTransportEdges,
+          ...route.legTransportEdges,
+        ],
+      },
+      0,
+      [connection],
+    ),
+  ).toBeNull();
+  expect(
+    savedLegTransport(route, 0, [
+      { ...connection, transport: { ...edge, adoptedRouteId: 'wrong-route' } },
+    ]),
+  ).toBeNull();
+  expect(
+    savedLegTransport(route, 0, [
+      { ...connection, transport: { ...edge, mode: 'RAIL' } },
+    ]),
+  ).toBeNull();
 });

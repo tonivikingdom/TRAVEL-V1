@@ -1,4 +1,5 @@
 import type {
+  ConnectionView,
   ItineraryNodeView,
   RouteCandidateView,
   ScheduleNodeProjectionView,
@@ -218,4 +219,33 @@ export function isFoldedTransfer(
     !!incoming?.adoptedRouteId &&
     incoming.adoptedRouteId === outgoing?.adoptedRouteId
   );
+}
+
+/** Use an explicit server-proven leg/edge identity; never zip arrays or match labels. */
+export function savedLegTransport(
+  route: NonNullable<TripView['savedRoutes']>[number],
+  legIndex: number,
+  connections: readonly ConnectionView[],
+) {
+  const identities = route.legTransportEdges ?? [];
+  const matching = identities.filter(
+    (identity) => identity.legIndex === legIndex,
+  );
+  if (matching.length !== 1) return null;
+  const id = matching[0]!.transportEdgeId;
+  if (
+    identities.filter((identity) => identity.transportEdgeId === id).length !==
+    1
+  )
+    return null;
+  const edges = connections.filter(
+    (c) => c.state === 'ACTIVE' && c.transport?.id === id,
+  );
+  const edge = edges.length === 1 ? edges[0]!.transport : null;
+  return edge?.source === 'ADOPTED_ROUTE' &&
+    edge.adoptedRouteId === route.adoptedRouteId &&
+    edge.mode === route.legs[legIndex]?.mode &&
+    route.transportEdgeIds.includes(edge.id)
+    ? edge
+    : null;
 }

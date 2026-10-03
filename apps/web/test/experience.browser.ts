@@ -116,6 +116,31 @@ test.beforeEach(async ({ page }) => {
             ),
           })),
         };
+      if (
+        ['REMOVE_TIME_INTENT', 'REMOVE_MIN_DWELL'].includes(body.command.type)
+      )
+        trip = {
+          ...trip,
+          version: trip.version + 1,
+          days: trip.days.map((d) => ({
+            ...d,
+            nodes: d.nodes.map((n) =>
+              n.id !== body.command.nodeId
+                ? n
+                : {
+                    ...n,
+                    timeIntents: n.timeIntents.filter((i) =>
+                      body.command.type === 'REMOVE_MIN_DWELL'
+                        ? i.kind !== 'MIN_DWELL'
+                        : !(
+                            i.pointKind === body.command.pointKind &&
+                            i.operator === body.command.operator
+                          ),
+                    ),
+                  },
+            ),
+          })),
+        };
       return send(trip);
     }
     if (path.endsWith('/routes/query')) {
@@ -163,7 +188,26 @@ test.beforeEach(async ({ page }) => {
               providerRef: null,
               createdAt: trip.createdAt,
               updatedAt: trip.updatedAt,
-              timeValues: [],
+              timeValues: (['DEPARTURE', 'ARRIVAL'] as const).flatMap(
+                (pointKind) => {
+                  const point =
+                    pointKind === 'DEPARTURE'
+                      ? candidate.legs[0]!.departure
+                      : candidate.legs[0]!.arrival;
+                  return point
+                    ? [
+                        {
+                          ...trip.days[0]!.nodes[0]!.timeValues[0]!,
+                          ...point,
+                          layer: 'PLANNED' as const,
+                          pointKind,
+                          sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+                          sourceRef: `snapshot:${tripId}/candidate:${candidate.candidateId}/leg:0`,
+                        },
+                      ]
+                    : [];
+                },
+              ),
             },
           },
         ],
@@ -172,6 +216,7 @@ test.beforeEach(async ({ page }) => {
             adoptedRouteId: tripId,
             transportEdgeIds: [tripId],
             legs: candidate.legs,
+            legTransportEdges: [{ legIndex: 0, transportEdgeId: tripId }],
           },
         ],
       };
@@ -675,6 +720,10 @@ test('draft recovers a version conflict inside the open detail', async ({
   failSave = true;
   await page.getByRole('button', { name: '保存备注' }).click();
   await expect(page.locator('#save-status')).toContainText('已变化');
+  page.on('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: '关闭详情' }).click();
+  await expect(page.locator('#draft-recovery')).toBeVisible();
+  await expect(page.locator('textarea')).toHaveValue('retained draft');
   failSave = false;
   trip = { ...trip, version: trip.version + 1 };
   await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
@@ -857,4 +906,399 @@ test('new typing during evaluation stays dirty after the submitted command has a
   release!();
   await expect(page.locator('#save-status')).toContainText('未保存');
   await expect(page.locator('textarea')).toHaveValue('new B during evaluation');
+});
+
+function addRemovalRequirement(kind: 'time' | 'dwell') {
+  if (kind === 'dwell') return;
+  trip = {
+    ...trip,
+    days: trip.days.map((d) => ({
+      ...d,
+      nodes: d.nodes.map((n) =>
+        n.id !== fromId
+          ? n
+          : {
+              ...n,
+              timeIntents: [
+                ...n.timeIntents,
+                {
+                  id: toId,
+                  kind: 'POINT_TIME',
+                  pointKind: 'DEPARTURE',
+                  operator: 'NOT_BEFORE',
+                  instant: '2030-10-01T06:00:00Z',
+                  timeZone: 'Asia/Tokyo',
+                  durationSeconds: null,
+                  locked: true,
+                  createdAt: n.createdAt,
+                  updatedAt: n.updatedAt,
+                },
+              ],
+            },
+      ),
+    })),
+  };
+}
+for (const kind of ['time', 'dwell'] as const) {
+  for (const pending of ['note', 'time', 'dwell'] as const) {
+    test(`R1 ${kind} removal retains new ${pending} draft during response`, async ({
+      page,
+    }) => {
+      addRemovalRequirement(kind);
+      await enter(page);
+      await page.locator('[data-node]').first().click();
+      await page.locator('.edit > summary').click();
+      if (pending === 'time') {
+        await page.locator('textarea').fill('explicitly discarded old draft');
+        page.on('dialog', (dialog) => dialog.accept());
+      }
+      holdSave = true;
+      await page
+        .getByRole('button', {
+          name: kind === 'time' ? '移除出发最早要求' : '移除停留要求',
+          exact: true,
+        })
+        .click();
+      await expect.poll(() => releaseSave !== null).toBe(true);
+      const field = page.locator(
+        pending === 'note'
+          ? 'textarea'
+          : pending === 'time'
+            ? '#time-edit input[name=when]'
+            : '#dwell-edit input',
+      );
+      const value =
+        pending === 'note'
+          ? 'new note after removal started'
+          : pending === 'time'
+            ? '2030-10-01T18:00'
+            : '75';
+      await field.fill(value);
+      releaseSave!();
+      await expect(
+        page.getByRole('button', {
+          name: kind === 'time' ? '移除出发最早要求' : '移除停留要求',
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await expect(field).toHaveValue(value);
+      await expect(page.locator('#save-status')).toContainText('未保存');
+      page.removeAllListeners('dialog');
+      page.on('dialog', (dialog) => dialog.dismiss());
+      await page.getByRole('button', { name: '关闭详情' }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(field).toHaveValue(value);
+      expect(commands.at(-1)?.command).toMatchObject({
+        type: kind === 'time' ? 'REMOVE_TIME_INTENT' : 'REMOVE_MIN_DWELL',
+      });
+    });
+  }
+}
+test('R2 abandoning recovery draft ends its context before unrelated route search', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.locator('[data-node]').first().click();
+  await page.locator('textarea').fill('abandon this draft');
+  failSave = true;
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#draft-recovery')).toBeVisible();
+  page.on('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '关闭详情' }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  failSave = false;
+  await page.getByRole('button', { name: '重新载入' }).click();
+  await page.getByRole('button', { name: '东京慢旅行' }).click();
+  await page.locator('.connection').click();
+  await page.getByRole('button', { name: '搜索路线' }).click();
+  await expect(page.locator('.candidate')).toBeVisible();
+  expect(calls.filter((p) => p.endsWith('/routes/query'))).toHaveLength(1);
+});
+for (const mode of ['BUS', 'RAIL'] as const) {
+  for (const layer of ['ESTIMATED', 'ACTUAL'] as const) {
+    test(`R3 saved ${mode} displays current ${layer} rather than unlabelled adoption times`, async ({
+      page,
+    }) => {
+      candidate = {
+        ...candidate,
+        legs: candidate.legs.map((l) => ({ ...l, mode })),
+      };
+      await enter(page);
+      await route(page);
+      await page.locator('.candidate').click();
+      await page.getByRole('button', { name: '使用这条路线' }).click();
+      await expect(page.locator('.undo')).toBeVisible();
+      const old = trip.days[0]!.nodes[0]!.timeValues[0]!;
+      trip = {
+        ...trip,
+        connections: trip.connections.map((c) => ({
+          ...c,
+          transport: c.transport
+            ? {
+                ...c.transport,
+                timeValues: [
+                  {
+                    ...old,
+                    pointKind: 'DEPARTURE',
+                    layer,
+                    instant: '2030-10-01T05:20:00Z',
+                    timeZone: 'Etc/UTC',
+                    sourceKind: 'PROVIDER_OBSERVATION',
+                    sourceRef: 'SYNTHETIC_PROVIDER',
+                  },
+                ],
+              }
+            : null,
+        })),
+      };
+      Object.assign(trip.savedRoutes![0]!, {
+        legTransportEdges: [{ legIndex: 0, transportEdgeId: tripId }],
+      });
+      await page.reload();
+      await page.locator('[data-trip]').click();
+      await expect(page.locator('.connection')).toContainText('14:20');
+      const planningCalls = calls.filter((p) =>
+        /query|previews|adopt/u.test(p),
+      );
+      await page.locator('.connection').click();
+      await expect(page.locator('.saved-legs')).toContainText('14:20');
+      await expect(page.locator('.saved-legs')).toContainText(
+        layer === 'ACTUAL' ? '车辆实测' : '预计',
+      );
+      expect(calls.filter((p) => /query|previews|adopt/u.test(p))).toEqual(
+        planningCalls,
+      );
+    });
+  }
+}
+
+for (const kind of ['time', 'dwell'] as const) {
+  test(`R1 ${kind} removal without new editing refreshes only its accepted requirement`, async ({
+    page,
+  }) => {
+    addRemovalRequirement(kind);
+    await enter(page);
+    await page.locator('[data-node]').first().click();
+    await page.locator('.edit > summary').click();
+    await page
+      .getByRole('button', {
+        name: kind === 'time' ? '移除出发最早要求' : '移除停留要求',
+        exact: true,
+      })
+      .click();
+    await expect(page.locator('#save-status')).toContainText('要求已移除');
+    await expect(
+      page.locator(
+        kind === 'time' ? '#time-edit input[name=when]' : '#dwell-edit input',
+      ),
+    ).toHaveValue('');
+    await expect(page.locator('#save-status')).not.toContainText('未保存');
+    let confirmation = false;
+    page.on('dialog', (dialog) => {
+      confirmation = true;
+      void dialog.dismiss();
+    });
+    await page.getByRole('button', { name: '关闭详情' }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+    expect(confirmation).toBe(false);
+  });
+  for (const outcome of ['command-failure', 'read-failure'] as const) {
+    test(`R1 ${kind} removal ${outcome} preserves pending drafts and reports accepted writes honestly`, async ({
+      page,
+    }) => {
+      addRemovalRequirement(kind);
+      await enter(page);
+      await page.locator('[data-node]').first().click();
+      await page.locator('.edit > summary').click();
+      holdSave = true;
+      failSave = outcome === 'command-failure';
+      if (outcome === 'read-failure')
+        await page.route('**/api/**/schedule/evaluate', (r) =>
+          r.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE' } }),
+          }),
+        );
+      await page
+        .getByRole('button', {
+          name: kind === 'time' ? '移除出发最早要求' : '移除停留要求',
+          exact: true,
+        })
+        .click();
+      await expect.poll(() => releaseSave !== null).toBe(true);
+      await page.locator('textarea').fill('draft while removing, still mine');
+      releaseSave!();
+      await expect(page.locator('#draft-recovery')).toBeVisible();
+      await expect(page.locator('textarea')).toHaveValue(
+        'draft while removing, still mine',
+      );
+      if (outcome === 'read-failure')
+        await expect(page.locator('#save-status')).toContainText(
+          '本次提交已保存到服务器',
+        );
+      else
+        await expect(page.locator('#save-status')).not.toContainText(
+          '已保存到服务器',
+        );
+      expect(
+        trip.days[0]!.nodes[0]!.timeIntents.some((i) =>
+          kind === 'dwell' ? i.kind === 'MIN_DWELL' : i.kind === 'POINT_TIME',
+        ),
+      ).toBe(outcome === 'command-failure');
+      failSave = false;
+      holdSave = false;
+      await page.unroute('**/api/**/schedule/evaluate');
+      await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
+      await page
+        .getByRole('button', { name: '已核对，保留草稿继续编辑' })
+        .click();
+      await expect(page.locator('textarea')).toHaveValue(
+        'draft while removing, still mine',
+      );
+      await page.getByRole('button', { name: '保存备注' }).click();
+      await expect(page.locator('#save-status')).toContainText('已保存');
+      expect(trip.days[0]!.nodes[0]!.note).toBe(
+        'draft while removing, still mine',
+      );
+    });
+  }
+}
+for (const matching of [true, false]) {
+  test(`R3 saved original plan ${matching ? 'matches current planned facts' : 'has no provable current-edge correspondence'}`, async ({
+    page,
+  }) => {
+    candidate = {
+      ...candidate,
+      legs: candidate.legs.map((l) => ({ ...l, mode: 'BUS' })),
+    };
+    await enter(page);
+    await route(page);
+    await page.locator('.candidate').click();
+    await page.getByRole('button', { name: '使用这条路线' }).click();
+    await expect(page.locator('.undo')).toBeVisible();
+    if (!matching)
+      trip = {
+        ...trip,
+        savedRoutes: trip.savedRoutes!.map((r) => ({
+          ...r,
+          legTransportEdges: [],
+        })),
+      };
+    await page.reload();
+    await page.locator('[data-trip]').click();
+    const writes = calls.filter((p) =>
+      /query|previews|adopt|commands|temporal-values/u.test(p),
+    );
+    await page.locator('.connection').click();
+    await expect(page.locator('.saved-legs')).toContainText('14:00');
+    if (matching)
+      await expect(page.locator('.current-transport-times')).toContainText(
+        '计划',
+      );
+    else {
+      await expect(page.locator('.original-plan')).toContainText('原方案计划');
+      await expect(page.locator('.current-transport-times')).toContainText(
+        '待定',
+      );
+      await expect(page.locator('.saved-legs')).toContainText('暂无可靠对应');
+    }
+    expect(
+      calls.filter((p) =>
+        /query|previews|adopt|commands|temporal-values/u.test(p),
+      ),
+    ).toEqual(writes);
+    const url = new URL(
+      (await page
+        .getByRole('link', { name: '步行到上车点' })
+        .getAttribute('href'))!,
+    );
+    expect(url.searchParams.get('destination')).toBe('35.6812,139.7671');
+  });
+}
+test('R3 adopted times retain cross-day local dates and different event zones', async ({
+  page,
+}) => {
+  const departure = { instant: '2030-10-01T14:30:00Z', timeZone: 'Asia/Tokyo' };
+  const arrival = {
+    instant: '2030-10-01T17:00:00Z',
+    timeZone: 'Asia/Shanghai',
+  };
+  candidate = {
+    ...candidate,
+    overall: { departure, arrival, durationSeconds: 9000 },
+    legs: candidate.legs.map((l) => ({
+      ...l,
+      mode: 'RAIL',
+      departure,
+      arrival,
+      durationSeconds: 9000,
+    })),
+  };
+  await enter(page);
+  await route(page);
+  await page.locator('.candidate').click();
+  await page.getByRole('button', { name: '使用这条路线' }).click();
+  await expect(page.locator('.undo')).toBeVisible();
+  await page.reload();
+  await page.locator('[data-trip]').click();
+  await page.locator('.connection').click();
+  await expect(page.locator('.current-transport-times')).toContainText(
+    '2030-10-01 23:30',
+  );
+  await expect(page.locator('.current-transport-times')).toContainText(
+    '2030-10-02 01:00',
+  );
+  await expect(page.locator('.saved-legs')).toContainText('时区切换');
+  await expect(page.locator('.saved-legs')).toContainText('Tokyo');
+  await expect(page.locator('.saved-legs')).toContainText('Shanghai');
+});
+test('R3 manual public transport keeps service and authoritative times without invented boarding data', async ({
+  page,
+}) => {
+  const value = trip.days[0]!.nodes[0]!.timeValues[0]!;
+  trip = {
+    ...trip,
+    connections: [
+      {
+        fromNodeId: fromId,
+        toNodeId: toId,
+        state: 'ACTIVE',
+        transport: {
+          id: tripId,
+          fromNodeId: fromId,
+          toNodeId: toId,
+          mode: 'BUS',
+          fixedService: true,
+          serviceLabel: 'SYNTHETIC Manual Line',
+          note: null,
+          source: 'MANUAL',
+          adoptedRouteId: null,
+          provider: null,
+          providerRef: null,
+          createdAt: trip.createdAt,
+          updatedAt: trip.updatedAt,
+          timeValues: [
+            {
+              ...value,
+              pointKind: 'DEPARTURE',
+              layer: 'ESTIMATED',
+              instant: '2030-10-01T05:20:00Z',
+            },
+          ],
+        },
+      },
+    ],
+  };
+  await enter(page);
+  const before = [...calls];
+  await page.locator('.connection').click();
+  await expect(page.locator('.saved-legs')).toContainText(
+    'SYNTHETIC Manual Line',
+  );
+  await expect(page.locator('.saved-legs')).toContainText('预计');
+  await expect(page.locator('.saved-legs')).toContainText('14:20');
+  await expect(page.locator('.saved-legs')).toContainText('上/下车地点未保存');
+  await expect(page.getByRole('link', { name: '步行到上车点' })).toHaveCount(0);
+  expect(calls).toEqual(before);
 });

@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { chromium, expect } from '@playwright/test';
 import {
   AuthService,
+  GroundTransitService,
   digestOpaqueToken,
   TripService,
   RouteQueryService,
@@ -18,12 +19,14 @@ import {
 import {
   createPrismaClient,
   PrismaAuthRepository,
+  PrismaGroundTransitRepository,
   PrismaTripRepository,
   PrismaRoutePlanningRepository,
 } from '../packages/persistence/src/index.js';
 import {
   createDevelopmentSyntheticRouteProvider,
   SyntheticRouteProvider,
+  SyntheticGroundTransitProvider,
 } from '../packages/providers/src/index.js';
 import { buildApi } from '../apps/api/src/app.js';
 const databaseUrl = process.env.DATABASE_URL;
@@ -133,12 +136,30 @@ const provider = new SyntheticRouteProvider(
           mode: 'BUS',
           fixedService: true,
           serviceLabel: 'SYNTHETIC saved bus',
+          groundTransit: {
+            serviceClass: 'FIXED_SERVICE',
+            serviceIdentityKey: 'synthetic:p6a2:saved-bus',
+            lineRef: 'synthetic:p6a2',
+            lineName: 'SYNTHETIC bus',
+            directionRef: 'synthetic:direction',
+            directionLabel: 'SYNTHETIC direction',
+            boardingHubRef: 'synthetic:boarding',
+            alightingHubRef: 'synthetic:alighting',
+            headwayMinSeconds: null,
+            headwayMaxSeconds: null,
+            minimumTransferSeconds: null,
+            boardingAccessMinimumSeconds: null,
+          },
         })),
       })),
     };
   },
 );
 const app = buildApi({
+  groundTransitService: new GroundTransitService(
+    new PrismaGroundTransitRepository(managed.client),
+    new SyntheticGroundTransitProvider('FIXED_DELAY'),
+  ),
   readinessProbe: {
     async check() {
       return { name: 'postgresql', status: 'READY' };
@@ -257,15 +278,60 @@ try {
     await page.getByRole('button', { name: '关闭详情' }).click();
     await page.locator('[data-node]').first().click();
   }
-  // Remove the saved arrival deadline through the real command path for the
-  // independent old-route result scenario. No direct DB fact mutation.
+  // Delayed real removal responses preserve edits made after dispatch, for both commands.
+  for (const [kind, button, field, value] of [
+    [
+      'POINT_TIME',
+      '移除到达最晚要求',
+      'textarea',
+      'SYNTHETIC new note during removal',
+    ],
+    [
+      'MIN_DWELL',
+      '移除停留要求',
+      '#time-edit input[name=when]',
+      '2030-10-01T18:00',
+    ],
+  ] as const) {
+    await page.locator('.edit').evaluate((el) => el.setAttribute('open', ''));
+    let release: (() => void) | undefined;
+    await page.route('**/api/**/commands', async (route) => {
+      const response = await route.fetch();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await route.fulfill({ response });
+    });
+    await page.getByRole('button', { name: button, exact: true }).click();
+    await expect.poll(() => !!release).toBe(true);
+    assert.equal(
+      await managed.client.userTimeIntent.count({
+        where: { nodeId: origin.id, kind },
+      }),
+      0,
+    );
+    await page.locator(field).fill(value);
+    release!();
+    await expect(page.locator('#save-status')).toContainText('未保存');
+    await expect(page.locator(field)).toHaveValue(value);
+    await page.unroute('**/api/**/commands');
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: '关闭详情' }).click();
+    await page.locator('[data-node]').first().click();
+  }
+  await page.locator('.edit').evaluate((el) => el.setAttribute('open', ''));
+  await page.locator('#dwell-edit input').fill('60');
+  await page.getByRole('button', { name: '保存停留要求' }).click();
+  await expect(page.locator('#save-status')).toContainText('已保存');
+  assert.equal(
+    (
+      await managed.client.userTimeIntent.findFirstOrThrow({
+        where: { nodeId: origin.id, kind: 'MIN_DWELL' },
+      })
+    ).durationSeconds,
+    3600,
+  );
   let current = await service.getTrip(actor, trip.id);
-  current = await service.executeCommand(actor, trip.id, current.version, {
-    type: 'REMOVE_TIME_INTENT',
-    nodeId: origin.id,
-    pointKind: 'ARRIVAL',
-    operator: 'NOT_AFTER',
-  });
   await page.evaluate(() => dispatchEvent(new Event('offline')));
   await page.getByRole('button', { name: '重新读取并核对草稿' }).click();
   await page.getByRole('button', { name: '已核对，保留草稿继续编辑' }).click();
@@ -380,11 +446,27 @@ try {
     ).note,
     'SYNTHETIC recovered actual network draft',
   );
+  // A genuinely stale command is abandoned, then an unrelated route query succeeds.
+  await page.locator('textarea').fill('SYNTHETIC abandoned conflict draft');
+  current = await service.getTrip(actor, trip.id);
+  await service.executeCommand(actor, trip.id, current.version, {
+    type: 'SET_NODE_NOTE',
+    nodeId: origin.id,
+    note: 'SYNTHETIC current concurrent note',
+  });
+  await page.getByRole('button', { name: '保存备注' }).click();
+  await expect(page.locator('#draft-recovery')).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: '关闭详情' }).click();
+  await page.getByRole('button', { name: '重新载入' }).click();
+  await page.locator('[data-trip]').click();
   await page.locator('.connection').click();
   await expect(page.locator('input[name=when]')).toHaveValue(
     '2030-10-01T14:00',
   );
+  await page.getByRole('button', { name: '搜索路线' }).click();
+  await expect(page.locator('.candidate')).toBeVisible();
+
   await page.locator('#route-search input[name=when]').fill('2030-10-01T15:00');
   await page.getByRole('button', { name: '搜索路线' }).click();
   await expect(page.locator('.candidate')).toBeVisible();
@@ -478,6 +560,78 @@ try {
     where: { id: trip.id },
   });
   assert.equal(after.version, before.version + 3);
+  // Use the real supported Provider commit path only after the positive Undo chain.
+  const restored = await service.getTrip(actor, trip.id);
+  const restoredEdge = restored.connections.find(
+    (c) => c.transport !== null,
+  )!.transport!;
+  const countBeforeRefresh = await managed.client.executionEvent.count({
+    where: { tripId: trip.id },
+  });
+  const previewsBeforeRefresh = await managed.client.routePreview.count({
+    where: { tripId: trip.id },
+  });
+  const snapshotsBeforeRefresh =
+    await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: trip.id },
+    });
+  const callsBeforeRefresh = providerCalls;
+  const refreshStatus = await page.evaluate(async (path) => {
+    const response = await fetch('/api' + path, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${sessionStorage.getItem('travel.web.session')}`,
+      },
+    });
+    return response.status;
+  }, `/trips/${trip.id}/execution/ground-transit/${restoredEdge.id}/refresh`);
+  assert.equal(refreshStatus, 200);
+  const refreshed = await service.getTrip(actor, trip.id);
+  const estimate = refreshed.connections[0]!.transport!.timeValues.find(
+    (v) => v.layer === 'ESTIMATED' && v.pointKind === 'DEPARTURE',
+  )!;
+  assert(estimate, 'Provider refresh persisted an estimate');
+  assert.equal(
+    refreshed.savedRoutes![0]!.legTransportEdges![0]!.transportEdgeId,
+    restoredEdge.id,
+  );
+  await page.reload();
+  await page.locator('[data-trip]').click();
+  const clock = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: refreshed.savedRoutes![0]!.legs[0]!.departure!.timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(estimate.instant));
+  await expect(page.locator('.connection')).toContainText(clock);
+  await page.locator('.connection').click();
+  await expect(page.locator('.current-transport-times')).toContainText(clock);
+  await expect(page.locator('.current-transport-times')).toContainText('预计');
+  await expect(page.locator('.original-plan')).toContainText('原方案计划');
+  assert.equal(providerCalls, callsBeforeRefresh);
+  assert.equal(
+    await managed.client.routePreview.count({ where: { tripId: trip.id } }),
+    previewsBeforeRefresh,
+  );
+  assert.equal(
+    await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: trip.id },
+    }),
+    snapshotsBeforeRefresh,
+  );
+  assert.equal(
+    await managed.client.executionEvent.count({ where: { tripId: trip.id } }),
+    countBeforeRefresh,
+  );
+  await page.screenshot({
+    path: 'docs/status/assets/p6a-1/postgres-desktop-current-transport.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: 'docs/status/assets/p6a-1/postgres-mobile-current-transport.png',
+    fullPage: true,
+  });
   console.log(
     JSON.stringify({
       status: 'PASS',
@@ -487,6 +641,9 @@ try {
       queryPreviewReadOnly: 'PASS',
       explicitAdoptUndo: 'PASS',
       delayedNoteTimeDwellWrites: 'PASS',
+      delayedRealIntentRemovals: 'PASS',
+      abandonedRecoveryRouteQuery: 'PASS',
+      authoritativeSavedProviderEstimate: 'PASS',
       recoveryRealServerVersion: 'PASS',
       concurrentNoteRecovery: 'PASS',
       revokedSessionMagicLinkRecovery: 'PASS',

@@ -231,6 +231,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       departure: '2030-10-01T10:00:00Z',
       arrival: '2030-10-01T11:00:00Z',
     },
+    mode: 'RAIL' | 'BUS' = 'RAIL',
   ) {
     currentNow = new Date(schedule.now);
     const trip = await tripWithVisits(userA, [
@@ -249,7 +250,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           legs: [
             {
               ...base.legs[0]!,
-              mode: 'RAIL',
+              mode,
               groundTransit: {
                 serviceClass: 'FIXED_SERVICE',
                 serviceIdentityKey: 'synthetic:operational:1',
@@ -9496,6 +9497,140 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
     expect(response.statusCode).toBe(201);
     return response.json() as TripView;
+  }
+
+  for (const mode of ['RAIL', 'BUS'] as const) {
+    for (const layer of ['ESTIMATED', 'ACTUAL'] as const) {
+      it(`P6A-1 second review R3: ${mode} ${layer} retains exact saved-leg identity and current provider facts`, async () => {
+        const f = await adoptedFixedGroundTrip(
+          {
+            now: '2030-10-01T13:50:00Z',
+            departure: '2030-10-01T14:00:00Z',
+            arrival: '2030-10-01T15:00:00Z',
+          },
+          mode,
+        );
+        const route = await managed.client.adoptedRoute.findUniqueOrThrow({
+          where: { id: f.adopted.operationReceipt.adoptedRouteId },
+        });
+        const oldPreview = await managed.client.routePreview.findUniqueOrThrow({
+          where: { id: route.sourcePreviewId },
+        });
+        const oldSnapshot =
+          await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+            where: { id: route.candidateSnapshotId },
+          });
+        const beforeCounts = await Promise.all([
+          managed.client.routeCandidateSnapshot.count({
+            where: { tripId: f.trip.id },
+          }),
+          managed.client.routePreview.count({ where: { tripId: f.trip.id } }),
+          managed.client.operationReceipt.count({
+            where: { tripId: f.trip.id },
+          }),
+          managed.client.executionEvent.count({ where: { tripId: f.trip.id } }),
+        ]);
+        currentNow = new Date('2030-10-01T14:25:00Z');
+        await app.close();
+        const base = new SyntheticGroundTransitProvider(
+          'FIXED_DELAY',
+          () => currentNow,
+        );
+        app = buildTestApi(
+          new SyntheticRouteProvider(async () => {
+            throw new Error('reading selected transport must not query routes');
+          }),
+          {
+            name: 'SYNTHETIC',
+            async fetchObservation(input) {
+              const result = await base.fetchObservation(input);
+              if (result.status !== 'SUCCESS') return result;
+              return {
+                ...result,
+                observation: {
+                  ...result.observation,
+                  estimatedDeparture:
+                    layer === 'ESTIMATED'
+                      ? new Date('2030-10-01T14:20:00Z')
+                      : null,
+                  actualDeparture:
+                    layer === 'ACTUAL'
+                      ? new Date('2030-10-01T14:20:00Z')
+                      : null,
+                },
+              };
+            },
+          },
+        );
+        const refreshed = await app.inject({
+          method: 'POST',
+          url: `/trips/${f.trip.id}/execution/ground-transit/${f.leg.transportEdgeId}/refresh`,
+          headers: bearer(userA),
+        });
+        expect(refreshed.statusCode, refreshed.body).toBe(200);
+        const reopened = await app.inject({
+          method: 'GET',
+          url: `/trips/${f.trip.id}`,
+          headers: bearer(userA),
+        });
+        expect(reopened.statusCode).toBe(200);
+        const view = reopened.json<TripView>();
+        expect(view.savedRoutes?.[0]).toMatchObject({
+          legTransportEdges: [
+            { legIndex: 0, transportEdgeId: f.leg.transportEdgeId },
+          ],
+        });
+        expect(view.savedRoutes?.[0]?.legs[0]?.departure?.instant).toBe(
+          '2030-10-01T14:00:00.000Z',
+        );
+        expect(view.connections[0]?.transport?.timeValues).toContainEqual(
+          expect.objectContaining({
+            layer,
+            pointKind: 'DEPARTURE',
+            sourceKind: 'PROVIDER_OBSERVATION',
+            instant: '2030-10-01T14:20:00.000Z',
+          }),
+        );
+        expect(
+          await managed.client.routePreview.findUniqueOrThrow({
+            where: { id: route.sourcePreviewId },
+          }),
+        ).toEqual(oldPreview);
+        expect(
+          await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+            where: { id: route.candidateSnapshotId },
+          }),
+        ).toEqual(oldSnapshot);
+        expect(
+          await Promise.all([
+            managed.client.routeCandidateSnapshot.count({
+              where: { tripId: f.trip.id },
+            }),
+            managed.client.routePreview.count({ where: { tripId: f.trip.id } }),
+            managed.client.operationReceipt.count({
+              where: { tripId: f.trip.id },
+            }),
+            managed.client.executionEvent.count({
+              where: { tripId: f.trip.id },
+            }),
+          ]),
+        ).toEqual(beforeCounts);
+        // Lost adoption provenance cannot be reconstructed by edge order/name/time.
+        await managed.client.temporalValue.updateMany({
+          where: { transportEdgeId: f.leg.transportEdgeId, layer: 'PLANNED' },
+          data: { sourceRef: 'SYNTHETIC:unmatched' },
+        });
+        const unmatched = await app.inject({
+          method: 'GET',
+          url: `/trips/${f.trip.id}`,
+          headers: bearer(userA),
+        });
+        expect(unmatched.json().savedRoutes[0].legTransportEdges).toEqual([]);
+        expect(unmatched.json().savedRoutes[0].legs).toEqual(
+          view.savedRoutes![0]!.legs,
+        );
+      });
+    }
   }
 
   it('P6A-1 repair: old 15:00 selected service is not an independent departure constraint', async () => {

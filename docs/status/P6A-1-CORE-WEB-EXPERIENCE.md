@@ -64,7 +64,7 @@ Embedded map remains **PARTIAL**. Minimum remaining configuration: an approved m
 
 Final repair checks and final-HEAD GitHub CI are recorded in the PR report; the initial counts above are historical evidence, not a claim about this revision. Schema/migrations are unchanged (**24 total**).
 
-### Repair cloud verification
+### First-repair cloud verification (`bf63f55`)
 
 - Frozen install, Prisma generate/validate, format, lint, full typecheck, Unit and build passed.
 - **737 Unit**, **102 persistence + 482 API = 584 PostgreSQL integration**, **33 Chromium browser cases** passed on the repaired code. No assertions were removed to bypass a failure; selectors were made specific for the new optional timezone controls, and unavailable-opener focus recovery is explicitly asserted.
@@ -75,6 +75,30 @@ Final repair checks and final-HEAD GitHub CI are recorded in the PR report; the 
 - Compose passed, including API/Worker and existing route/execution/object-storage chains. Debug Web HTTP smoke returned 200. The first local Compose attempt rejected synthetic fixture timestamps with six decimal places; only task-local env fixtures were corrected to the existing three-digit UTC format, then acceptance was rerun. Provider validation and repository Compose scripts were not weakened.
 - Cloud WebKit download remains blocked by the previously verified HTTP 403 restriction; final-HEAD GitHub CI independently runs Chromium and WebKit. Real iPhone/touch/keyboard remains unverified.
 
+## Second-review repair: R1 / R2 / R3
+
+Starting HEAD `bf63f55c29a9d63edc5b883312840b17ad41bcb1`; main remains `d5350fc051bd4a3ff7b50c1aae5605007e0a3ab2`. The workspace and remote branch matched before development. This is a repair of the same Draft PR, without resetting, new product navigation or another batch.
+
+**Before repair:** all 11 new Chromium reproduction cases failed against the original application code: six delayed removal/edit cases (both commands × note/time/dwell), abandoned recovery → unrelated route Query, and four selected bus/rail ESTIMATED/Provider ACTUAL displays. The last cases showed the summary at 14:20 while the detail still showed unlabelled 14:00. Four real PostgreSQL/API tests successfully committed synthetic Provider observations through GroundTransit refresh but failed to obtain a proven saved-leg/current-edge identity. The original API suite also completed with its existing 482 cases passing; those were not evidence for the new scenarios.
+
+- **R1:** explicit consent discards only drafts present before dispatch. Accepted removal updates requirements, deletion controls and the affected form's accepted baseline without rebuilding the detail. Inputs created during command/evaluation remain dirty. Newly rendered removal controls stay disabled during the outstanding request. Both command failure and accepted-write/later-read failure retain new drafts; the latter is reported separately and can be recovered inside the modal.
+- **R2:** a successful explicit close ends the place draft's account/Trip/node recovery context. Cancelling that close retains it. Route search does not inherit a discarded place recovery flag. Same-owner reread/review/save and rejection of another account remain covered; no global render-based clearing or offline store was added.
+- **R3:** the immutable Preview's explicit `legIndex`, snapshot ID and candidate identity define the exact adoption `sourceRef`. The owned Trip read projection emits additive `legTransportEdges` only when a unique ACTIVE route-owned edge has matching PLANNED/ADOPTED_TRANSPORT_FACT provenance. Missing/legacy/contradictory identity is not inferred from edge order, names, proximity or timestamps. The client validates the explicit relation before displaying current `TransportEdge.timeValues`; unmatched saved segments show unknown current timing and explicitly labelled original-plan timing. Provider ACTUAL is labelled vehicle evidence, not user execution.
+
+Saved endpoint zones are used only for display conversion of the same authoritative instant after identity validation. Provider UTC storage is not labelled as the endpoint's local clock; raw fact timezone, instant, layer and source are not rewritten. Cross-day dates and different departure/arrival zones remain visible. Manual/legacy public transport retains its known service and current time even without saved boarding data; it does not invent boarding coordinates. Saved navigation continues to use trusted saved endpoints, with zero additional Query/Preview/Adopt or execution writes.
+
+Historical Preview/Snapshot data, route adoption/Undo, independent time requirements, live-origin authorization, ownership and transaction protections are unchanged. Schema, migration, lockfile and CI configuration diffs remain zero; **24 migrations total**.
+
+### Second-review evidence
+
+- Frozen install and Prisma generate/validate passed. Unit: **738**. Full PostgreSQL 17: **102 persistence + 486 API = 588**. A separately created empty database applied all **24 migrations**.
+- Full Chromium: **54 cases passed**, retaining the original save-race, recovery, owner, map/navigation and viewport cases. New coverage includes both removal commands with no prior draft/explicit prior discard/new input, command failure versus accepted-write/read failure, abandoned/cancelled recovery, current estimates/vehicle ACTUAL, original-plan-only/unmatched identities, cross-day/event-zone display and manual transport.
+- Real PostgreSQL + HTTP + Chromium passed delayed REMOVE_TIME_INTENT/REMOVE_MIN_DWELL responses with new drafts and persisted removals; real VERSION_CONFLICT → explicit abandonment → fresh route Query; Provider refresh → Trip reread → current estimate in summary/detail with unchanged planning and execution-event counts. Existing 15:00 → 14:15 replacement, explicit Adopt/Undo, note/time/dwell save races, revoked-session/Magic Link and offline recovery also passed.
+- The four focused PostgreSQL Provider tests cover BUS/RAIL × ESTIMATED/ACTUAL with exact identity, unchanged immutable Preview/Snapshot, no planning receipts/ExecutionEvents, and deliberate loss of provenance yielding no association. The UI failure cases use controlled contract responses; they are not claimed as real API 503 injection.
+- Final format, lint, full typecheck and build passed. Compose passed API/Worker, existing route/execution and private object-storage chains; API readiness and Debug Web smoke returned HTTP 200. P5B passed **5 users, 200 requests, 0 isolation failures, 0 unexpected 5xx, 0 network failures**. Independent final-HEAD CI results are recorded in the PR report after execution. The first local parallel Docker build exhausted the isolated disk; only this task's inactive images/failed build caches were removed and the unchanged acceptance passed on a serial retry. Databases and user data were retained; acceptance scripts and assertions were not weakened.
+
+Embedded maps remain **PARTIAL**; real timetable/fare validation and iPhone touch/soft-keyboard acceptance remain unverified. No real paid call, merge, public/production deployment or next batch is authorized by this repair.
+
 ## Review screenshots
 
 All data shown is labeled SYNTHETIC; no credentials/private production content appears.
@@ -82,6 +106,8 @@ All data shown is labeled SYNTHETIC; no credentials/private production content a
 - [Mobile day, real PostgreSQL](assets/p6a-1/postgres-mobile-day.png)
 - [Desktop day, real PostgreSQL](assets/p6a-1/postgres-desktop-day.png)
 - [Saved transport, real PostgreSQL](assets/p6a-1/postgres-mobile-saved-transport.png)
+- [Current Provider estimate, mobile / real PostgreSQL](assets/p6a-1/postgres-mobile-current-transport.png)
+- [Current Provider estimate, desktop / real PostgreSQL](assets/p6a-1/postgres-desktop-current-transport.png)
 - [Draft/version recovery, real PostgreSQL](assets/p6a-1/postgres-mobile-draft-recovery.png)
 - [Mobile saved bus navigation](assets/p6a-1/mobile-saved-bus.png)
 - [Desktop saved bus navigation](assets/p6a-1/desktop-saved-bus.png)

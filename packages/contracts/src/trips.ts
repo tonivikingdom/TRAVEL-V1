@@ -174,6 +174,11 @@ export interface TripView {
     readonly adoptedRouteId: string;
     readonly transportEdgeIds: readonly string[];
     readonly legs: readonly import('./routes.js').RouteCandidateLegView[];
+    /** Explicit adoption provenance; absent/unmatched legs have no current-edge claim. */
+    readonly legTransportEdges?: readonly {
+      readonly legIndex: number;
+      readonly transportEdgeId: string;
+    }[];
   }[];
 }
 

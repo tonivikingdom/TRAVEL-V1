@@ -15,6 +15,8 @@ import type {
   UndoRouteAdoptionResponse,
   UserView,
   RouteCandidateLegView,
+  TransportEdgeView,
+  TemporalValueView,
 } from '@travel/contracts';
 import { TravelApi, WebError, errorText } from './api.js';
 import { DetailDrawer } from './drawer.js';
@@ -26,6 +28,7 @@ import {
   formatTime,
   temporalLabel,
   transportTime,
+  savedLegTransport,
   localInput,
   localToInstant,
   modeLabel,
@@ -83,6 +86,48 @@ function savedForm(id: string, submitted: string) {
   else dirtyForms.delete(id);
   draftDirty = dirtyForms.size > 0;
 }
+function discardFormDrafts() {
+  for (const id of dirtyForms) {
+    const form = detail.querySelector<HTMLFormElement>(`#${id}`);
+    const baseline = formBaselines.get(id);
+    if (!form || !baseline) continue;
+    const values = new Map<string, string>(JSON.parse(baseline));
+    for (const field of form.querySelectorAll<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >('[name]')) {
+      if (field instanceof HTMLInputElement && field.type === 'checkbox')
+        field.checked = values.has(field.name);
+      else field.value = values.get(field.name) ?? '';
+    }
+    const zone = form.querySelector<HTMLSelectElement>('[data-zone]');
+    if (zone) zone.value = values.get('zone') ?? '';
+  }
+  dirtyForms.clear();
+  draftDirty = false;
+}
+function removalControls(n: ItineraryNodeView) {
+  return n.timeIntents
+    .map(
+      (i) =>
+        `<button class="remove-intent" data-intent="${i.id}">移除${i.kind === 'MIN_DWELL' ? '停留' : i.pointKind === 'ARRIVAL' ? '到达' : '出发'}${i.kind === 'MIN_DWELL' ? '' : { EXACT: '指定', NOT_AFTER: '最晚', NOT_BEFORE: '最早', MINIMUM: '' }[i.operator]}要求</button>`,
+    )
+    .join('');
+}
+function refreshIntentControls(n: ItineraryNodeView) {
+  const summary = detail.querySelector('[data-requirements]');
+  if (summary) summary.innerHTML = requirements(n);
+  const controls = detail.querySelector('[data-remove-intents]');
+  if (controls) {
+    controls.innerHTML = removalControls(n);
+    if (busy)
+      controls
+        .querySelectorAll<HTMLButtonElement>('button')
+        .forEach((button) => {
+          button.dataset.wasDisabled = 'false';
+          button.disabled = true;
+        });
+  }
+}
 const drawer = new DetailDrawer(
   detail,
   () =>
@@ -92,6 +137,10 @@ const drawer = new DetailDrawer(
     preview = null;
     routeCandidates = [];
     draftDirty = false;
+    recoveryRequired = false;
+    detailBasis = null;
+    dirtyForms.clear();
+    formBaselines.clear();
     epoch++;
   },
 );
@@ -170,7 +219,11 @@ function connectionCard(c: ConnectionView) {
   const from = node(c.fromNodeId);
   const to = node(c.toNodeId);
   const floor = from ? departureFloor(from, projection(from.id)) : null;
-  const departure = edge ? transportTime(edge.timeValues, 'DEPARTURE') : null;
+  const savedLeg = edge ? selectedLegForEdge(edge.id) : null;
+  const departure = localTransportTime(
+    edge ? transportTime(edge.timeValues, 'DEPARTURE') : null,
+    savedLeg?.departure?.timeZone,
+  );
   const conflict =
     departure && floor && Date.parse(departure.instant) < Date.parse(floor);
   return `<button class="connection ${conflict ? 'conflict' : ''}" data-route-from="${c.fromNodeId}" data-route-to="${c.toNodeId}">${icon('route')}<span><strong>${esc(edge ? `${modeLabel[edge.mode]} · ${edge.serviceLabel ?? '已选交通'}` : '选择交通')}</strong><small>${edge ? `${departure ? temporalLabel(departure) : '待定'} ${esc(formatTime(departure, from ? dayDate(from.dayOccurrenceId) : undefined))} 出发 · 前往 ${esc(to ? nodeTitle(to) : '下一安排')}` : '查看方案或在地图中查询'}</small>${conflict ? '<small class="warning">出发早于当前可出发时间，原路线仍保留</small>' : ''}</span><span>›</span></button>`;
@@ -220,7 +273,7 @@ function openPlace(n: ItineraryNodeView) {
   drawer.open(
     frame(
       nodeTitle(n),
-      `<p class="address">${esc(n.place?.address ?? '地址未提供')}</p>${n.place ? mapLinks(n.place) : ''}<p class="map-status">内嵌地图尚未配置；可在地图应用中查看已保存的位置。</p>${timeGrid(n)}<div data-requirements>${requirements(n)}</div><details class="edit"><summary>编辑重要时间要求</summary><p class="muted">要求独立于计划/预计/实际时间，不会改写已发生事实。</p><form id="time-edit"><label>要求<select name="requirement"><option value="ARRIVAL:NOT_AFTER">最晚到达</option><option value="ARRIVAL:NOT_BEFORE">最早到达</option><option value="ARRIVAL:EXACT">指定到达</option><option value="DEPARTURE:NOT_BEFORE">最早出发</option><option value="DEPARTURE:NOT_AFTER">最晚出发</option><option value="DEPARTURE:EXACT">指定出发</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" required></label>${zoneField(zone, '时间要求所在地')}<label class="check"><input name="locked" type="checkbox" checked>保护这项要求</label><button class="primary">保存时间要求</button></form><form id="dwell-edit"><label>至少停留（分钟）<input name="minutes" type="number" min="1" step="1" value="${n.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ? String(n.timeIntents.find((i) => i.kind === 'MIN_DWELL')!.durationSeconds! / 60) : ''}" required></label><button>保存停留要求</button></form>${n.timeIntents.map((i) => `<button class="remove-intent" data-intent="${i.id}">移除${i.kind === 'MIN_DWELL' ? '停留' : i.pointKind === 'ARRIVAL' ? '到达' : '出发'}${i.kind === 'MIN_DWELL' ? '' : { EXACT: '指定', NOT_AFTER: '最晚', NOT_BEFORE: '最早', MINIMUM: '' }[i.operator]}要求</button>`).join('')}</details><form id="note-edit"><label>备注<textarea name="note" maxlength="2000" rows="3" placeholder="这处安排需要记住什么？">${esc(n.note ?? '')}</textarea></label><button class="primary">保存备注</button></form><p id="save-status" role="status">已读取服务器数据</p>`,
+      `<p class="address">${esc(n.place?.address ?? '地址未提供')}</p>${n.place ? mapLinks(n.place) : ''}<p class="map-status">内嵌地图尚未配置；可在地图应用中查看已保存的位置。</p>${timeGrid(n)}<div data-requirements>${requirements(n)}</div><details class="edit"><summary>编辑重要时间要求</summary><p class="muted">要求独立于计划/预计/实际时间，不会改写已发生事实。</p><form id="time-edit"><label>要求<select name="requirement"><option value="ARRIVAL:NOT_AFTER">最晚到达</option><option value="ARRIVAL:NOT_BEFORE">最早到达</option><option value="ARRIVAL:EXACT">指定到达</option><option value="DEPARTURE:NOT_BEFORE">最早出发</option><option value="DEPARTURE:NOT_AFTER">最晚出发</option><option value="DEPARTURE:EXACT">指定出发</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" required></label>${zoneField(zone, '时间要求所在地')}<label class="check"><input name="locked" type="checkbox" checked>保护这项要求</label><button class="primary">保存时间要求</button></form><form id="dwell-edit"><label>至少停留（分钟）<input name="minutes" type="number" min="1" step="1" value="${n.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ? String(n.timeIntents.find((i) => i.kind === 'MIN_DWELL')!.durationSeconds! / 60) : ''}" required></label><button>保存停留要求</button></form><div data-remove-intents>${removalControls(n)}</div></details><form id="note-edit"><label>备注<textarea name="note" maxlength="2000" rows="3" placeholder="这处安排需要记住什么？">${esc(n.note ?? '')}</textarea></label><button class="primary">保存备注</button></form><p id="save-status" role="status">已读取服务器数据</p>`,
     ),
   );
   const existing = n.timeIntents.find((i) => i.kind === 'POINT_TIME');
@@ -246,8 +299,7 @@ function refreshPlaceSummary(id: string) {
   if (!fresh) return;
   const grid = detail.querySelector('.times');
   if (grid) grid.outerHTML = timeGrid(fresh);
-  const requirementsElement = detail.querySelector('[data-requirements]');
-  if (requirementsElement) requirementsElement.innerHTML = requirements(fresh);
+  refreshIntentControls(fresh);
 }
 function drawerClose() {
   if (busy) return false;
@@ -273,7 +325,105 @@ function wholeRouteMap(
     ? `<div class="map-links"><a class="whole-route-map" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${icon('route')}在地图中查询整段</a></div><p class="muted">外部地图重新查询，不锁定原班次、日期或票价。${mode ? '' : '未指定方式，请在地图中选择。'}</p>`
     : '<p class="muted">原起终点或方式不完整，无法在地图中查询原路线。</p>';
 }
-function legView(l: RouteCandidateLegView) {
+function selectedLegForEdge(edgeId: string) {
+  for (const route of trip?.savedRoutes ?? []) {
+    const links =
+      route.legTransportEdges?.filter(
+        (link) => link.transportEdgeId === edgeId,
+      ) ?? [];
+    if (links.length !== 1) continue;
+    const legIndex = links[0]!.legIndex;
+    if (savedLegTransport(route, legIndex, trip!.connections)?.id === edgeId)
+      return route.legs[legIndex] ?? null;
+  }
+  return null;
+}
+function localTransportTime(
+  value: TemporalValueView | null,
+  eventZone?: string | null,
+) {
+  // Display conversion only. The raw Provider instant, layer/source and stored
+  // timezone remain immutable. Event zone comes from a proven saved endpoint.
+  return value && eventZone ? { ...value, timeZone: eventZone } : value;
+}
+function transportClock(
+  edge?: TransportEdgeView | null,
+  leg?: RouteCandidateLegView,
+) {
+  const departure = localTransportTime(
+    edge ? transportTime(edge.timeValues, 'DEPARTURE') : null,
+    leg?.departure?.timeZone,
+  );
+  const arrival = localTransportTime(
+    edge ? transportTime(edge.timeValues, 'ARRIVAL') : null,
+    leg?.arrival?.timeZone,
+  );
+  const zones =
+    departure && arrival && departure.timeZone !== arrival.timeZone
+      ? `<small>时区切换：出发 ${esc(departure.timeZone.split('/').at(-1)?.replaceAll('_', ' '))} 当地时间 → 到达 ${esc(arrival.timeZone.split('/').at(-1)?.replaceAll('_', ' '))} 当地时间</small>`
+      : `<small>${
+          [departure, arrival].find((v) => v)?.timeZone
+            ? `时间按 ${esc(
+                [departure, arrival]
+                  .find((v) => v)!
+                  .timeZone.replace('Etc/', '')
+                  .split('/')
+                  .at(-1)
+                  ?.replaceAll('_', ' '),
+              )} 显示`
+            : '时间未知'
+        }</small>`;
+  const vehicle = [departure, arrival].some(
+    (v) => v?.layer === 'ACTUAL' && v.sourceKind === 'PROVIDER_OBSERVATION',
+  )
+    ? '<small>车辆实测不表示你本人已经出发或到达。</small>'
+    : '';
+  return (
+    `<small class="current-transport-times">出发${departure ? ` · ${temporalLabel(departure)}` : ''} ${esc(formatTime(departure))} → 到达${arrival ? ` · ${temporalLabel(arrival)}` : ''} ${esc(formatTime(arrival))}</small>` +
+    zones +
+    vehicle
+  );
+}
+function legTimes(
+  l: RouteCandidateLegView,
+  edge?: TransportEdgeView | null,
+  saved = false,
+  originalPlan = true,
+) {
+  if (!saved)
+    return `<small>方案计划：${esc(formatTime(l.departure))} → ${esc(formatTime(l.arrival))} · 当地时间</small>`;
+  const departure = edge ? transportTime(edge.timeValues, 'DEPARTURE') : null;
+  const arrival = edge ? transportTime(edge.timeValues, 'ARRIVAL') : null;
+  const historical =
+    originalPlan &&
+    (!departure ||
+      !arrival ||
+      departure.instant !== l.departure?.instant ||
+      arrival.instant !== l.arrival?.instant ||
+      departure.layer !== 'PLANNED' ||
+      arrival.layer !== 'PLANNED');
+  const originalZones =
+    historical &&
+    l.departure &&
+    l.arrival &&
+    l.departure.timeZone !== l.arrival.timeZone
+      ? `<small>原方案时区：${esc(l.departure.timeZone.split('/').at(-1)?.replaceAll('_', ' '))} → ${esc(l.arrival.timeZone.split('/').at(-1)?.replaceAll('_', ' '))}</small>`
+      : '';
+  return (
+    transportClock(edge, l) +
+    (historical
+      ? `<small class="original-plan">原方案计划：${esc(formatTime(l.departure))} → ${esc(formatTime(l.arrival))}</small>`
+      : '') +
+    originalZones +
+    (!edge ? '<small>当前分段时间暂无可靠对应。</small>' : '')
+  );
+}
+function legView(
+  l: RouteCandidateLegView,
+  current?: TransportEdgeView | null,
+  saved = false,
+  originalPlan = true,
+) {
   const mode = mapMode(l.mode);
   const publicTransport = mode === 'transit';
   const target = publicTransport ? l.from : l.to;
@@ -289,7 +439,7 @@ function legView(l: RouteCandidateLegView) {
         : `<span>${i === 0 ? '起点' : '终点'}位置未知</span>`;
     })
     .join('');
-  return `<li><strong>${esc(modeLabel[l.mode])} ${esc(l.serviceLabel ?? '')}</strong><p>${publicTransport ? '上车' : '起点'}：${esc(l.from.name)} → ${publicTransport ? '下车' : '终点'}：${esc(l.to.name)}</p><small>${esc(formatTime(l.departure))} → ${esc(formatTime(l.arrival))} · 当地时间</small><div class="map-links">${links}${nav ? `<a class="segment-navigation" href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${publicTransport ? '步行到上车点' : l.mode === 'WALKING' ? '步行到分段终点' : '驾车到分段终点'}</a>` : '<span>暂无可靠导航目标</span>'}</div></li>`;
+  return `<li><strong>${esc(modeLabel[l.mode])} ${esc(l.serviceLabel ?? '')}</strong><p>${publicTransport ? '上车' : '起点'}：${esc(l.from.name)} → ${publicTransport ? '下车' : '终点'}：${esc(l.to.name)}</p>${legTimes(l, current, saved, originalPlan)}<div class="map-links">${links}${nav ? `<a class="segment-navigation" href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${publicTransport ? '步行到上车点' : l.mode === 'WALKING' ? '步行到分段终点' : '驾车到分段终点'}</a>` : '<span>暂无可靠导航目标</span>'}</div></li>`;
 }
 function savedTransport(chain: readonly ConnectionView[]) {
   const ids = chain.map((c) => c.transport?.id);
@@ -300,7 +450,7 @@ function savedTransport(chain: readonly ConnectionView[]) {
       r.transportEdgeIds.every((id) => ids.includes(id)),
   );
   if (saved)
-    return `<ol class="legs saved-legs">${saved.legs.map(legView).join('')}</ol>`;
+    return `<ol class="legs saved-legs">${saved.legs.map((leg, legIndex) => legView(leg, savedLegTransport(saved, legIndex, chain), true)).join('')}</ol>`;
   // Manual/legacy edges have only their real itinerary endpoints. Do not invent
   // service boarding locations when immutable selected segments are unavailable.
   return `<ol class="legs saved-legs">${chain
@@ -309,21 +459,27 @@ function savedTransport(chain: readonly ConnectionView[]) {
       const from = node(c.fromNodeId)?.place,
         to = node(c.toNodeId)?.place;
       if (!t) return '';
+      const summary = `<strong>${esc(modeLabel[t.mode])} ${esc(t.serviceLabel ?? '')}</strong>${transportClock(t)}`;
       if (!from || !to)
-        return `<li>${esc(modeLabel[t.mode])} · 地点信息不完整，无法导航</li>`;
+        return `<li>${summary}<p>地点信息不完整，无法导航。</p></li>`;
       if (['RAIL', 'BUS', 'FERRY'].includes(t.mode))
-        return `<li><strong>${esc(modeLabel[t.mode])} ${esc(t.serviceLabel ?? '')}</strong><p>行程地点：${esc(from.name)} → ${esc(to.name)}</p><p>上/下车地点未保存，不能提供上车点导航。</p></li>`;
-      return legView({
-        mode: t.mode,
-        fixedService: t.fixedService,
-        serviceLabel: t.serviceLabel,
-        providerRef: t.providerRef,
-        from: { ...from, providerPlaceRef: null },
-        to: { ...to, providerPlaceRef: null },
-        departure: transportTime(t.timeValues, 'DEPARTURE'),
-        arrival: transportTime(t.timeValues, 'ARRIVAL'),
-        durationSeconds: null,
-      });
+        return `<li>${summary}<p>行程地点：${esc(from.name)} → ${esc(to.name)}</p><p>上/下车地点未保存，不能提供上车点导航。</p></li>`;
+      return legView(
+        {
+          mode: t.mode,
+          fixedService: t.fixedService,
+          serviceLabel: t.serviceLabel,
+          providerRef: t.providerRef,
+          from: { ...from, providerPlaceRef: null },
+          to: { ...to, providerPlaceRef: null },
+          departure: transportTime(t.timeValues, 'DEPARTURE'),
+          arrival: transportTime(t.timeValues, 'ARRIVAL'),
+          durationSeconds: null,
+        },
+        t,
+        true,
+        false,
+      );
     })
     .join('')}</ol>`;
 }
@@ -333,6 +489,8 @@ function openRoute(from: string, to: string) {
     destination = node(to);
   if (!origin || !destination) return;
   selection = { type: 'route', from, to };
+  detailBasis = null;
+  recoveryRequired = false;
   preview = null;
   routeCandidates = [];
   candidatesBasis = -1;
@@ -382,7 +540,7 @@ function showPreview(p: RoutePreviewView) {
   if (!target) return;
   const adjustments = p.changeSummary.requiredUserAdjustments ?? [];
   const impact = p.changeSummary.downstreamImpact;
-  target.innerHTML = `<section class="choice"><h3>这条路线</h3><ol class="legs">${p.candidate.legs.map(legView).join('')}</ol><p>会${p.changeSummary.transportAction === 'REPLACE' ? '替换当前交通' : '新增交通'}；目的地保持不变。</p>${impact ? `<p>后续停留：${esc(duration(impact.projectedDwellSeconds))}${['INFEASIBLE', 'USER_REQUIREMENT_VIOLATION'].includes(impact.status) ? ' · 重要安排存在冲突' : ''}</p>` : ''}${adjustments.length ? `<label class="check"><input id="accept-adjustments" type="checkbox">我同意将以下最短停留改为：${adjustments.map((a) => `${esc(node(a.nodeId) ? nodeTitle(node(a.nodeId)!) : '相关地点')} ${duration(a.fromDurationSeconds)} → ${duration(a.toDurationSeconds)}`).join('；')}</label>` : ''}${!p.adoptable ? '<p class="warning">这条方案当前不能使用：存在受保护事实、时间冲突或已过期。请核对后重新查询。</p>' : ''}<button class="primary" data-action="adopt" ${p.adoptable ? '' : 'disabled'}>使用这条路线</button></section>`;
+  target.innerHTML = `<section class="choice"><h3>这条路线</h3><ol class="legs">${p.candidate.legs.map((leg) => legView(leg)).join('')}</ol><p>会${p.changeSummary.transportAction === 'REPLACE' ? '替换当前交通' : '新增交通'}；目的地保持不变。</p>${impact ? `<p>后续停留：${esc(duration(impact.projectedDwellSeconds))}${['INFEASIBLE', 'USER_REQUIREMENT_VIOLATION'].includes(impact.status) ? ' · 重要安排存在冲突' : ''}</p>` : ''}${adjustments.length ? `<label class="check"><input id="accept-adjustments" type="checkbox">我同意将以下最短停留改为：${adjustments.map((a) => `${esc(node(a.nodeId) ? nodeTitle(node(a.nodeId)!) : '相关地点')} ${duration(a.fromDurationSeconds)} → ${duration(a.toDurationSeconds)}`).join('；')}</label>` : ''}${!p.adoptable ? '<p class="warning">这条方案当前不能使用：存在受保护事实、时间冲突或已过期。请核对后重新查询。</p>' : ''}<button class="primary" data-action="adopt" ${p.adoptable ? '' : 'disabled'}>使用这条路线</button></section>`;
   target.scrollIntoView({ block: 'start' });
 }
 function showRecovery() {
@@ -622,15 +780,12 @@ detail.addEventListener('click', (event) => {
     status('已核对最新服务器版本，草稿尚未保存。');
   }
   if (target.dataset.intent && selection?.type === 'place') {
+    if (busy) return;
     if (recoveryRequired || !trip) {
       status('请先重新读取并核对草稿，再修改服务器要求。');
       return;
     }
-    if (
-      draftDirty &&
-      !confirm('移除要求后将重新载入详情。放弃当前未保存的修改？')
-    )
-      return;
+    if (draftDirty && !confirm('移除要求前，放弃当前未保存的修改？')) return;
     const n = node(selection.nodeId)!;
     const intent = n.timeIntents.find((i) => i.id === target.dataset.intent);
     if (!intent) {
@@ -638,6 +793,15 @@ detail.addEventListener('click', (event) => {
       status('该要求已变化，请重新读取并核对。');
       return;
     }
+    // Consent discards only edits already present, before accepting any later input.
+    if (draftDirty) discardFormDrafts();
+    const formId = intent.kind === 'MIN_DWELL' ? 'dwell-edit' : 'time-edit';
+    const form = detail.querySelector<HTMLFormElement>(`#${formId}`)!;
+    const submitted = formValue(form);
+    const data = new FormData(form);
+    const editsRemovedRequirement =
+      intent.kind === 'MIN_DWELL' ||
+      data.get('requirement') === `${intent.pointKind}:${intent.operator}`;
     void act(async () => {
       await command(
         intent.kind === 'MIN_DWELL'
@@ -648,12 +812,30 @@ detail.addEventListener('click', (event) => {
               pointKind: intent.pointKind!,
               operator: intent.operator as 'EXACT' | 'NOT_BEFORE' | 'NOT_AFTER',
             },
+        (fresh) => {
+          const acceptedNode = fresh.days
+            .flatMap((d) => d.nodes)
+            .find((item) => item.id === n.id)!;
+          refreshIntentControls(acceptedNode);
+          if (!editsRemovedRequirement) return;
+          const fieldName = intent.kind === 'MIN_DWELL' ? 'minutes' : 'when';
+          const acceptedSnapshot = JSON.stringify(
+            [...data.entries()].map(([key, value]) => [
+              key,
+              key === fieldName ? '' : value,
+            ]),
+          );
+          if (formValue(form) === submitted)
+            form.querySelector<HTMLInputElement>(
+              `input[name=${fieldName}]`,
+            )!.value = '';
+          savedForm(formId, acceptedSnapshot);
+        },
       );
-      draftDirty = false;
-      const fresh = node(n.id)!;
-      detail.close();
-      document.body.style.overflow = '';
-      openPlace(fresh);
+      refreshPlaceSummary(n.id);
+      status(
+        `要求已移除，当前安排已重新核对。${draftDirty ? ' 还有未保存的修改。' : ''}`,
+      );
     });
   }
   if (
@@ -774,7 +956,7 @@ detail.addEventListener('submit', (event) => {
     });
     return;
   }
-  if (recoveryRequired) {
+  if (recoveryRequired && selection?.type === 'place' && detailBasis) {
     status('当前无法保存，请先重新读取并核对草稿，再保存。');
     return;
   }

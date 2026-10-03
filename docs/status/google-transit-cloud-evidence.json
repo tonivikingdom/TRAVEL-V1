@@ -815,5 +815,78 @@
     "Schema drift",
     "Cross-day itinerary",
     "Calendar outside visible month"
-  ]
+  ],
+  "arriveByFinalTravelRecheck": {
+    "baselineHead": "246a50173ab53858217f9f4be6316d1a2b1d6ae8",
+    "mainVerified": "6871aa1f88964f8590ca61e3d368bb4da67072d3",
+    "status": "PARTIAL",
+    "requestedConditionsFromHarness": {
+      "date": "2026-10-05",
+      "time": "15:00",
+      "timezone": "Asia/Tokyo",
+      "timeMode": "ARRIVE_BY"
+    },
+    "newIsolatedAccountAndTrip": true,
+    "attemptsThisBatch": 1,
+    "run": {
+      "implementation": "REBUILT_COMPATIBLE_IMPLEMENTATION",
+      "recordedAt": "2026-10-03T06:00:24.228Z",
+      "runStartedAt": "2026-10-03T06:00:10.464Z",
+      "providerHttpCalls": 1,
+      "lastSidecarError": "UPSTREAM_TIMEOUT:response-verification",
+      "browserDiagnostics": {
+        "launchCalls": 1,
+        "browserDisconnected": true,
+        "contexts": [
+          {
+            "pageUrlType": "GOOGLE_MAPS_DIRECTIONS",
+            "directionsMainExists": true,
+            "leaveNowExists": false,
+            "leaveNowVisible": false,
+            "blockedPage": false,
+            "http403Seen": false,
+            "http429Seen": false,
+            "navigationStatus": 200,
+            "contextClosed": true,
+            "observationComplete": true
+          }
+        ]
+      },
+      "transport": "actual loopback HTTP on both hops",
+      "database": "dedicated PostgreSQL 17 with isolated test accounts and trips",
+      "summaries": [
+        {
+          "status": "FAIL",
+          "reason": "Travel HTTP 503 /trips/:id/routes/query PROVIDER_UNAVAILABLE UPSTREAM_TIMEOUT:response-verification"
+        }
+      ]
+    },
+    "postgresAfterQueryFailure": {
+      "accounts": 1,
+      "trips": 1,
+      "tripVersions": [3],
+      "nodes": 2,
+      "snapshots": 0,
+      "previews": 0,
+      "adoptedRoutes": 0,
+      "transportEdges": 0,
+      "adoptReceipts": 0,
+      "undoReceipts": 0
+    },
+    "acceptance": {
+      "queryEcho": "NOT_REACHED",
+      "allCandidateArrivalBounds": "NOT_REACHED",
+      "snapshotFromThisQuery": "NOT_REACHED",
+      "queryTripVersionUnchanged": true,
+      "preview": "NOT_REACHED",
+      "explicitAdopt": "NOT_REACHED",
+      "undo": "NOT_REACHED",
+      "noPostQueryGoogleCalls": true,
+      "liveCandidatesReturned": false
+    },
+    "interpretation": "This attempt reached response-verification; it did not reproduce time-mode timeout. No verified route response returned. Do not infer CAPTCHA, denial or a root cause.",
+    "productionCodeChanged": false,
+    "automaticRetry": false,
+    "stoppedAfterAttempt": true
+  }
 }

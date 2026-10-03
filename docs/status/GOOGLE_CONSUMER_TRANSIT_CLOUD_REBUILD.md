@@ -2,7 +2,39 @@
 
 模型建议：Sol／High；备选 Astra；复杂解析或安全边界问题再提高推理强度。实际客户端模型配置无法核验，未声称自动切换。
 
-本批为 **REBUILT_COMPATIBLE_IMPLEMENTATION / PARTIAL**。原电脑源码未取得；这里是新写的兼容服务，不是原样迁移、原源码恢复或继承历史 live PASS。已交付可运行源码和测试，Google 页面后续加载超时使 ARRIVE_BY 的完整后端链路仍未通过。
+本批为 **REBUILT_COMPATIBLE_IMPLEMENTATION / PARTIAL**。原电脑源码未取得；这里是新写的兼容服务，不是原样迁移、原源码恢复或继承历史 live PASS。ARRIVE_BY 最终 Travel 全链复验仍未通过：2026-10-03 一次新查询走到 `response-verification`，未取得可验证响应后超时。没有修改生产实现或追加 live 请求。
+
+## ARRIVE_BY 最终 Travel 复验（2026-10-03）
+
+模型建议：Sol／High，备选 Astra；复杂诊断再提高强度。实际客户端配置无法核验。本轮仅验收，未开始功能开发或故障修复。
+
+远端核对 `main@6871aa1f88964f8590ca61e3d368bb4da67072d3`、[Draft PR #41](https://github.com/tonivikingdom/TRAVEL-V1/pull/41) HEAD `246a50173ab53858217f9f4be6316d1a2b1d6ae8`；本地 HEAD 一致、工作区干净。当前网络为 enforced unrestricted；沿用个人开发范围、环境 proxy/CA 和回环连接。未修改 PR #40／P6A-2或同步其他未合并分支。
+
+恢复冻结依赖安装后，新建临时 PostgreSQL 17 数据库 `travel_arrive_google_live_test`，仅监听回环端口，应用原有 24 个迁移；使用新隔离测试账号和 Trip。账号／Trip 标 SYNTHETIC；候选 Provider 必须是 GOOGLE_CONSUMER_EXPERIMENTAL。本次没有返回 live 候选，没有把 Google 数据标为 SYNTHETIC。
+
+只执行一次 ARRIVE_BY 两跳实际 HTTP 调用。验收脚本指定 Hotel Mahoroba → The Lake View Toya Nonokaze Resort，`2026-10-05 15:00 Asia/Tokyo`。开始 `06:00:10.464Z`，结束 `06:00:24.228Z`；Travel HTTP 503／PROVIDER_UNAVAILABLE，sidecar `UPSTREAM_TIMEOUT:response-verification`。
+
+| 本次脱敏诊断         | 实际结果                                 |
+| -------------------- | ---------------------------------------- |
+| stage                | response-verification                    |
+| 页面 URL 类型        | GOOGLE_MAPS_DIRECTIONS；不保存完整 URL   |
+| Directions main      | 存在                                     |
+| Leave now            | 结束时不存在、不可见                     |
+| blockedPage          | false                                    |
+| Google HTTP 403／429 | 均未观察到；主导航 200                   |
+| 匿名 Context         | close 事件确认，正常释放                 |
+| 服务浏览器           | disconnected 事件确认，正常关闭          |
+| Provider HTTP        | 恰好 1 次；没有 retry 或后续 Google 查询 |
+
+控制流程已走过时间模式、日历和时间输入，但没有成功响应，不能声称请求回显、候选到达上限或完整时间语义已验收。本次没有复现 `time-mode` 超时，不构成该阶段的稳定复现证据；验证码、封禁、网络拒绝和具体根因均未确认。
+
+数据库事后只读核对：1 个新账号、1 个 Trip、版本仍 3、2 个原始节点；Snapshot／Preview／AdoptedRoute／TransportEdge、ROUTE_ADOPT／ROUTE_UNDO receipt 均为 0。Query 未改版本；Snapshot、Preview、明确 Adopt、Undo 保持 NOT_REACHED。未载入旧 ARRIVE_BY 成功结果替代本次查询。
+
+仅补必要验收脚本：全部候选到达上限、当前 fetchedAt／Provider、全部 Snapshot payload 与本次 HTTP 候选一致、Query／Preview 不改版本或计划、显式 Adopt +1、Undo +1 并恢复原计划事实及身份、后续无 Provider 调用、未知步行时刻保持 null。计划比较只排除版本和审计 updatedAt。只读观察器沿用原服务 launcher 参数，不改变查询操作、selector、deadline 或错误分类，只保存类型、布尔值和 HTTP 状态。新增六项 SYNTHETIC 回归检查 URL 脱敏。
+
+本轮本地 `pnpm check`／`pnpm format:check` PASS：全仓 66 files／802 tests，新服务 4 files／62 tests；lint／typecheck／build 均通过。冻结依赖安装此次已恢复并通过，未改变锁文件或依赖策略。CI 以新 HEAD 再验，最终状态见 PR／最终回复，不继承旧 HEAD 的检查结论。
+
+已停止真实请求，没有增大 timeout、改 selector、放宽 REQUEST_MISMATCH、登录或绕过验证。生产源码、适配器、Travel 核心、schema、前端及 CI 配置无改动。详细新证据见 [JSON](google-transit-cloud-evidence.json) 的 `arriveByFinalTravelRecheck`；最终新 HEAD／CI 见 PR及最终回复。临时数据库和进程已关闭，不建立长期运行配置。
 
 ## 分支和来源
 
@@ -35,7 +67,7 @@ API 与 sidecar 在同一云端网络命名空间回环连接。未添加公网�
 | 新服务单测和契约             | PASS                                   | 56 项新服务测试，包含合成 positional fixture、真实 loopback HTTP、鉴权、并发、取消、超时和 Context 回收；不是 Google live |
 | 浏览器在云端运行             | PASS                                   | 独立匿名 Chromium 实际打开 Google Maps，并通过可见 UI 选择日期、时刻及两种模式                                            |
 | Google 查询和解析            | DEPART_AT PASS；ARRIVE_BY PASS         | 铁路和混合路线各两种模式的四个新查询均通过未修改的原适配器                                                                |
-| Travel API／HTTP／PostgreSQL | DEPART_AT PASS；ARRIVE_BY NOT_VERIFIED | DEPART_AT 完整 Query/Snapshot/Preview/Adopt/Undo 通过；ARRIVE_BY 复验在 Google 初始时间控件等待阶段超时，未完成后端链路   |
+| Travel API／HTTP／PostgreSQL | DEPART_AT PASS；ARRIVE_BY NOT_VERIFIED | DEPART_AT 完整链通过；ARRIVE_BY 首轮 time-mode 超时，最新复验 response-verification 超时，未完成后端链路                  |
 
 ## 新真实查询证据
 

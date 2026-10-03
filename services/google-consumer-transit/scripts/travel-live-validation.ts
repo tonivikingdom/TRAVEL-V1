@@ -28,6 +28,8 @@ import type {
 import { GoogleConsumerExperimentalRouteProvider } from '@travel/providers';
 import { readConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
+import type { SearchResult } from '../src/contract.js';
+import { observeLiveBrowser } from './live-browser-observer.js';
 
 if (
   process.env.GOOGLE_TRANSIT_LIVE_ACK !== 'personal-development' ||
@@ -53,6 +55,8 @@ if (
   );
 const date = process.env.GOOGLE_TRANSIT_LIVE_DATE;
 if (!date) throw new Error('Explicit GOOGLE_TRANSIT_LIVE_DATE required');
+const runStartedAt = new Date().toISOString();
+const browserObservation = observeLiveBrowser();
 const managed = createPrismaClient(databaseUrl);
 const readiness = createPostgresReadiness(databaseUrl);
 const token = randomBytes(32).toString('hex');
@@ -67,6 +71,7 @@ const sidecar = buildServer(
 const sidecarAddress = await sidecar.listen({ host: '127.0.0.1', port: 0 });
 let providerHttpCalls = 0;
 let lastSidecarError: string | undefined;
+let lastSidecarResponse: SearchResult | undefined;
 const provider = new GoogleConsumerExperimentalRouteProvider({
   baseUrl: sidecarAddress,
   token,
@@ -74,12 +79,13 @@ const provider = new GoogleConsumerExperimentalRouteProvider({
   fetchImplementation: async (url, init) => {
     providerHttpCalls++;
     const response = await fetch(url, init);
-    const body = (await response.clone().json()) as {
+    const body = (await response.clone().json()) as SearchResult & {
       error?: { code: string; stage?: string };
     };
     lastSidecarError = body.error
       ? `${body.error.code}:${body.error.stage ?? 'unknown-stage'}`
       : undefined;
+    lastSidecarResponse = body.status === 'OK' ? body : undefined;
     return response;
   },
 });
@@ -136,6 +142,22 @@ async function post<T>(
   return data;
 }
 const summaries: unknown[] = [];
+// Ignore version and audit update timestamps. Plan facts and original
+// identities, including nodes/connections/saved routes, must be restored.
+function planState(trip: TripView): unknown {
+  return JSON.parse(
+    JSON.stringify(trip, (key, value) =>
+      key === 'version' || key === 'updatedAt' ? undefined : value,
+    ),
+  ) as unknown;
+}
+async function readTrip(tripId: string): Promise<TripView> {
+  const response = await fetch(new URL(`/trips/${tripId}`, apiAddress), {
+    headers: { authorization: `Bearer ${credential}` },
+  });
+  assert.equal(response.status, 200);
+  return (await response.json()) as TripView;
+}
 try {
   assert.equal((await fetch(new URL('/health/ready', apiAddress))).status, 200);
   const modes =
@@ -216,6 +238,62 @@ try {
     );
     assert(queried.candidates.length > 0);
     assert.equal(providerHttpCalls, callsBefore + 1);
+    const live = lastSidecarResponse;
+    assert(live, 'This query must return a fresh sidecar success');
+    assert.equal(live.queryVerified, true);
+    assert.equal(live.cacheHit, false);
+    assert.deepEqual(live.requestedQuery, {
+      origin: {
+        label: from!.place!.name,
+        latitude: from!.place!.latitude,
+        longitude: from!.place!.longitude,
+      },
+      destination: {
+        label: to!.place!.name,
+        latitude: to!.place!.latitude,
+        longitude: to!.place!.longitude,
+      },
+      date,
+      time: '15:00',
+      timezone: 'Asia/Tokyo',
+      timeMode,
+    });
+    assert(Date.parse(live.fetchedAt) >= Date.parse(runStartedAt));
+    const requestedInstant = Date.parse(`${date}T15:00:00+09:00`);
+    for (const c of live.candidates) {
+      assert.equal(c.arrivalTime.timezone, 'Asia/Tokyo');
+      if (timeMode === 'ARRIVE_BY')
+        assert(Date.parse(c.arrivalTime.utc) <= requestedInstant);
+      else assert(Date.parse(c.departureTime.utc) >= requestedInstant);
+      for (const l of c.legs.filter((l) => l.mode === 'WALK')) {
+        assert.equal(l.departureTime, null);
+        assert.equal(l.arrivalTime, null);
+      }
+    }
+    for (const c of queried.candidates) {
+      assert.equal(c.provider, 'GOOGLE_CONSUMER_EXPERIMENTAL');
+      assert.equal(c.observedAt, live.fetchedAt);
+      assert(live.candidates.some((raw) => raw.id === c.providerCandidateRef));
+      if (timeMode === 'ARRIVE_BY')
+        assert(Date.parse(c.overall.arrival.instant) <= requestedInstant);
+      const { candidateSnapshotId, snapshotExpiresAt, ...payload } = c;
+      const stored =
+        await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+          where: { id: candidateSnapshotId },
+        });
+      assert.equal(stored.provider, c.provider);
+      assert.equal(stored.observedAt.toISOString(), live.fetchedAt);
+      assert.equal(stored.expiresAt.toISOString(), snapshotExpiresAt);
+      assert.deepEqual(stored.candidatePayload, payload);
+      assert.deepEqual(stored.queryTimeCondition, queried.timeCondition);
+      for (const l of c.legs.filter((l) => l.mode === 'WALKING')) {
+        assert.equal(l.departure, null);
+        assert.equal(l.arrival, null);
+      }
+    }
+    const afterQuery = await readTrip(trip.id);
+    assert.equal(afterQuery.version, trip.version);
+    assert.deepEqual(planState(afterQuery), planState(trip));
     const candidate =
       queried.candidates.find(
         (c) =>
@@ -242,6 +320,9 @@ try {
     );
     assert.equal(preview.adoptable, true);
     assert.equal(providerHttpCalls, callsBefore + 1);
+    const afterPreview = await readTrip(trip.id);
+    assert.equal(afterPreview.version, trip.version);
+    assert.deepEqual(planState(afterPreview), planState(trip));
     const adopted = await post<AdoptRoutePreviewResponse>(
       `/trips/${trip.id}/previews/${preview.previewId}/adopt`,
       {
@@ -258,15 +339,27 @@ try {
       adoptedModes,
       candidate.legs.map((l) => l.mode),
     );
-    const temporalFacts = await managed.client.temporalValue.count({
+    for (const connection of adopted.trip.connections) {
+      assert.equal(
+        connection.transport?.provider,
+        'GOOGLE_CONSUMER_EXPERIMENTAL',
+      );
+    }
+    const temporalValues = await managed.client.temporalValue.findMany({
       where: { transportEdge: { tripId: trip.id } },
     });
+    const temporalFacts = temporalValues.length;
     const verifiedTimePointCount = candidate.legs.reduce(
       (sum, leg) =>
         sum + Number(leg.departure !== null) + Number(leg.arrival !== null),
       0,
     );
     assert.equal(temporalFacts, verifiedTimePointCount);
+    for (const fact of temporalValues) {
+      assert.equal(fact.layer, 'PLANNED');
+      assert.equal(fact.sourceKind, 'ADOPTED_TRANSPORT_FACT');
+      assert.equal(fact.observedAt?.toISOString(), live.fetchedAt);
+    }
     const undone = await post<UndoRouteAdoptionResponse>(
       `/trips/${trip.id}/operations/${adopted.operationReceipt.id}/undo`,
       {
@@ -279,6 +372,7 @@ try {
     assert.equal(undone.operationReceipt.operationType, 'ROUTE_UNDO');
     assert.equal(undone.trip.days[0]!.nodes.length, 2);
     assert.equal(undone.trip.connections[0]!.state, 'MISSING');
+    assert.deepEqual(planState(undone.trip), planState(trip));
     assert.equal(providerHttpCalls, callsBefore + 1);
     const preserved =
       await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
@@ -293,6 +387,19 @@ try {
       status: 'PASS',
       candidateCount: queried.candidates.length,
       providerHttpCalls: providerHttpCalls - callsBefore,
+      requestedQuery: live.requestedQuery,
+      fetchedAt: live.fetchedAt,
+      pageEvidence: live.evidence,
+      allSidecarArrivals: live.candidates.map((c) => c.arrivalTime.utc),
+      allTravelArrivals: queried.candidates.map(
+        (c) => c.overall.arrival.instant,
+      ),
+      allSnapshotsMatchThisLiveQuery: true,
+      queryAndPreviewPlanUnchanged: true,
+      queryPreviewVersions: [afterQuery.version, afterPreview.version],
+      undoRestoresOriginalPlan: true,
+      unknownWalkingTimesRemainNull: true,
+      liveDataProvider: 'GOOGLE_CONSUMER_EXPERIMENTAL',
       snapshotHashUnchanged: true,
       previewAdoptable: preview.adoptable,
       adoptedModes,
@@ -329,6 +436,7 @@ try {
 } finally {
   await api.close();
   await sidecar.close();
+  browserObservation.restore();
   await readiness.close();
   await managed.close();
   const directory = new URL(
@@ -337,11 +445,18 @@ try {
   );
   await mkdir(directory, { recursive: true });
   await writeFile(
-    new URL('travel-live-summary.json', directory),
+    new URL(
+      `travel-live-${runStartedAt.replace(/[:.]/g, '-')}.json`,
+      directory,
+    ),
     JSON.stringify(
       {
         implementation: 'REBUILT_COMPATIBLE_IMPLEMENTATION',
         recordedAt: new Date().toISOString(),
+        runStartedAt,
+        providerHttpCalls,
+        lastSidecarError: lastSidecarError ?? null,
+        browserDiagnostics: browserObservation.diagnostics,
         transport: 'actual loopback HTTP on both hops',
         database:
           'dedicated PostgreSQL 17 with isolated test accounts and trips',

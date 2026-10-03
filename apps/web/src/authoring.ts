@@ -367,14 +367,35 @@ export class TripAuthoringEditor {
         position.value = '';
       }
     }
+    const missingTarget =
+      this.context.mode === 'add' &&
+      !this.h.days().some((d) => d.key === this.context!.dayKey);
     this.h.detail.querySelector('#authoring-recovery')!.innerHTML =
-      '<p>已重新读取当前版本。草稿尚未提交，请核对目标日期、位置及当前安排。</p><button data-authoring-ack><span class="control-content">已核对，继续编辑</span></button>';
+      `<p>已重新读取当前版本。草稿尚未提交，请核对目标日期、位置及当前安排。</p>${missingTarget ? `<label>原日期卡已变化，请重新选择目标日期<select id="authoring-retarget"><option value="">请选择日期</option>${this.dayOptions('')}</select></label>` : ''}<button data-authoring-ack><span class="control-content">已核对，继续编辑</span></button>`;
   }
   acknowledge() {
+    const retarget = this.h.detail.querySelector<HTMLSelectElement>(
+      '#authoring-retarget',
+    );
+    if (retarget && this.context) {
+      const day = this.h
+        .days()
+        .find((d) => d.key === retarget.value && !d.occupied);
+      if (!day) {
+        this.h.message('请选择新的目标日期，再核对这份草稿。');
+        return;
+      }
+      this.context.dayKey = day.key;
+      const dateLabel = this.h.detail.querySelector('.authoring-date');
+      if (dateLabel) dateLabel.textContent = day.label;
+      this.baseline = '';
+      this.acceptedSnapshot = null;
+    }
     this.recoveryRequired = false;
     this.h.detail.querySelector('#authoring-recovery')?.remove();
     this.input();
   }
+
   private accept(
     fresh: TripView,
     pending: NonNullable<TripAuthoringEditor['pending']>,

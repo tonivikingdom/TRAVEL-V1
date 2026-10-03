@@ -246,10 +246,63 @@ try {
   await page.getByRole('button', { name: '添加自由行动', exact: true }).click();
   await expect(page.locator('#save-status')).toContainText('本次提交已保存');
   await page.locator('[data-close]').click();
+  // Another device moves the last contents off the draft's original day.
+  current = await service.getTrip(actor, trip.id);
+  const removedDay = current.days[1]!;
+  await page.locator('[data-action=add-arrangement]').click();
+  await page.getByRole('button', { name: '自由行动', exact: true }).click();
+  await page.locator('[name=title]').fill('SYNTHETIC 原日期移走后的草稿');
+  for (const node of removedDay.nodes) {
+    const res = await fetch(
+      `http://127.0.0.1:43151/trips/${trip.id}/authoring`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${credential}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          baseTripVersion: current.version,
+          idempotencyKey: randomUUID(),
+          command: {
+            type: 'MOVE_NODE',
+            nodeId: node.id,
+            targetDay: {
+              type: 'EXISTING',
+              dayOccurrenceId: current.days[0]!.dayOccurrenceId,
+            },
+            position: current.days[0]!.nodes.length,
+          },
+        }),
+      },
+    );
+    assert.equal(res.status, 200);
+    current = (await res.json()) as typeof current;
+  }
+  assert.equal(current.days.length, 1);
+  await page.getByRole('button', { name: '添加自由行动', exact: true }).click();
+  await page.locator('[data-authoring-recover]').click();
+  await expect(page.locator('#authoring-retarget')).toBeVisible();
+  await expect(page.locator('[name=title]')).toHaveValue(
+    'SYNTHETIC 原日期移走后的草稿',
+  );
+  await page
+    .locator('#authoring-retarget')
+    .selectOption(current.days[0]!.dayOccurrenceId);
+  await screen('mobile-removed-date-recovery');
+  await page.locator('[data-authoring-ack]').click();
+  await page.getByRole('button', { name: '添加自由行动', exact: true }).click();
+  await expect(page.locator('#save-status')).toContainText('本次提交已保存');
+  await page.locator('[data-close]').click();
+  current = await service.getTrip(actor, trip.id);
+  assert.equal(
+    current.days[0]!.nodes.at(-1)!.note,
+    'SYNTHETIC 原日期移走后的草稿',
+  );
   // Another Trip owns tomorrow: no occurrence, receipt, version or data is partially changed.
   const occupied = await service.createTrip(actor, {
     name: 'SYNTHETIC 日期占用',
-    planningAnchorDate: '2032-10-03',
+    planningAnchorDate: '2032-10-02',
     defaultPeopleCount: 1,
   });
   await service.executeAuthoring(actor, occupied.id, {
@@ -257,7 +310,7 @@ try {
     idempotencyKey: randomUUID(),
     command: {
       type: 'ADD_FREE_ACTION',
-      targetDay: { type: 'NEW', localDate: '2032-10-03', sequence: 0 },
+      targetDay: { type: 'NEW', localDate: '2032-10-02', sequence: 0 },
       position: 0,
       note: 'SYNTHETIC 另一旅行',
     },

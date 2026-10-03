@@ -242,3 +242,50 @@ test('place catalog outage recovery keeps notes and restores a reachable reliabl
   await expect(page.locator('#save-status')).toContainText('本次提交已保存');
   expect(trip.days[0]!.nodes.at(-1)!.note).toBe('SYNTHETIC 保留新备注');
 });
+
+test('a removed target date requires explicit reselection without losing the activity draft', async ({
+  page,
+}) => {
+  await enter(page);
+  await add(page);
+  await page.locator('[name=title]').fill('SYNTHETIC 原日期被移走后的草稿');
+  const surviving = trip.days[1]!;
+  trip = {
+    ...trip,
+    version: trip.version + 1,
+    days: [
+      {
+        ...surviving,
+        sequence: 0,
+        nodes: trip.days[0]!.nodes.map((n) => ({
+          ...n,
+          dayOccurrenceId: surviving.dayOccurrenceId,
+        })),
+      },
+    ],
+  };
+  failure = 'VERSION_CONFLICT';
+  await page.getByRole('button', { name: '添加自由行动', exact: true }).click();
+  await expect(page.locator('[data-authoring-recover]')).toBeVisible();
+  failure = undefined;
+  await page.locator('[data-authoring-recover]').click();
+  await expect(page.locator('#authoring-retarget')).toBeVisible();
+  await page.locator('[data-authoring-ack]').click();
+  expect(writes).toBe(1);
+  await expect(page.locator('#save-status')).toContainText('请选择');
+  await page
+    .locator('#authoring-retarget')
+    .selectOption(surviving.dayOccurrenceId);
+  await page.locator('[data-authoring-ack]').click();
+  await expect(page.locator('.authoring-date')).toContainText(
+    surviving.localDate,
+  );
+  await expect(page.locator('[name=title]')).toHaveValue(
+    'SYNTHETIC 原日期被移走后的草稿',
+  );
+  await page.getByRole('button', { name: '添加自由行动', exact: true }).click();
+  await expect(page.locator('#save-status')).toContainText('本次提交已保存');
+  expect(trip.days[0]!.nodes.at(-1)!.note).toBe(
+    'SYNTHETIC 原日期被移走后的草稿',
+  );
+});

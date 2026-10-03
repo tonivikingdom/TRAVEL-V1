@@ -1,4 +1,7 @@
 import type {
+  InTripView,
+  GroundTransitExecutionResponse,
+  FlightMovementView,
   AdoptRoutePreviewResponse,
   ConnectionView,
   ItineraryNodeView,
@@ -40,6 +43,7 @@ import {
 } from './model.js';
 import { navigation, placeMap, mapMode, type MapLocation } from './maps.js';
 import { transportClockPair } from './transport-display.js';
+import { inTripProjection, type InTripStep } from './in-trip.js';
 import {
   TripAuthoringEditor,
   editorDays,
@@ -56,6 +60,11 @@ const api = new TravelApi(() => sessionStorage.getItem(tokenKey));
 let trip: TripView | null = null;
 let schedule: ScheduleProjectionView | null = null;
 let dayId = '';
+let viewMode: 'itinerary' | 'today' = 'itinerary';
+let inTrip: InTripView | null = null;
+let ground: GroundTransitExecutionResponse | null = null;
+let inTripReadAt: string | null = null;
+let inTripReadUnavailable = false;
 let temporaryDays: TemporaryDay[] = [];
 let busy = false;
 let notice = '';
@@ -176,6 +185,8 @@ const authoring = new TripAuthoringEditor({
   load: loadTrip,
   accepted: async (fresh, command) => {
     trip = fresh;
+    inTrip = null;
+    ground = null;
     notice = '';
     acceptedWrite = '本次提交已保存到服务器';
     if (!command || command.targetDay.type === 'NEW') temporaryDays = [];
@@ -188,13 +199,23 @@ const authoring = new TripAuthoringEditor({
       `/trips/${fresh.id}/schedule/evaluate`,
       { basisVersion: fresh.version },
     );
+    if (schedule.tripId !== fresh.id || schedule.basisVersion !== fresh.version)
+      throw new WebError(
+        409,
+        'VERSION_CONFLICT',
+        '行程版本已变化，请重新载入。',
+      );
+    if (viewMode === 'today') await readInTrip(fresh, epoch);
     render();
   },
 });
 const icon = (name: string) =>
   `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${({ pin: 'M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12Zm0-9a3 3 0 1 0 0-6 3 3 0 0 0 0 6', arrow: 'm5 12 14 0m-5-5 5 5-5 5', close: 'm6 6 12 12M6 18 18 6', calendar: 'M5 5h14v15H5zM8 2v6m8-6v6M5 10h14', route: 'M6 5a2 2 0 1 0 0 .1M18 19a2 2 0 1 0 0 .1M8 5h6a4 4 0 0 1 0 8h-4a4 4 0 0 0 0 6h6', clock: 'M12 3a9 9 0 1 0 .1 0M12 7v5l3 2' } as Record<string, string>)[name] ?? 'M5 12h14'}"/></svg>`;
 function projection(id: string): ScheduleNodeProjectionView | undefined {
-  return schedule?.nodes.find((n) => n.nodeId === id);
+  return schedule?.tripId === trip?.id &&
+    schedule?.basisVersion === trip?.version
+    ? schedule?.nodes.find((n) => n.nodeId === id)
+    : undefined;
 }
 function node(id: string) {
   return trip ? orderedNodes(trip).find((n) => n.id === id) : undefined;
@@ -232,6 +253,272 @@ function requirements(n: ItineraryNodeView) {
 function banner() {
   return notice ? `<p class="message" role="status">${esc(notice)}</p>` : '';
 }
+function modeSwitch() {
+  return `<nav class="view-switch" aria-label="查看方式"><button data-view="today" aria-pressed="${viewMode === 'today'}">今天 / 下一步</button><button data-view="itinerary" aria-pressed="${viewMode === 'itinerary'}">全部日程</button></nav>`;
+}
+async function readInTrip(fresh: TripView, request: number) {
+  const results = await Promise.allSettled([
+    api.request<InTripView>(`/trips/${fresh.id}/in-trip`),
+    api.request<GroundTransitExecutionResponse>(
+      `/trips/${fresh.id}/execution/ground-transit`,
+    ),
+  ]);
+  if (request !== epoch) return;
+  for (const result of results)
+    if (
+      result.status === 'rejected' &&
+      result.reason instanceof WebError &&
+      [401, 403].includes(result.reason.status)
+    ) {
+      trip = null;
+      schedule = null;
+      inTrip = null;
+      ground = null;
+      concealUnavailableDetails();
+      throw result.reason;
+    }
+  for (const result of results) {
+    if (
+      result.status === 'fulfilled' &&
+      (result.value.tripId !== fresh.id ||
+        result.value.tripVersion !== fresh.version)
+    )
+      throw new WebError(
+        409,
+        'VERSION_CONFLICT',
+        '行程版本已变化，请重新载入。',
+      );
+  }
+  const [stored, transit] = results;
+  inTrip =
+    stored?.status === 'fulfilled' &&
+    stored.value.tripId === fresh.id &&
+    stored.value.tripVersion === fresh.version
+      ? stored.value
+      : null;
+  ground =
+    transit?.status === 'fulfilled' &&
+    transit.value.tripId === fresh.id &&
+    transit.value.tripVersion === fresh.version
+      ? transit.value
+      : null;
+  inTripReadUnavailable = !inTrip;
+  inTripReadAt = new Date().toISOString();
+}
+function stepTitle(step: InTripStep) {
+  return step.kind === 'node'
+    ? (step.node.place?.name ?? step.node.note ?? '自由行动')
+    : `${modeLabel[step.connection.transport!.mode]} · ${step.connection.transport!.serviceLabel ?? '已选交通'}`;
+}
+function stepDetailButton(step: InTripStep, label = '查看完整详情') {
+  return step.kind === 'node'
+    ? `<button data-node="${step.node.id}">${label}</button>`
+    : `<button data-route-from="${step.routeFrom}" data-route-to="${step.routeTo}">${label}</button>`;
+}
+function todayEdge(edge: TransportEdgeView, index: number | null) {
+  const matches =
+    ground?.legs.filter(
+      (l) =>
+        l.transportEdgeId === edge.id &&
+        l.adoptedRouteId === edge.adoptedRouteId &&
+        l.legIndex === index,
+    ) ?? [];
+  const health =
+    matches.length === 1 ? matches[0]!.safety.boarding.realtimeFreshness : null;
+  const flight = inTrip?.flights.find((f) => f.transportEdgeId === edge.id);
+  const unknown =
+    (['BUS', 'RAIL'].includes(edge.mode) && health !== 'FRESH') ||
+    (edge.mode === 'FLIGHT' && (!flight || flight.providerUnavailable));
+  return unknown
+    ? {
+        ...edge,
+        timeValues: edge.timeValues.filter((v) => v.layer !== 'ESTIMATED'),
+      }
+    : edge;
+}
+function originalChanged(
+  leg: RouteCandidateLegView,
+  edge: TransportEdgeView | null,
+) {
+  return (
+    !edge ||
+    Date.parse(transportTime(edge.timeValues, 'DEPARTURE')?.instant ?? '') !==
+      Date.parse(leg.departure?.instant ?? '') ||
+    Date.parse(transportTime(edge.timeValues, 'ARRIVAL')?.instant ?? '') !==
+      Date.parse(leg.arrival?.instant ?? '')
+  );
+}
+function todayTransport(step: Extract<InTripStep, { kind: 'transport' }>) {
+  const edge =
+    trip!.connections.find(
+      (c) => c.transport?.id === step.connection.transport?.id,
+    )?.transport ?? step.connection.transport!;
+  const saved = trip!.savedRoutes?.find(
+    (r) => r.adoptedRouteId === edge.adoptedRouteId,
+  );
+  const leg =
+    saved && step.legIndex !== null ? saved.legs[step.legIndex] : null;
+  const matches =
+    ground?.legs.filter(
+      (l) =>
+        l.transportEdgeId === edge.id &&
+        l.adoptedRouteId === edge.adoptedRouteId &&
+        l.legIndex === step.legIndex,
+    ) ?? [];
+  const freshness =
+    matches.length === 1 ? matches[0]!.safety.boarding.realtimeFreshness : null;
+  const flight = inTrip?.flights.find((f) => f.transportEdgeId === edge.id);
+  const stale =
+    (edge.mode === 'FLIGHT' && (!flight || flight.providerUnavailable)) ||
+    freshness === 'STALE' ||
+    freshness === 'UNAVAILABLE' ||
+    (!ground && ['BUS', 'RAIL'].includes(edge.mode));
+  const current = todayEdge(edge, step.legIndex);
+  const status =
+    !ground && ['BUS', 'RAIL'].includes(edge.mode)
+      ? '实时状态暂不可用'
+      : stale
+        ? freshness === 'STALE'
+          ? '更新已过期；实时状态未知'
+          : '实时状态暂不可用'
+        : edge.timeValues.some((v) => v.sourceKind === 'PROVIDER_OBSERVATION')
+          ? '已保存交通更新；不保证实时'
+          : '暂无实时更新';
+  const observation = edge.timeValues
+    .filter((v) => v.sourceKind === 'PROVIDER_OBSERVATION')
+    .map((v) => v.observedAt)
+    .filter((v): v is string => !!v)
+    .sort()
+    .at(-1);
+  const update = `<p class="realtime-status">${status}${observation ? `<small>信息更新于 ${esc(observation.replace('T', ' ').replace('Z', ' UTC'))}</small>` : ''}</p>`;
+  const target = node(step.connection.toNodeId)?.place;
+  const endpointNavigation =
+    target && ['WALKING', 'DRIVING', 'TAXI'].includes(edge.mode)
+      ? navigation(target, undefined, mapMode(edge.mode))
+      : null;
+  let body = leg
+    ? `<ol class="legs next-leg">${legView(leg, current, true, originalChanged(leg, current))}</ol>`
+    : `<h3>${esc(stepTitle(step))}</h3>${transportClock(current)}${endpointNavigation ? `<p>终点：${esc(target!.name)}</p><div class="segment-actions"><a href="${esc(endpointNavigation)}" target="_blank" rel="noopener noreferrer">${edge.mode === 'WALKING' ? '步行' : '驾车'}到分段终点</a></div>` : '<p class="muted">上/下车地点未保存，暂无可靠上车点导航。</p>'}`;
+  if (stale && edge.timeValues.some((v) => v.layer === 'ESTIMATED'))
+    body +=
+      '<p class="muted">此前预计已失去实时可靠性；当前显示计划或已保存车辆实测。</p>';
+  const transfer =
+    saved && saved.legs.length > 1
+      ? `<details class="transfer-details"><summary>查看完整换乘 · ${saved.legs.length} 段</summary><ol class="legs">${saved.legs
+          .map((l, i) => {
+            const proven = savedLegTransport(saved, i, trip!.connections);
+            const current = proven ? todayEdge(proven, i) : null;
+            return legView(l, current, true, originalChanged(l, current));
+          })
+          .join('')}</ol></details>`
+      : '';
+  return update + body + transfer + stepDetailButton(step, '查看整段路线');
+}
+function flightMovement(
+  m: FlightMovementView,
+  protectedActual: TemporalValueView | null = null,
+  unavailable = false,
+) {
+  const point = (instant: string | null) =>
+    instant && m.timeZone ? { instant, timeZone: m.timeZone } : null;
+  const current =
+    protectedActual?.instant ??
+    m.runwayUtc ??
+    (unavailable ? null : (m.revisedUtc ?? m.predictedUtc)) ??
+    m.scheduledUtc;
+  const label =
+    protectedActual || m.runwayUtc
+      ? '车辆实测 · 跑道时间'
+      : !unavailable && m.revisedUtc
+        ? '修订 / 预计'
+        : !unavailable && m.predictedUtc
+          ? '预测 · 非实际'
+          : '计划';
+  return `<p class="flight-clock"><span>${label}</span><strong>${esc(formatTime(point(current)))}</strong>${current !== m.scheduledUtc ? `<small>原计划 ${esc(formatTime(point(m.scheduledUtc)))}</small>` : ''}</p>${protectedActual && m.runwayUtc && Date.parse(protectedActual.instant) !== Date.parse(m.runwayUtc) ? '<p class="warning">供应商跑道时间与已保护车辆事实不一致，请核对。</p>' : ''}${unavailable && (m.revisedUtc || m.predictedUtc) ? '<small>此前预计暂无实时核验，当前保留计划或车辆实测。</small>' : ''}<p>${esc(m.airportName ?? m.airportIata ?? '机场待定')}<br>航站楼 ${esc(m.terminal ?? '待定')} · 登机口 ${esc(m.gate ?? '待定')}</p>`;
+}
+function todayFlights(edgeId: string | null) {
+  const flights =
+    inTrip && inTrip.tripVersion === trip?.version
+      ? inTrip.flights.filter((f) => edgeId === f.transportEdgeId)
+      : [];
+  const edge = trip?.connections.find(
+    (c) => c.transport?.id === edgeId,
+  )?.transport;
+  const actual = (kind: 'DEPARTURE' | 'ARRIVAL') =>
+    edge?.timeValues.find(
+      (v) =>
+        v.pointKind === kind &&
+        v.layer === 'ACTUAL' &&
+        v.sourceKind === 'PROVIDER_OBSERVATION',
+    ) ?? null;
+  const status: Record<string, string> = {
+    SCHEDULED: '计划',
+    BOARDING: '登机中',
+    DEPARTED: '已起飞',
+    EN_ROUTE: '飞行中',
+    LANDED: '已落地',
+    ARRIVED: '已抵达',
+    DELAYED: '供应商报告延误',
+    CANCELLED: '已取消',
+    DIVERTED: '已备降',
+    UNKNOWN: '未知',
+  };
+  return flights
+    .map(
+      (f) =>
+        `<section class="flight-info"><h3>航班 ${esc(f.latestSnapshot.displayFlightNumber)}</h3><p class="muted">${f.providerUnavailable ? '实时状态暂不可用' : '已保存航班信息；暂无实时核验'}<br>信息更新于 ${esc(f.latestSnapshot.fetchedAt.replace('T', ' ').replace('Z', ' UTC'))}</p><p>已保存航班状态：${esc(status[f.latestSnapshot.status] ?? '未知')}（车辆状态）</p><div class="flight-movements"><div><h4>起飞</h4>${flightMovement(f.latestSnapshot.departure, actual('DEPARTURE'), f.providerUnavailable)}</div><div><h4>抵达</h4>${flightMovement(f.latestSnapshot.arrival, actual('ARRIVAL'), f.providerUnavailable)}</div></div><p>行李转盘 ${esc(f.latestSnapshot.arrival.baggageBelt ?? '待定')}</p><small>车辆实测不表示你本人已经登机、出发或到达。</small><details><summary>更多航班资料</summary><p>机型 ${esc(f.latestSnapshot.aircraft?.model ?? '待定')}</p><p>航空公司 ${esc(f.latestSnapshot.airline.name ?? '待定')}</p></details></section>`,
+    )
+    .join('');
+}
+function renderToday() {
+  if (!trip) return;
+  let deviceZone: string | null = null;
+  try {
+    deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    /* unknown */
+  }
+  const displayTrip: TripView = {
+    ...trip,
+    connections: trip.connections.map((c) => {
+      const edge = c.transport;
+      if (!edge) return c;
+      const route = trip!.savedRoutes?.find(
+        (r) => r.adoptedRouteId === edge.adoptedRouteId,
+      );
+      const index =
+        route?.legs.findIndex(
+          (_, i) =>
+            savedLegTransport(route, i, trip!.connections)?.id === edge.id,
+        ) ?? -1;
+      return { ...c, transport: todayEdge(edge, index >= 0 ? index : null) };
+    }),
+  };
+  const p = inTripProjection(
+    displayTrip,
+    schedule,
+    inTrip,
+    new Date(),
+    deviceZone,
+  );
+  const step = p.step;
+  const title = p.context
+    ? `${p.context.localDate} · ${p.context.clock}`
+    : '当前日期未知';
+  const body = step
+    ? step.kind === 'node'
+      ? `<h2>${esc(stepTitle(step))}</h2>${step.node.place ? `<p class="address">${esc(step.node.place.address ?? '地址待定')}</p>` : '<p class="muted">自由行动 · 地点待定</p>'}${timeGrid(step.node)}${requirements(step.node)}${projection(step.node.id)?.status === 'VIOLATED' || projection(step.node.id)?.status === 'CONFLICT' ? '<p class="warning">当前安排与重要时间要求有冲突，请查看详情。</p>' : ''}<p class="action-time">${step.end ? `${temporalLabel(step.end)} ${esc(formatTime(step.end, p.day?.localDate))} 出发` : step.start ? `${temporalLabel(step.start)} ${esc(formatTime(step.start, p.day?.localDate))} 到达` : '时间待定'}<small>暂时无法确定建议出发时间</small></p>${step.node.place ? mapLinks(step.node.place) : ''}${step.node.note ? `<p class="step-note">${esc(step.node.note)}</p>` : ''}${stepDetailButton(step)}`
+      : todayTransport(step) +
+        todayFlights(step.connection.transport?.id ?? null)
+    : `<div class="empty">${!p.context ? '缺少可靠时间上下文，请查看全部日程。' : p.ambiguous ? '今天有重复日期卡，当前进度未知；请在全部日程中选择日期卡。' : !p.day ? '今天没有这趟旅行的安排。' : '今天还没有安排。'}</div>`;
+  const nextTransport = p.following.find((s) => s.kind === 'transport');
+  const flightEdge =
+    nextTransport?.kind === 'transport' &&
+    nextTransport.connection.transport?.mode === 'FLIGHT'
+      ? nextTransport.connection.transport.id
+      : null;
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
+}
 function render() {
   if (!sessionStorage.getItem(tokenKey)) {
     root.innerHTML = `<main class="login"><div class="brand">${icon('route')} TRAVEL</div><h1>把旅行安排好</h1><p>使用受邀邮箱登录，查看你的旅行。</p>${banner()}<form id="login"><label>邮箱<input name="email" type="email" autocomplete="email" required></label><button class="primary">发送登录链接</button></form><p class="muted">登录链接将发送到你的邮箱。不提供公开注册。</p></main>`;
@@ -241,12 +528,16 @@ function render() {
     root.innerHTML = `<header><div class="brand">${icon('route')} TRAVEL</div><div class="header-actions"><button data-action="reload">重新载入</button><button data-action="logout">退出</button></div></header><main class="trip-list"><div class="page-heading"><h1>你的旅行</h1><button data-action="create-trip" class="primary"><span class="control-content">${icon('calendar')}新建旅行</span></button></div>${banner()}<div id="trips">正在读取旅行…</div></main>`;
     return;
   }
+  if (viewMode === 'today') {
+    renderToday();
+    return;
+  }
   const days = editorDays(trip, temporaryDays);
   const day = days.find((d) => d.key === dayId) ?? days[0];
   dayId = day?.key ?? '';
   const shownNodes =
     day?.nodes.filter((n) => !isFoldedTransfer(trip!, n)) ?? [];
-  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header><main class="workspace"><aside class="date-sidebar"><p class="eyebrow">这次旅行</p><h1>${esc(trip.name)}</h1><p class="muted">${trip.defaultPeopleCount} 人 · ${esc(trip.effectiveStartDate ?? trip.planningAnchorDate)}</p><nav aria-label="旅行日期">${days.map((d, i) => `<button data-day="${d.key}" class="${d.key === dayId ? 'selected' : ''}"><span class="control-content">${icon('calendar')}<span>第 ${i + 1} 天<small>${esc(d.localDate)}${d.temporary ? ' · 待添加' : ''}</small></span></span></button>`).join('')}</nav><div class="date-extension"><button data-action="previous-day"><span class="control-content">${icon('calendar')}添加前一天</span></button><button data-action="next-day"><span class="control-content">${icon('calendar')}添加下一天</span></button></div></aside><section class="itinerary"><div class="page-heading"><div><p class="eyebrow">按计划查看</p><h2>${esc(day?.localDate ?? '日程')}</h2><p class="mobile-trip">${esc(trip.name)}</p></div><span class="badge"><span class="control-content">${shownNodes.length} 个安排</span></span></div>${day?.temporary ? '<p class="temporary-day-note">这是临时规划日，添加有效安排后才占用日期；离开或刷新不会保留空白日。</p>' : ''}<div class="authoring-toolbar"><button class="primary" data-action="add-arrangement" ${day?.occupied ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>${banner()}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo">撤销刚才的路线修改</button></div>' : ''}<div class="timeline">${
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="workspace"><aside class="date-sidebar"><p class="eyebrow">这次旅行</p><h1>${esc(trip.name)}</h1><p class="muted">${trip.defaultPeopleCount} 人 · ${esc(trip.effectiveStartDate ?? trip.planningAnchorDate)}</p><nav aria-label="旅行日期">${days.map((d, i) => `<button data-day="${d.key}" class="${d.key === dayId ? 'selected' : ''}"><span class="control-content">${icon('calendar')}<span>第 ${i + 1} 天<small>${esc(d.localDate)}${d.temporary ? ' · 待添加' : ''}</small></span></span></button>`).join('')}</nav><div class="date-extension"><button data-action="previous-day"><span class="control-content">${icon('calendar')}添加前一天</span></button><button data-action="next-day"><span class="control-content">${icon('calendar')}添加下一天</span></button></div></aside><section class="itinerary"><div class="page-heading"><div><p class="eyebrow">按计划查看</p><h2>${esc(day?.localDate ?? '日程')}</h2><p class="mobile-trip">${esc(trip.name)}</p></div><span class="badge"><span class="control-content">${shownNodes.length} 个安排</span></span></div>${day?.temporary ? '<p class="temporary-day-note">这是临时规划日，添加有效安排后才占用日期；离开或刷新不会保留空白日。</p>' : ''}<div class="authoring-toolbar"><button class="primary" data-action="add-arrangement" ${day?.occupied ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>${banner()}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo">撤销刚才的路线修改</button></div>' : ''}<div class="timeline">${
     shownNodes.length
       ? shownNodes
           .map((n) => {
@@ -707,10 +998,17 @@ async function loadTrip(id: string) {
     `/trips/${id}/schedule/evaluate`,
     { basisVersion: fresh.version },
   );
+  if (evaluated.tripId !== fresh.id || evaluated.basisVersion !== fresh.version)
+    throw new WebError(409, 'VERSION_CONFLICT', '行程版本已变化，请重新载入。');
   if (request !== epoch) return;
   if (!authoring.active) temporaryDays = [];
   trip = fresh;
   schedule = evaluated;
+  inTrip = null;
+  ground = null;
+  if (viewMode === 'today') await readInTrip(fresh, request);
+  if (request !== epoch) return;
+  notice = '';
   render();
 }
 async function listTrips() {
@@ -719,6 +1017,9 @@ async function listTrips() {
   trip = null;
   schedule = null;
   receipt = null;
+  inTrip = null;
+  ground = null;
+  viewMode = 'itinerary';
   notice = '';
   render();
   try {
@@ -764,13 +1065,22 @@ async function command(
 root.addEventListener('click', (event) => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('button');
   if (!target) return;
+  if (target.dataset.view && trip) {
+    if (detail.open && !drawerClose()) return;
+    viewMode = target.dataset.view === 'today' ? 'today' : 'itinerary';
+    if (viewMode === 'today') void act(() => loadTrip(trip!.id));
+    else render();
+    return;
+  }
   if (target.dataset.action === 'create-trip') {
     if (detail.open && !drawerClose()) return;
     authoring.openCreate();
     return;
   }
   if (target.dataset.action === 'add-arrangement' && trip) {
-    const day = editorDays(trip, temporaryDays).find((d) => d.key === dayId);
+    const day = editorDays(trip, temporaryDays).find(
+      (d) => d.key === (target.dataset.authoringDay ?? dayId),
+    );
     if (day) {
       if (detail.open && !drawerClose()) return;
       authoring.openAdd(day);
@@ -806,6 +1116,7 @@ root.addEventListener('click', (event) => {
   if (target.dataset.trip) void act(() => loadTrip(target.dataset.trip!));
   if (target.dataset.day) {
     if (detail.open && !drawerClose()) return;
+    viewMode = 'itinerary';
     dayId = target.dataset.day;
     epoch++;
     render();
@@ -1268,4 +1579,7 @@ async function start() {
     }
   }
 }
+setInterval(() => {
+  if (viewMode === 'today' && trip && !busy && !detail.open) render();
+}, 30000);
 void start();

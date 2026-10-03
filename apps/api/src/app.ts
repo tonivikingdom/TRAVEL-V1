@@ -1,4 +1,5 @@
 import {
+  InTripReadService,
   AssistanceCapabilityService,
   ApplicationError,
   AuthService,
@@ -46,6 +47,7 @@ import {
 } from './credential-transport.js';
 
 export interface ApiDependencies {
+  readonly inTripReadService?: InTripReadService;
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
   readonly assistanceCapabilityService?: AssistanceCapabilityService;
@@ -193,6 +195,28 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request.params.tripId,
         request.params.flightBindingId,
         parseAssistanceMutation(request.body),
+      );
+    },
+  );
+
+  // P6B: stored evidence only; no execution trigger or Provider refresh.
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/in-trip',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.inTripReadService)
+        throw new ApplicationError(
+          'SERVICE_UNAVAILABLE',
+          '旅中信息暂时不可用。',
+          503,
+        );
+      return dependencies.inTripReadService.read(
+        authenticated.actor,
+        request.params.tripId,
       );
     },
   );

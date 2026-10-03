@@ -218,6 +218,10 @@ export {
   type StorageReconciliationSummary,
 } from './stored-object-reconciliation-service.js';
 export type { StoredObjectCleanupClaim } from './ports.js';
+export {
+  InTripReadService,
+  type InTripReadRepository,
+} from './in-trip-read-service.js';
 
 export type {
   RepositoryAuthoringCommand,

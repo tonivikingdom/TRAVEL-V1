@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   AuthService,
+  InTripReadService,
   digestOpaqueToken,
   ExecutionRiskService,
   ExecutionLocationService,
@@ -42,6 +43,7 @@ import {
   createPrismaClient,
   hashPreservedRoutePrefix,
   PrismaAuthRepository,
+  PrismaInTripReadRepository,
   PrismaExecutionRiskRepository,
   PrismaExecutionLocationRepository,
   PrismaGroundTransitRepository,
@@ -153,6 +155,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       () => currentNow,
     );
     return buildApi({
+      inTripReadService: new InTripReadService(
+        new PrismaInTripReadRepository(managed.client),
+      ),
       externalExecutionOriginService: externalOrigins,
       readinessProbe: {
         async check() {
@@ -292,6 +297,26 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     const count = await managed.client.tripAuthoringReceipt.count({
       where: { tripId: trip.id },
     });
+    const readSaved = async () => {
+      const read = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/in-trip`,
+        headers: bearer(userA),
+      });
+      expect(read.statusCode).toBe(200);
+      expect(read.json()).toMatchObject({
+        tripVersion: trip.version,
+        execution: { state: 'NOT_STARTED' },
+      });
+      const reopened = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}`,
+        headers: bearer(userA),
+      });
+      expect(reopened.json().savedRoutes).toEqual(trip.savedRoutes);
+      expect(await externalDurableState(trip.id)).toEqual(before);
+    };
+    await readSaved();
     for (const command of [
       {
         type: 'MOVE_NODE',
@@ -322,6 +347,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       expect(r.statusCode, r.body).toBe(409);
       expect(r.json().error.code).toBe('CONSTRAINT_CONFLICT');
       expect(await externalDurableState(trip.id)).toEqual(before);
+      await readSaved();
       expect(
         await managed.client.tripAuthoringReceipt.count({
           where: { tripId: trip.id },

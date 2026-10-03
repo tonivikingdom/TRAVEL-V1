@@ -160,8 +160,12 @@ async function openMaterials() {
     if (backup.status === 'fulfilled') latestBackup = backup.value.backup;
     else {
       latestBackup =
-        localBackups(owner).find((b) => b.tripId === basis.id) ?? null;
-      backupNotice = '未能读取服务器备份；本机备份仍可查看。';
+        viewingBackup ??
+        localBackups(owner).find((b) => b.tripId === basis.id) ??
+        null;
+      backupNotice = latestBackup
+        ? '未能读取服务器备份；已有静态备份仍可查看。'
+        : '未能读取服务器备份；暂无可用备份。';
     }
     if (evidence.status === 'fulfilled') {
       if (
@@ -178,14 +182,20 @@ async function openMaterials() {
     render();
   } catch (error) {
     if (!active()) return;
-    materialsOpen = false;
+    // An explicitly opened artifact may have no persistent device copy.
+    const keepStatic =
+      !!viewingBackup &&
+      error instanceof WebError &&
+      (error.status >= 500 || (error.status === 0 && error.code === 'NETWORK'));
+    materialsOpen = keepStatic;
     materialsVerifying = false;
-    viewingBackup = null;
+    if (!keepStatic) viewingBackup = null;
     trip = null;
     schedule = null;
     inTrip = null;
     ground = null;
     notice = errorText(error);
+    backupNotice = keepStatic ? notice : '';
     if (error instanceof WebError && error.status === 401) {
       sessionStorage.removeItem(tokenKey);
       bindBackupOwner(null);

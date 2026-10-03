@@ -802,7 +802,7 @@ for (const mode of ['503', 'NETWORK'] as const)
     unavailable = true;
     coreNetwork = mode === 'NETWORK';
     await page.locator('[data-action=live-essentials]').click();
-    await expect(page.locator('.message')).toContainText(
+    await expect(page.locator('.essentials [role=status]')).toContainText(
       mode === '503' ? '核心服务暂时不可用' : '连接中断',
     );
     await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(
@@ -810,12 +810,17 @@ for (const mode of ['503', 'NETWORK'] as const)
     );
     expect(calls.slice(before)).toEqual([`GET /trips/${tripId}`]);
     expect(JSON.stringify(backup)).toBe(immutable);
-    await page.locator('[data-local-backup]').click();
     await expect(page.locator('.backup-label')).toHaveText('正在查看备份');
     await expect(page.locator('.backup-warning')).toContainText(
       '无法核验在线版本',
     );
     await expect(page.locator('.essentials')).toContainText('SY 123 SYNTHETIC');
+    await page.locator('[data-action=close-materials]').click();
+    await expect(page.locator('.message')).toContainText(
+      mode === '503' ? '核心服务暂时不可用' : '连接中断',
+    );
+    await page.locator('[data-local-backup]').click();
+    await expect(page.locator('.backup-label')).toBeVisible();
   });
 
 test('backup to live version change requires reload without mixing N and N+1', async ({
@@ -984,4 +989,53 @@ for (const destination of ['other-trip', 'logout', 'other-owner'] as const)
       ).toEqual([]);
     }
     await expect(page.locator('.backup-label')).toHaveCount(0);
+  });
+
+for (const endpoint of ['core', 'backup'] as const)
+  test(`backup to live ${endpoint} failure keeps an explicitly opened server-only artifact without persisting it`, async ({
+    page,
+  }) => {
+    await generate(page);
+    await page.locator('[data-action=close-materials]').click();
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage))
+        if (key.startsWith('travel.static-backup.v1:'))
+          localStorage.removeItem(key);
+    });
+    // Read and explicitly open the existing server artifact, without a device copy.
+    await page.locator('[data-action=essentials]').click();
+    await page.locator('[data-action=view-backup]').click();
+    await expect(page.locator('.backup-label')).toBeVisible();
+    const immutable = JSON.stringify(backup);
+    unavailable = endpoint === 'core';
+    backupUnavailable = endpoint === 'backup';
+    const before = calls.length;
+    await page.locator('[data-action=live-essentials]').click();
+    await expect(page.locator('.essentials [role=status]')).toContainText(
+      endpoint === 'core' ? '核心服务暂时不可用' : '未能读取服务器备份',
+    );
+    if (endpoint === 'backup') {
+      await expect(
+        page.getByText('在线行程资料', { exact: true }),
+      ).toBeVisible();
+      await page.locator('[data-action=view-backup]').click();
+    }
+    await expect(page.locator('.backup-label')).toHaveText('正在查看备份');
+    await expect(page.locator('[data-action=download-backup]')).toBeVisible();
+    await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(
+      0,
+    );
+    if (endpoint === 'core')
+      await expect(page.locator('.backup-warning')).toContainText(
+        '无法核验在线版本',
+      );
+    expect(calls.slice(before).filter((c) => c.startsWith('POST'))).toEqual([]);
+    expect(JSON.stringify(backup)).toBe(immutable);
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).filter((k) =>
+          k.startsWith('travel.static-backup.v1:'),
+        ),
+      ),
+    ).toEqual([]);
   });

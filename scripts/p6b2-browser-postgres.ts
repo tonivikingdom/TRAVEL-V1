@@ -197,9 +197,10 @@ try {
   // Same authority check from an explicitly opened backup, with real HTTP 503.
   outage = 'core';
   await page.locator('[data-action=live-essentials]').click();
-  await expect(page.locator('.message')).toContainText('核心服务暂时不可用');
+  await expect(page.locator('.essentials [role=status]')).toContainText(
+    '核心服务暂时不可用',
+  );
   await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(0);
-  await page.locator('[data-local-backup]').click();
   await expect(page.locator('.backup-label')).toHaveText('正在查看备份');
   await expect(page.locator('.essentials')).toContainText(
     snapshot.displayFlightNumber,
@@ -307,8 +308,10 @@ try {
   );
   await shutdownContext.close();
   await page.locator('[data-action=live-essentials]').click();
-  await expect(page.locator('.essentials')).toHaveCount(0);
-  await page.locator('[data-local-backup]').click();
+  await expect(page.locator('.essentials [role=status]')).toContainText(
+    /连接中断|核心服务暂时不可用/u,
+  );
+  await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(0);
   await expect(page.locator('.backup-label')).toBeVisible();
   await page.reload();
   await page.locator('[data-local-backup]').click();

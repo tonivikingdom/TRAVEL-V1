@@ -435,3 +435,18 @@ export interface ScheduleProjectionView {
   readonly violations: readonly ScheduleConstraintEvaluationView[];
   readonly conflicts: readonly ScheduleConflictView[];
 }
+
+/** Narrow authoring operations; all positions refer to the real occurrence timeline. */
+export type TripAuthoringCommandInput =
+  | Extract<TripCommandInput, { type: 'ADD_PLACE_VISIT' | 'ADD_FREE_ACTION' }>
+  | {
+      readonly type: 'MOVE_NODE';
+      readonly nodeId: string;
+      readonly targetDay: DayOccurrenceTargetInput;
+      readonly position: number;
+    };
+export interface TripAuthoringRequest {
+  readonly baseTripVersion: number;
+  readonly idempotencyKey: string;
+  readonly command: TripAuthoringCommandInput;
+}

@@ -188,3 +188,8 @@ export type {
   ExternalOriginRouteQueryResponse,
   ExternalRouteOriginSnapshot,
 } from './routes.js';
+
+export type {
+  TripAuthoringCommandInput,
+  TripAuthoringRequest,
+} from './trips.js';

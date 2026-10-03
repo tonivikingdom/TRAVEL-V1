@@ -17,6 +17,7 @@ import type {
   TransportEdgeView,
   TransportHistoryView,
   TransportMode,
+  TripAuthoringRequest,
   TripCommandInput,
   TripView,
   UserResolvedTemporalValueInput,
@@ -40,6 +41,7 @@ import {
   validateIanaTimeZoneInput,
 } from './time-input.js';
 import type {
+  AuthoringMutationResult,
   AdoptedRouteRecord,
   ItineraryNodeRecord,
   PlaceRecord,
@@ -66,9 +68,38 @@ export class TripService {
       readonly name: string;
       readonly planningAnchorDate: string;
       readonly defaultPeopleCount: number;
+      readonly idempotencyKey?: string;
     },
   ): Promise<TripView> {
     authorizeSelf(actor, 'WRITE_PRIVATE_RESOURCE');
+    const data = {
+      ownerUserId: actor.userId,
+      name: boundedText(input.name, 'name', 1, 200),
+      planningAnchorDate: parseLocalDate(input.planningAnchorDate),
+      defaultPeopleCount: positiveInteger(
+        input.defaultPeopleCount,
+        'defaultPeopleCount',
+      ),
+    };
+    if (input.idempotencyKey !== undefined) {
+      if (!this.repository.createAuthoringTrip)
+        throw new ApplicationError(
+          'UNSUPPORTED_SCENARIO',
+          '当前无法安全创建旅行。',
+          422,
+        );
+      return authoringResultToView(
+        await this.repository.createAuthoringTrip({
+          ...data,
+          idempotencyKey: boundedText(
+            input.idempotencyKey,
+            'idempotencyKey',
+            1,
+            200,
+          ),
+        }),
+      );
+    }
     const trip = await this.repository.create({
       ownerUserId: actor.userId,
       name: boundedText(input.name, 'name', 1, 200),
@@ -164,6 +195,60 @@ export class TripService {
         tripId,
         baseTripVersion: positiveInteger(baseTripVersion, 'baseTripVersion'),
         command: validateCommand(command),
+      }),
+    );
+  }
+
+  async executeAuthoring(
+    actor: Actor,
+    tripId: string,
+    input: TripAuthoringRequest,
+  ): Promise<TripView> {
+    requireUuid(tripId, 'tripId');
+    authorizeSelf(actor, 'WRITE_PRIVATE_RESOURCE');
+    if (!this.repository.executeAuthoringCommand)
+      throw new ApplicationError(
+        'UNSUPPORTED_SCENARIO',
+        '当前无法安全编辑行程。',
+        422,
+      );
+    const command = input.command;
+    let validated;
+    if (command.type === 'MOVE_NODE') {
+      requireUuid(command.nodeId, 'nodeId');
+      validated = {
+        type: command.type,
+        nodeId: command.nodeId,
+        targetDay: validateDayOccurrenceTarget(command.targetDay),
+        position: nonnegativeInteger(command.position, 'position'),
+      } as const;
+    } else if (
+      command.type === 'ADD_PLACE_VISIT' ||
+      command.type === 'ADD_FREE_ACTION'
+    ) {
+      validated = validateCommand(command) as Extract<
+        RepositoryTripCommand,
+        { type: 'ADD_PLACE_VISIT' | 'ADD_FREE_ACTION' }
+      >;
+      if (command.type === 'ADD_FREE_ACTION')
+        boundedText(command.note ?? '', '活动名称', 1, 2000);
+    } else
+      throw new ApplicationError('VALIDATION_ERROR', '不支持的行程编辑。', 400);
+    return authoringResultToView(
+      await this.repository.executeAuthoringCommand({
+        ownerUserId: actor.userId,
+        tripId,
+        baseTripVersion: positiveInteger(
+          input.baseTripVersion,
+          'baseTripVersion',
+        ),
+        idempotencyKey: boundedText(
+          input.idempotencyKey,
+          'idempotencyKey',
+          1,
+          200,
+        ),
+        command: validated,
       }),
     );
   }
@@ -511,7 +596,7 @@ function mutationResultToView(result: TripMutationResult): TripView {
   }
 }
 
-function toTripView(record: TripAggregateRecord): TripView {
+export function toTripView(record: TripAggregateRecord): TripView {
   const days = projectDays(record);
   return {
     id: record.id,
@@ -1157,4 +1242,27 @@ function requireUuid(value: string, field: string): void {
   ) {
     throw new ApplicationError('VALIDATION_ERROR', `${field} 无效。`, 400);
   }
+}
+
+function authoringResultToView(result: AuthoringMutationResult): TripView {
+  if (result.status === 'SUCCESS') return result.trip;
+  if (result.status === 'IDEMPOTENCY_CONFLICT')
+    throw new ApplicationError(
+      'IDEMPOTENCY_CONFLICT',
+      '这次提交的内容已变化，请核对后重新提交。',
+      409,
+    );
+  if (result.status === 'TRANSPORT_CONFLICT')
+    throw new ApplicationError(
+      'CONSTRAINT_CONFLICT',
+      '这次调整会改变已选交通的连接或日期。原交通仍保留；请先核对并明确处理相关交通。',
+      409,
+    );
+  if (result.status === 'FACT_PROTECTED')
+    throw new ApplicationError(
+      'FACT_PROTECTED',
+      '这个安排已有执行事实或受保护要求，不能直接调整顺序或日期。',
+      409,
+    );
+  return mutationResultToView({ status: result.status });
 }

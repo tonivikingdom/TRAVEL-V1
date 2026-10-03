@@ -22,7 +22,7 @@ const splitMigrations = new Set([
 
 describe('P5 storage reconciliation migration', () => {
   it('applies exactly 24 migrations cleanly and enforces cleanup metadata constraints', async () => {
-    const names = await migrationNames();
+    const names = (await migrationNames()).filter((name) => name <= migration);
     expect(names).toHaveLength(24);
     await withDatabase('clean', async (client) => {
       for (const name of names) await applyMigration(client, name);

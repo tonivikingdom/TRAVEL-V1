@@ -421,6 +421,9 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         name: requiredString(body, 'name'),
         planningAnchorDate: requiredString(body, 'planningAnchorDate'),
         defaultPeopleCount: requiredNumber(body, 'defaultPeopleCount'),
+        ...(hasOwn(body, 'idempotencyKey')
+          ? { idempotencyKey: requiredString(body, 'idempotencyKey') }
+          : {}),
       },
     );
     return reply.code(201).send(trip);
@@ -477,6 +480,47 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       },
     );
   });
+
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/authoring',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      const command = requiredRecord(body.command);
+      const parsed =
+        command.type === 'MOVE_NODE'
+          ? {
+              type: 'MOVE_NODE' as const,
+              nodeId: requiredString(command, 'nodeId'),
+              targetDay: parseDayOccurrenceTarget(command.targetDay),
+              position: requiredNumber(command, 'position'),
+            }
+          : parseTripCommand(command);
+      if (
+        parsed.type !== 'ADD_PLACE_VISIT' &&
+        parsed.type !== 'ADD_FREE_ACTION' &&
+        !('targetDay' in parsed && parsed.type === 'MOVE_NODE')
+      )
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '不支持的行程编辑。',
+          400,
+        );
+      return requireTripService(dependencies).executeAuthoring(
+        authenticated.actor,
+        request.params.id,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          command: parsed,
+        },
+      );
+    },
+  );
 
   app.post<{ Params: { id: string } }>(
     '/trips/:id/commands',

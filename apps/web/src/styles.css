@@ -674,7 +674,9 @@ form button {
 /* Keep unsaved forms, never present cached schedule/maps as current while offline. */
 [data-unavailable]
   .sheet-body
-  > :not(form):not(.edit):not(#save-status):not(#draft-recovery),
+  > :not(form):not(.edit):not(#save-status):not(#draft-recovery):not(
+    #authoring-recovery
+  ),
 [data-unavailable] .edit > :not(form):not(summary) {
   display: none;
 }
@@ -685,7 +687,8 @@ form button {
   gap: 8px;
 }
 
-#draft-recovery {
+#draft-recovery,
+#authoring-recovery {
   padding: 12px;
   border: 1px solid #9bb6d4;
   border-radius: 12px;
@@ -877,5 +880,103 @@ form button {
   }
   .segment-service {
     font-size: max(16px, 1.07rem);
+  }
+}
+
+/* Authoring controls retain an independent, visually centered content group. */
+.control-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.authoring-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 18px;
+}
+.date-extension {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.date-extension button,
+.authoring-toolbar button,
+.arrangement-actions button,
+.authoring-types button,
+[data-authoring] button {
+  min-height: 44px;
+  padding: 10px 16px;
+}
+.arrangement-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+}
+.arrangement-actions button {
+  font-size: max(13px, 0.87rem);
+  color: var(--muted);
+}
+.authoring-types {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.authoring-date,
+.temporary-day-note {
+  color: var(--muted);
+  font-size: max(13px, 0.87rem);
+}
+[data-authoring] {
+  min-width: 0;
+}
+[data-authoring] label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+[data-authoring] input,
+[data-authoring] select,
+[data-authoring] textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+[data-authoring] button {
+  width: 100%;
+}
+#authoring-recovery {
+  padding: 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f3f7fe;
+}
+#authoring-recovery button {
+  min-height: 44px;
+}
+@media (max-width: 760px) {
+  .date-extension {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 10px 0 0;
+  }
+  .date-extension button {
+    font-size: max(13px, 0.87rem);
+    padding: 10px 12px;
+  }
+  .authoring-toolbar {
+    justify-content: stretch;
+  }
+  .authoring-toolbar button {
+    width: 100%;
+  }
+  .arrangement-actions button {
+    max-width: 100%;
+  }
+  .trip-list .page-heading {
+    flex-wrap: wrap;
   }
 }

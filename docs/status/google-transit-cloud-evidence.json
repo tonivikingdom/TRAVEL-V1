@@ -1,0 +1,892 @@
+{
+  "implementation": "REBUILT_COMPATIBLE_IMPLEMENTATION",
+  "scope": "Personal development, anonymous contexts; public Japanese transit scenarios",
+  "serviceRunRecordedAt": "2026-10-03T04:50:53.049Z",
+  "serviceQueries": [
+    {
+      "scenario": "rail",
+      "query": {
+        "origin": {
+          "label": "Sapporo Station",
+          "latitude": 43.068661,
+          "longitude": 141.350755
+        },
+        "destination": {
+          "label": "Otaru Station",
+          "latitude": 43.197305,
+          "longitude": 140.993625
+        },
+        "date": "2026-10-05",
+        "time": "10:00",
+        "timezone": "Asia/Tokyo",
+        "timeMode": "DEPART_AT"
+      },
+      "status": "SUCCESS",
+      "httpCalls": 1,
+      "elapsedMs": 6860,
+      "fetchedAt": "2026-10-03T04:49:35.751Z",
+      "candidateCount": 6,
+      "evidence": {
+        "modeVisible": true,
+        "dateVisible": true,
+        "timeVisible": true,
+        "pageStateMatches": true,
+        "timezoneMatches": true,
+        "selectedResponseIndex": 0,
+        "responseCount": 1
+      },
+      "candidateDepartureRangeUtc": [
+        "2026-10-05T01:00:00.000Z",
+        "2026-10-05T03:00:00.000Z"
+      ],
+      "candidateArrivalRangeUtc": [
+        "2026-10-05T01:41:00.000Z",
+        "2026-10-05T03:41:00.000Z"
+      ],
+      "firstCandidate": {
+        "departure": "2026-10-05T01:00:00.000Z",
+        "arrival": "2026-10-05T01:41:00.000Z",
+        "durationSeconds": 2460,
+        "fare": {
+          "amount": "1800",
+          "currency": "JPY"
+        },
+        "legs": [
+          {
+            "mode": "RAIL",
+            "from": {
+              "name": "Sapporo Station",
+              "latitude": 43.0685168,
+              "longitude": 141.35091839999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "Otaru Station",
+              "latitude": 43.197452999999996,
+              "longitude": 140.993541,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T01:00:00.000Z",
+            "arrival": "2026-10-05T01:41:00.000Z",
+            "durationSeconds": 2460,
+            "serviceLabel": "Rapid Airport 35",
+            "fixedService": true
+          }
+        ]
+      },
+      "movingSeconds": 2460,
+      "waitingSeconds": 0
+    },
+    {
+      "scenario": "rail",
+      "query": {
+        "origin": {
+          "label": "Sapporo Station",
+          "latitude": 43.068661,
+          "longitude": 141.350755
+        },
+        "destination": {
+          "label": "Otaru Station",
+          "latitude": 43.197305,
+          "longitude": 140.993625
+        },
+        "date": "2026-10-05",
+        "time": "10:00",
+        "timezone": "Asia/Tokyo",
+        "timeMode": "ARRIVE_BY"
+      },
+      "status": "SUCCESS",
+      "httpCalls": 1,
+      "elapsedMs": 5818,
+      "fetchedAt": "2026-10-03T04:49:56.590Z",
+      "candidateCount": 6,
+      "evidence": {
+        "modeVisible": true,
+        "dateVisible": true,
+        "timeVisible": true,
+        "pageStateMatches": true,
+        "timezoneMatches": true,
+        "selectedResponseIndex": 0,
+        "responseCount": 1
+      },
+      "candidateDepartureRangeUtc": [
+        "2026-10-04T23:02:08.000Z",
+        "2026-10-05T00:10:00.000Z"
+      ],
+      "candidateArrivalRangeUtc": [
+        "2026-10-04T23:53:00.000Z",
+        "2026-10-05T00:45:00.000Z"
+      ],
+      "firstCandidate": {
+        "departure": "2026-10-05T00:10:00.000Z",
+        "arrival": "2026-10-05T00:45:00.000Z",
+        "durationSeconds": 2100,
+        "fare": {
+          "amount": "1800",
+          "currency": "JPY"
+        },
+        "legs": [
+          {
+            "mode": "RAIL",
+            "from": {
+              "name": "Sapporo Station",
+              "latitude": 43.0684776,
+              "longitude": 141.3509247,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "Otaru Station",
+              "latitude": 43.197452999999996,
+              "longitude": 140.993541,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T00:10:00.000Z",
+            "arrival": "2026-10-05T00:45:00.000Z",
+            "durationSeconds": 2100,
+            "serviceLabel": "Rapid Airport 27",
+            "fixedService": true
+          }
+        ]
+      },
+      "movingSeconds": 2100,
+      "waitingSeconds": 0
+    },
+    {
+      "scenario": "mixed",
+      "query": {
+        "origin": {
+          "label": "Hotel Mahoroba",
+          "latitude": 42.4930624,
+          "longitude": 141.1419064
+        },
+        "destination": {
+          "label": "The Lake View Toya Nonokaze Resort",
+          "latitude": 42.565637,
+          "longitude": 140.8222622
+        },
+        "date": "2026-10-05",
+        "time": "15:00",
+        "timezone": "Asia/Tokyo",
+        "timeMode": "DEPART_AT"
+      },
+      "status": "SUCCESS",
+      "httpCalls": 1,
+      "elapsedMs": 5683,
+      "fetchedAt": "2026-10-03T04:50:17.269Z",
+      "candidateCount": 6,
+      "evidence": {
+        "modeVisible": true,
+        "dateVisible": true,
+        "timeVisible": true,
+        "pageStateMatches": true,
+        "timezoneMatches": true,
+        "selectedResponseIndex": 0,
+        "responseCount": 1
+      },
+      "candidateDepartureRangeUtc": [
+        "2026-10-05T06:12:06.000Z",
+        "2026-10-05T08:07:38.000Z"
+      ],
+      "candidateArrivalRangeUtc": [
+        "2026-10-05T08:26:10.000Z",
+        "2026-10-05T10:12:10.000Z"
+      ],
+      "firstCandidate": {
+        "departure": "2026-10-05T06:12:06.000Z",
+        "arrival": "2026-10-05T08:26:10.000Z",
+        "durationSeconds": 8044,
+        "fare": {
+          "amount": "3910",
+          "currency": "JPY"
+        },
+        "legs": [
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "Hotel Mahoroba",
+              "latitude": 42.4930624,
+              "longitude": 141.1419064,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "登別温泉",
+              "latitude": 42.491475,
+              "longitude": 141.143156,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 174,
+            "serviceLabel": null,
+            "fixedService": false
+          },
+          {
+            "mode": "BUS",
+            "from": {
+              "name": "登別温泉",
+              "latitude": 42.491475,
+              "longitude": 141.143156,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "登別駅前",
+              "latitude": 42.4522104,
+              "longitude": 141.1803775,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T06:15:00.000Z",
+            "arrival": "2026-10-05T06:27:00.000Z",
+            "durationSeconds": 720,
+            "serviceLabel": "登別苫小牧線",
+            "fixedService": true
+          },
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "登別駅前",
+              "latitude": 42.4522104,
+              "longitude": 141.1803775,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "Noboribetsu Station",
+              "latitude": 42.4520246,
+              "longitude": 141.1808589,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 63,
+            "serviceLabel": null,
+            "fixedService": false
+          },
+          {
+            "mode": "RAIL",
+            "from": {
+              "name": "Noboribetsu Station",
+              "latitude": 42.4520246,
+              "longitude": 141.1808589,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "Tōya Station",
+              "latitude": 42.5506226,
+              "longitude": 140.7637296,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T06:59:00.000Z",
+            "arrival": "2026-10-05T07:38:00.000Z",
+            "durationSeconds": 2340,
+            "serviceLabel": "Hokuto 16",
+            "fixedService": true
+          },
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "Tōya Station",
+              "latitude": 42.5506226,
+              "longitude": 140.7637296,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "洞爺駅前",
+              "latitude": 42.550553099999995,
+              "longitude": 140.76341929999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 70,
+            "serviceLabel": null,
+            "fixedService": false
+          },
+          {
+            "mode": "BUS",
+            "from": {
+              "name": "洞爺駅前",
+              "latitude": 42.550553099999995,
+              "longitude": 140.76341929999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "さくらまち",
+              "latitude": 42.565408,
+              "longitude": 140.820659,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T08:05:00.000Z",
+            "arrival": "2026-10-05T08:24:00.000Z",
+            "durationSeconds": 1140,
+            "serviceLabel": "洞爺湖線",
+            "fixedService": true
+          },
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "さくらまち",
+              "latitude": 42.565408,
+              "longitude": 140.820659,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "The Lake View Toya Nonokaze Resort",
+              "latitude": 42.565637,
+              "longitude": 140.8222622,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 130,
+            "serviceLabel": null,
+            "fixedService": false
+          }
+        ]
+      },
+      "movingSeconds": 4637,
+      "waitingSeconds": 3407
+    },
+    {
+      "scenario": "mixed",
+      "query": {
+        "origin": {
+          "label": "Hotel Mahoroba",
+          "latitude": 42.4930624,
+          "longitude": 141.1419064
+        },
+        "destination": {
+          "label": "The Lake View Toya Nonokaze Resort",
+          "latitude": 42.565637,
+          "longitude": 140.8222622
+        },
+        "date": "2026-10-05",
+        "time": "15:00",
+        "timezone": "Asia/Tokyo",
+        "timeMode": "ARRIVE_BY"
+      },
+      "status": "SUCCESS",
+      "httpCalls": 1,
+      "elapsedMs": 5676,
+      "fetchedAt": "2026-10-03T04:50:37.951Z",
+      "candidateCount": 4,
+      "evidence": {
+        "modeVisible": true,
+        "dateVisible": true,
+        "timeVisible": true,
+        "pageStateMatches": true,
+        "timezoneMatches": true,
+        "selectedResponseIndex": 0,
+        "responseCount": 1
+      },
+      "candidateDepartureRangeUtc": [
+        "2026-10-05T00:22:06.000Z",
+        "2026-10-05T03:30:06.000Z"
+      ],
+      "candidateArrivalRangeUtc": [
+        "2026-10-05T02:23:27.000Z",
+        "2026-10-05T05:48:27.000Z"
+      ],
+      "firstCandidate": {
+        "departure": "2026-10-05T03:30:06.000Z",
+        "arrival": "2026-10-05T05:48:27.000Z",
+        "durationSeconds": 8301,
+        "fare": {
+          "amount": "3910",
+          "currency": "JPY"
+        },
+        "legs": [
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "Hotel Mahoroba",
+              "latitude": 42.4930624,
+              "longitude": 141.1419064,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "登別温泉",
+              "latitude": 42.491475,
+              "longitude": 141.143156,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 174,
+            "serviceLabel": null,
+            "fixedService": false
+          },
+          {
+            "mode": "BUS",
+            "from": {
+              "name": "登別温泉",
+              "latitude": 42.491475,
+              "longitude": 141.143156,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "登別駅前",
+              "latitude": 42.452371799999995,
+              "longitude": 141.18067969999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T03:33:00.000Z",
+            "arrival": "2026-10-05T03:55:00.000Z",
+            "durationSeconds": 1320,
+            "serviceLabel": "ND 登別駅前線",
+            "fixedService": true
+          },
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "登別駅前",
+              "latitude": 42.452371799999995,
+              "longitude": 141.18067969999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "Noboribetsu Station",
+              "latitude": 42.4520246,
+              "longitude": 141.1808589,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 91,
+            "serviceLabel": null,
+            "fixedService": false
+          },
+          {
+            "mode": "RAIL",
+            "from": {
+              "name": "Noboribetsu Station",
+              "latitude": 42.4520246,
+              "longitude": 141.1808589,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "Tōya Station",
+              "latitude": 42.5506226,
+              "longitude": 140.7637296,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T04:28:00.000Z",
+            "arrival": "2026-10-05T05:08:00.000Z",
+            "durationSeconds": 2400,
+            "serviceLabel": "Hokuto 12",
+            "fixedService": true
+          },
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "Tōya Station",
+              "latitude": 42.5506226,
+              "longitude": 140.7637296,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "洞爺駅前",
+              "latitude": 42.550553099999995,
+              "longitude": 140.76341929999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 70,
+            "serviceLabel": null,
+            "fixedService": false
+          },
+          {
+            "mode": "BUS",
+            "from": {
+              "name": "洞爺駅前",
+              "latitude": 42.550553099999995,
+              "longitude": 140.76341929999998,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "中央通",
+              "latitude": 42.56543,
+              "longitude": 140.824078,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": "2026-10-05T05:25:00.000Z",
+            "arrival": "2026-10-05T05:46:00.000Z",
+            "durationSeconds": 1260,
+            "serviceLabel": "洞爺湖線",
+            "fixedService": true
+          },
+          {
+            "mode": "WALKING",
+            "from": {
+              "name": "中央通",
+              "latitude": 42.56543,
+              "longitude": 140.824078,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "to": {
+              "name": "The Lake View Toya Nonokaze Resort",
+              "latitude": 42.565637,
+              "longitude": 140.8222622,
+              "providerPlaceRef": null,
+              "providerHubRef": null
+            },
+            "departure": null,
+            "arrival": null,
+            "durationSeconds": 147,
+            "serviceLabel": null,
+            "fixedService": false
+          }
+        ]
+      },
+      "movingSeconds": 5462,
+      "waitingSeconds": 2839
+    }
+  ],
+  "travelHttpPostgres": {
+    "transport": "actual loopback HTTP on both hops",
+    "database": "dedicated PostgreSQL 17 with isolated test accounts and trips",
+    "runs": [
+      {
+        "timeMode": "DEPART_AT",
+        "date": "2026-10-05",
+        "localTime": "15:00",
+        "timezone": "Asia/Tokyo",
+        "status": "PASS",
+        "candidateCount": 6,
+        "providerHttpCalls": 1,
+        "snapshotHashUnchanged": true,
+        "previewAdoptable": true,
+        "adoptedModes": [
+          "WALKING",
+          "BUS",
+          "WALKING",
+          "RAIL",
+          "WALKING",
+          "BUS",
+          "WALKING"
+        ],
+        "plannedTemporalFacts": 6,
+        "versions": [3, 4, 5],
+        "restoredNodes": 2,
+        "selectedCandidate": {
+          "provider": "GOOGLE_CONSUMER_EXPERIMENTAL",
+          "departure": {
+            "instant": "2026-10-05T06:12:06.000Z",
+            "timeZone": "Asia/Tokyo"
+          },
+          "arrival": {
+            "instant": "2026-10-05T08:26:10.000Z",
+            "timeZone": "Asia/Tokyo"
+          },
+          "durationSeconds": 8044,
+          "fare": {
+            "amount": "3910",
+            "currency": "JPY"
+          },
+          "legs": [
+            {
+              "to": {
+                "name": "登別温泉",
+                "latitude": 42.491475,
+                "longitude": 141.143156,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "Hotel Mahoroba",
+                "latitude": 42.493062,
+                "longitude": 141.141906,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "WALKING",
+              "arrival": null,
+              "departure": null,
+              "providerRef": "google-0-1791180726-1791188770:leg:0",
+              "fixedService": false,
+              "serviceLabel": null,
+              "durationSeconds": 174
+            },
+            {
+              "to": {
+                "name": "登別駅前",
+                "latitude": 42.4522104,
+                "longitude": 141.1803775,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "登別温泉",
+                "latitude": 42.491475,
+                "longitude": 141.143156,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "BUS",
+              "arrival": {
+                "instant": "2026-10-05T06:27:00.000Z",
+                "timeZone": "Asia/Tokyo"
+              },
+              "departure": {
+                "instant": "2026-10-05T06:15:00.000Z",
+                "timeZone": "Asia/Tokyo"
+              },
+              "providerRef": "google-0-1791180726-1791188770:leg:1",
+              "fixedService": true,
+              "serviceLabel": "登別苫小牧線",
+              "durationSeconds": 720
+            },
+            {
+              "to": {
+                "name": "Noboribetsu Station",
+                "latitude": 42.4520246,
+                "longitude": 141.1808589,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "登別駅前",
+                "latitude": 42.4522104,
+                "longitude": 141.1803775,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "WALKING",
+              "arrival": null,
+              "departure": null,
+              "providerRef": "google-0-1791180726-1791188770:leg:2",
+              "fixedService": false,
+              "serviceLabel": null,
+              "durationSeconds": 63
+            },
+            {
+              "to": {
+                "name": "Tōya Station",
+                "latitude": 42.5506226,
+                "longitude": 140.7637296,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "Noboribetsu Station",
+                "latitude": 42.4520246,
+                "longitude": 141.1808589,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "RAIL",
+              "arrival": {
+                "instant": "2026-10-05T07:38:00.000Z",
+                "timeZone": "Asia/Tokyo"
+              },
+              "departure": {
+                "instant": "2026-10-05T06:59:00.000Z",
+                "timeZone": "Asia/Tokyo"
+              },
+              "providerRef": "google-0-1791180726-1791188770:leg:3",
+              "fixedService": true,
+              "serviceLabel": "Hokuto 16",
+              "durationSeconds": 2340
+            },
+            {
+              "to": {
+                "name": "洞爺駅前",
+                "latitude": 42.550553099999995,
+                "longitude": 140.76341929999998,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "Tōya Station",
+                "latitude": 42.5506226,
+                "longitude": 140.7637296,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "WALKING",
+              "arrival": null,
+              "departure": null,
+              "providerRef": "google-0-1791180726-1791188770:leg:4",
+              "fixedService": false,
+              "serviceLabel": null,
+              "durationSeconds": 70
+            },
+            {
+              "to": {
+                "name": "さくらまち",
+                "latitude": 42.565408,
+                "longitude": 140.820659,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "洞爺駅前",
+                "latitude": 42.550553099999995,
+                "longitude": 140.76341929999998,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "BUS",
+              "arrival": {
+                "instant": "2026-10-05T08:24:00.000Z",
+                "timeZone": "Asia/Tokyo"
+              },
+              "departure": {
+                "instant": "2026-10-05T08:05:00.000Z",
+                "timeZone": "Asia/Tokyo"
+              },
+              "providerRef": "google-0-1791180726-1791188770:leg:5",
+              "fixedService": true,
+              "serviceLabel": "洞爺湖線",
+              "durationSeconds": 1140
+            },
+            {
+              "to": {
+                "name": "The Lake View Toya Nonokaze Resort",
+                "latitude": 42.565637,
+                "longitude": 140.822262,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "from": {
+                "name": "さくらまち",
+                "latitude": 42.565408,
+                "longitude": 140.820659,
+                "providerHubRef": null,
+                "providerPlaceRef": null
+              },
+              "mode": "WALKING",
+              "arrival": null,
+              "departure": null,
+              "providerRef": "google-0-1791180726-1791188770:leg:6",
+              "fixedService": false,
+              "serviceLabel": null,
+              "durationSeconds": 130
+            }
+          ]
+        }
+      },
+      {
+        "status": "FAIL",
+        "reason": "Travel HTTP 503 /trips/:id/routes/query SERVICE_UNAVAILABLE UPSTREAM_TIMEOUT"
+      }
+    ],
+    "arriveByFinalAttempt": [
+      {
+        "status": "FAIL",
+        "reason": "Travel HTTP 503 /trips/:id/routes/query PROVIDER_UNAVAILABLE UPSTREAM_TIMEOUT:time-mode"
+      }
+    ]
+  },
+  "notObservedLive": [
+    "CAPTCHA/login gate",
+    "Explicit access denial",
+    "Confirmed empty route",
+    "Schema drift",
+    "Cross-day itinerary",
+    "Calendar outside visible month"
+  ],
+  "arriveByFinalTravelRecheck": {
+    "baselineHead": "246a50173ab53858217f9f4be6316d1a2b1d6ae8",
+    "mainVerified": "6871aa1f88964f8590ca61e3d368bb4da67072d3",
+    "status": "PARTIAL",
+    "requestedConditionsFromHarness": {
+      "date": "2026-10-05",
+      "time": "15:00",
+      "timezone": "Asia/Tokyo",
+      "timeMode": "ARRIVE_BY"
+    },
+    "newIsolatedAccountAndTrip": true,
+    "attemptsThisBatch": 1,
+    "run": {
+      "implementation": "REBUILT_COMPATIBLE_IMPLEMENTATION",
+      "recordedAt": "2026-10-03T06:00:24.228Z",
+      "runStartedAt": "2026-10-03T06:00:10.464Z",
+      "providerHttpCalls": 1,
+      "lastSidecarError": "UPSTREAM_TIMEOUT:response-verification",
+      "browserDiagnostics": {
+        "launchCalls": 1,
+        "browserDisconnected": true,
+        "contexts": [
+          {
+            "pageUrlType": "GOOGLE_MAPS_DIRECTIONS",
+            "directionsMainExists": true,
+            "leaveNowExists": false,
+            "leaveNowVisible": false,
+            "blockedPage": false,
+            "http403Seen": false,
+            "http429Seen": false,
+            "navigationStatus": 200,
+            "contextClosed": true,
+            "observationComplete": true
+          }
+        ]
+      },
+      "transport": "actual loopback HTTP on both hops",
+      "database": "dedicated PostgreSQL 17 with isolated test accounts and trips",
+      "summaries": [
+        {
+          "status": "FAIL",
+          "reason": "Travel HTTP 503 /trips/:id/routes/query PROVIDER_UNAVAILABLE UPSTREAM_TIMEOUT:response-verification"
+        }
+      ]
+    },
+    "postgresAfterQueryFailure": {
+      "accounts": 1,
+      "trips": 1,
+      "tripVersions": [3],
+      "nodes": 2,
+      "snapshots": 0,
+      "previews": 0,
+      "adoptedRoutes": 0,
+      "transportEdges": 0,
+      "adoptReceipts": 0,
+      "undoReceipts": 0
+    },
+    "acceptance": {
+      "queryEcho": "NOT_REACHED",
+      "allCandidateArrivalBounds": "NOT_REACHED",
+      "snapshotFromThisQuery": "NOT_REACHED",
+      "queryTripVersionUnchanged": true,
+      "preview": "NOT_REACHED",
+      "explicitAdopt": "NOT_REACHED",
+      "undo": "NOT_REACHED",
+      "noPostQueryGoogleCalls": true,
+      "liveCandidatesReturned": false
+    },
+    "interpretation": "This attempt reached response-verification; it did not reproduce time-mode timeout. No verified route response returned. Do not infer CAPTCHA, denial or a root cause.",
+    "productionCodeChanged": false,
+    "automaticRetry": false,
+    "stoppedAfterAttempt": true
+  }
+}

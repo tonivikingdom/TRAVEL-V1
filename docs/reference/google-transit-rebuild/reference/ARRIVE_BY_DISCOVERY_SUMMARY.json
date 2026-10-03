@@ -1,0 +1,74 @@
+{
+  "currentSupport": {
+    "DEPART_AT": "Enabled and verified for direct search and reverse import by existing unit and saved live evidence.",
+    "ARRIVE_BY": "Valid domain value but disabled and unverified; direct search and reverse import return UNSUPPORTED_MODE.",
+    "NOW": "Valid domain value but disabled; direct search returns UNSUPPORTED_MODE.",
+    "LAST_TRANSIT": "Valid domain value but disabled and unverified; direct search returns UNSUPPORTED_MODE. Reverse URL parser contains an unverified marker mapping."
+  },
+  "arriveByRejectedAt": [
+    {
+      "path": "services/google-consumer-transit/src/api/search.ts",
+      "symbol": "SearchCoordinator.search",
+      "line": 31,
+      "scope": "direct search",
+      "error": "UNSUPPORTED_MODE",
+      "httpStatus": 422
+    },
+    {
+      "path": "services/google-consumer-transit/src/google/directions-capture.ts",
+      "symbol": "GoogleTransitClient.importSelectedUrl",
+      "line": 399,
+      "scope": "reverse import",
+      "error": "UNSUPPORTED_MODE",
+      "httpStatus": 422
+    }
+  ],
+  "requestBuilderFiles": [
+    "services/google-consumer-transit/src/google/url-builder.ts",
+    "services/google-consumer-transit/src/browser/google-page.ts",
+    "services/google-consumer-transit/src/google/directions-capture.ts"
+  ],
+  "responseCaptureFiles": [
+    "services/google-consumer-transit/src/browser/browser-manager.ts",
+    "services/google-consumer-transit/src/browser/google-page.ts",
+    "services/google-consumer-transit/src/google/directions-capture.ts"
+  ],
+  "verificationFiles": [
+    "services/google-consumer-transit/src/google/schema-sentinel.ts",
+    "services/google-consumer-transit/src/google/directions-capture.ts",
+    "services/google-consumer-transit/src/google/url-builder.ts"
+  ],
+  "parserFiles": [
+    "services/google-consumer-transit/src/google/response-parser.ts"
+  ],
+  "sentinelFiles": [
+    "services/google-consumer-transit/src/google/schema-sentinel.ts"
+  ],
+  "reverseImportFiles": [
+    "services/google-consumer-transit/src/server/routes.ts",
+    "services/google-consumer-transit/src/api/search.ts",
+    "services/google-consumer-transit/src/google/url-builder.ts",
+    "services/google-consumer-transit/src/browser/google-page.ts",
+    "services/google-consumer-transit/src/google/directions-capture.ts"
+  ],
+  "testFiles": [
+    "services/google-consumer-transit/tests/fixtures.ts",
+    "services/google-consumer-transit/tests/parser.test.ts",
+    "services/google-consumer-transit/tests/server.test.ts",
+    "services/google-consumer-transit/scripts/live-validation.ts"
+  ],
+  "cacheIncludesTimeMode": true,
+  "reverseImportCanIdentifyArriveBy": true,
+  "parserCoupledToTimeMode": false,
+  "recommendedCase": "B+C",
+  "externalEvidenceRequired": true,
+  "openQuestions": [
+    "What is the sanitized ARRIVE_BY time-mode marker sequence for the same origin, destination, date, and wall clock?",
+    "Does the DEPART_AT companion marker currently represented as !7e2 remain unchanged for ARRIVE_BY, and what structural role can be evidenced without inferring private field semantics?",
+    "Does ARRIVE_BY emit the same /maps/preview/directions path and the same response count and ordering?",
+    "Does an ARRIVE_BY response retain the verified candidate, route summary, leg, stop, fare, and time positional shapes?",
+    "What exact arrival-time verification invariant and cross-day window should be enforced?",
+    "Are ARRIVE_BY no-route rendered markers and selected-route index markers structurally unchanged?",
+    "Is the existing untested !6e1 reverse-import mapping correct for the current Google Consumer frontend?"
+  ]
+}

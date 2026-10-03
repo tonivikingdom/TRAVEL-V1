@@ -41,7 +41,7 @@ Saving captures submitted input before asynchronous work. Accepted writes acknow
 
 P6A-1 R1/R2/R3, time provenance, independent requirements, earlier feasible replacement versus old route time, navigation, explicit Adopt, and execution-aware Undo stay intact. Provider vehicle observation is not user location.
 
-## Verification and screenshots
+## Verification
 
 All new test data is **SYNTHETIC**, on isolated local development/test PostgreSQL 17. No real timetable, fare, address lookup, paid Provider or production data is used.
 
@@ -51,25 +51,37 @@ All new test data is **SYNTHETIC**, on isolated local development/test PostgreSQ
 - `scripts/p6a2-browser-postgres.ts` performs the real PostgreSQL + HTTP + Chromium user chain, including refresh, temporary blank no-write, cross-day move, version recovery and date collision with zero partial writes. It refuses a non-local/non-task-owned database. Run through `scripts/p6a1-browser-tsconfig.json` so ApplicationError identities use the existing source aliases.
 - Browser fixtures additionally test edits during pending activity/place submissions, duplicate accepted input prevention, successful write/failed read recovery, temporary dates and 320/375/390/430/1280 px with enlarged text. Existing P6A-1 browser assertions remain.
 
-Screenshots below come from the real PostgreSQL/HTTP chain and were opened for visual inspection. Viewport automation is not iPhone hardware/soft-keyboard verification.
-
-| View                                        | Image                                                                                                                                                                      |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mobile complete day with Place and activity | [mobile-day-places.png](assets/p6a-2/mobile-day-places.png)                                                                                                                |
-| Add arrangement choice                      | [mobile-add-choice.png](assets/p6a-2/mobile-add-choice.png)                                                                                                                |
-| Add reliable saved Place                    | [mobile-add-place.png](assets/p6a-2/mobile-add-place.png)                                                                                                                  |
-| Add FreeAction                              | [mobile-add-activity.png](assets/p6a-2/mobile-add-activity.png)                                                                                                            |
-| Order/date editor                           | [mobile-order-date.png](assets/p6a-2/mobile-order-date.png)                                                                                                                |
-| Place detail                                | [mobile-place-detail.png](assets/p6a-2/mobile-place-detail.png)                                                                                                            |
-| Desktop day                                 | [desktop-day.png](assets/p6a-2/desktop-day.png)                                                                                                                            |
-| Date collision                              | [mobile-date-conflict.png](assets/p6a-2/mobile-date-conflict.png)                                                                                                          |
-| Version conflict recovery                   | [mobile-version-conflict.png](assets/p6a-2/mobile-version-conflict.png)                                                                                                    |
-| Removed-date draft recovery                 | [mobile-removed-date-recovery.png](assets/p6a-2/mobile-removed-date-recovery.png)                                                                                          |
-| Narrow mobile                               | [320 px](assets/p6a-2/mobile-day-320.png), [375 px](assets/p6a-2/mobile-day-375.png), [390 px](assets/p6a-2/mobile-day-390.png), [430 px](assets/p6a-2/mobile-day-430.png) |
-
-Local cloud validation: format/lint/typecheck/build passed; **745 Unit**, **601 PostgreSQL integration** (104 persistence + 497 API), clean Prisma deploy of **25 migrations**, and populated 24→25 checks passed. Chromium completed **77 cases**, including a failed-before/passed-after removed-date regression and its real PostgreSQL/HTTP counterpart. Compose API/Worker and the complete existing acceptance chains passed. P5B passed with **5 users / 200 requests / 0 isolation failures / 0 unexpected 5xx / 0 network failures**. Final dual-engine GitHub CI is recorded against the final HEAD in the Draft PR delivery report.
+Local cloud validation: format/lint/typecheck/build passed; **745 Unit**, **601 PostgreSQL integration** (104 persistence + 497 API), clean Prisma deploy of **25 migrations**, and populated 24→25 checks passed. Chromium completed **77 cases**, including a failed-before/passed-after removed-date regression and its real PostgreSQL/HTTP counterpart. Compose API/Worker and the complete existing acceptance chains passed. P5B passed with **5 users / 200 requests / 0 isolation failures / 0 unexpected 5xx / 0 network failures**. Implementation HEAD `730fe41a3d23a20c2dc13a1b57a630a16e5b98e4` was reverified after network recovery. [CI 37103896664](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37103896664) matches that implementation HEAD: verify, Compose verification and P5B acceptance all completed/success; its browser logs confirm **77 Chromium + 77 WebKit = 154 passed**. This visual-delivery update changes documentation/artifacts only and does not claim that the implementation CI ran against a later artifact commit.
 
 The initial container checks failed on VFS disk exhaustion and copied host TypeScript build metadata, not a passing runtime. `.dockerignore` now excludes nested generated compiler caches and Playwright results; it preserves source/tests. Inactive known task build caches were reclaimed, Prisma regenerated, and the full container checks rerun successfully. No assertion, dependency or CI gate was weakened.
+
+## Visual review artifacts
+
+These artifacts correspond to implementation HEAD `730fe41a3d23a20c2dc13a1b57a630a16e5b98e4`. All 14 originals were opened individually in this visual-delivery round, verified byte-identical to their committed files at that HEAD, and checked against the capture sequence in `scripts/p6a2-browser-postgres.ts`. The ordinary views are unaffected by the final removed-date recovery fix; its separate recovery capture is included below. No page was regenerated and no original screenshot was modified.
+
+The data is visibly **SYNTHETIC**. The inspected screenshots contain no tokens, cookies, real credentials or personal information. They are isolated PostgreSQL/HTTP/Chromium captures; viewport automation is not iPhone hardware, Safari or soft-keyboard validation. Visible recovery warnings are captured states, not claims that a failed read succeeded.
+
+[Open the contact sheet](assets/p6a-2/review-contact-sheet.png) — **1416 × 4434 px**, nine titled panels. Each original is pasted at **1:1 native pixels**, with its aspect ratio intact, no crop and no overlay over the UI. Desktop occupies a separate full-width row. This sheet is an inspection index, not a replacement for the original files. Open the original-resolution image to inspect text and spacing.
+
+| Artifact                                                               | Capture viewport (CSS px)        | Review scenario                                                                    |
+| ---------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------- |
+| [Contact sheet](assets/p6a-2/review-contact-sheet.png)                 | Assembly, not a browser viewport | Nine key mobile/desktop views together                                             |
+| [Mobile complete day](assets/p6a-2/mobile-day-places.png)              | 390 × 844                        | Saved Place and FreeAction, long name, separate arrival/departure/dwell            |
+| [Add arrangement choice](assets/p6a-2/mobile-add-choice.png)           | 390 × 844                        | Planning anchor and Place/FreeAction choice in bottom sheet                        |
+| [Add saved Place](assets/p6a-2/mobile-add-place.png)                   | 390 × 844                        | Owned reliable Place, explicit search downgrade, unsaved note                      |
+| [Add FreeAction](assets/p6a-2/mobile-add-activity.png)                 | 390 × 844                        | Natural activity title, unspecified time stays unknown                             |
+| [Date/order editor](assets/p6a-2/mobile-order-date.png)                | 390 × 844                        | Natural date and position choices, protection explanation                          |
+| [Place detail](assets/p6a-2/mobile-place-detail.png)                   | 390 × 844                        | Saved location/navigation, separate times, note editing, map PARTIAL               |
+| [Date conflict](assets/p6a-2/mobile-date-conflict.png)                 | 390 × 844                        | Another Trip owns the date; draft retained, no partial write                       |
+| [Version conflict](assets/p6a-2/mobile-version-conflict.png)           | 390 × 844                        | Retained draft and reachable reread/verification action                            |
+| [Removed-date recovery](assets/p6a-2/mobile-removed-date-recovery.png) | 390 × 844                        | Another device removed the original date; explicit retarget before acknowledgement |
+| [320 px day](assets/p6a-2/mobile-day-320.png)                          | 320 × 844                        | Narrow date cards, actions and activity cards                                      |
+| [375 px day](assets/p6a-2/mobile-day-375.png)                          | 375 × 844                        | Narrow mobile layout and controls                                                  |
+| [390 px day](assets/p6a-2/mobile-day-390.png)                          | 390 × 844                        | Standard mobile layout after cross-day move                                        |
+| [430 px day](assets/p6a-2/mobile-day-430.png)                          | 430 × 844                        | Wider mobile layout without desktop scaling                                        |
+| [Desktop day](assets/p6a-2/desktop-day.png)                            | 1280 × 960                       | Separate date/itinerary/detail columns                                             |
+
+The captures use `fullPage: true`: PNG height can exceed viewport height (for example, the removed-date recovery image is 390 × 1788 px). The extra page area is preserved rather than cropped. The narrow-width captures are normal-size text views; enlarged-text behavior is covered separately by browser tests. Contact-sheet assembly does not alter product styling or layout and does not establish human visual acceptance by itself.
 
 ## Remaining boundaries
 

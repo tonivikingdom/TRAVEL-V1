@@ -1,4 +1,5 @@
 import {
+  TripImpactService,
   StaticBackupService,
   InTripReadService,
   AssistanceCapabilityService,
@@ -75,6 +76,7 @@ let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
 let routeUndoService: RouteUndoService | undefined;
 let staticBackupService: StaticBackupService | undefined;
+let tripImpactService: TripImpactService | undefined;
 let inTripReadService: InTripReadService | undefined;
 let tripService: TripService | undefined;
 
@@ -151,6 +153,13 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
       () => new Date(),
       externalExecutionOriginService,
     );
+  tripImpactService = new TripImpactService(
+    tripRepository,
+    groundTransitRepository,
+    groundTransitService,
+    groundTransitRouteReevaluationService,
+    inTripReadService,
+  );
   executionLocationService = new ExecutionLocationService(
     new PrismaExecutionLocationRepository(managedPrisma.client),
     executionRiskService,
@@ -215,6 +224,7 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
 
 const app = buildApi({
   readinessProbe: managedProbe.probe,
+  ...(tripImpactService ? { tripImpactService } : {}),
   ...(staticBackupService ? { staticBackupService } : {}),
   ...(inTripReadService ? { inTripReadService } : {}),
   ...(authService === undefined ? {} : { authService }),

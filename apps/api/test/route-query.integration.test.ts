@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  TripImpactService,
   AuthService,
   StaticBackupService,
   InTripReadService,
@@ -156,7 +157,30 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       hubResolver,
       () => currentNow,
     );
+    const impactInTrip = new InTripReadService(
+      new PrismaInTripReadRepository(managed.client),
+    );
+    const impactGround = new GroundTransitService(
+      groundTransitRepository,
+      groundProvider,
+      () => currentNow,
+    );
+    const impactHandoff = new GroundTransitRouteReevaluationService(
+      tripRepository,
+      groundTransitRepository,
+      new PrismaGroundTransitRouteProgressRepository(managed.client),
+      () => currentNow,
+      externalOrigins,
+    );
     return buildApi({
+      tripImpactService: new TripImpactService(
+        tripRepository,
+        groundTransitRepository,
+        impactGround,
+        impactHandoff,
+        impactInTrip,
+        () => currentNow,
+      ),
       inTripReadService: new InTripReadService(
         new PrismaInTripReadRepository(managed.client),
       ),
@@ -5673,6 +5697,168 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
     expect(oldDecision).toEqual({ status: 'OBSERVATION_OBSOLETE' });
   });
+
+  it.each(['PENDING', 'ARRIVED_PENDING_HANDOFF', 'COMPLETED'] as const)(
+    'P6C %s service state does not become user progress and absent Provider facts remain unknown',
+    async (state) => {
+      const { trip, leg } = await adoptedFixedGroundTrip();
+      await managed.client.groundTransitLegExecution.update({
+        where: { id: leg.id },
+        data: { state },
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/impact`,
+        headers: bearer(userA),
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      const body = response.json<import('@travel/contracts').TripImpactView>();
+      expect(
+        body.items.some(
+          (i) =>
+            i.transportEdgeId === leg.transportEdgeId && i.status === 'UNKNOWN',
+        ),
+      ).toBe(true);
+      expect(body.handoffs[0]?.readiness).toBe('NOT_REQUIRED');
+      const evidence = await new InTripReadService(
+        new PrismaInTripReadRepository(managed.client),
+      ).read(userA.actor, trip.id);
+      expect(evidence.execution).toMatchObject({
+        state: 'NOT_STARTED',
+        recordedAt: null,
+      });
+      expect(
+        await managed.client.executionEvent.count({
+          where: { tripId: trip.id },
+        }),
+      ).toBe(0);
+    },
+  );
+
+  it('P6C impact retains the exact confirmed suffix origin without altering prefix', async () => {
+    const f = await suffixFixture(false, false, false);
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED']),
+    );
+    const edge = f.suffixEdges.find((e) => e.fromNodeId === f.C.id)!;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/trips/${f.first.trip.id}/execution/ground-transit/${edge.id}/refresh`,
+          headers: bearer(userA),
+        })
+      ).statusCode,
+    ).toBe(200);
+    f.first.trip = (
+      await confirmSourceOrigin(f.first.trip, f.A.id, f.B.id)
+    ).trip;
+    const before = await repairDurableState(f.first.trip.id);
+    const response = await app.inject({
+      method: 'GET',
+      url: `/trips/${f.first.trip.id}/impact`,
+      headers: bearer(userA),
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(
+      response.json<import('@travel/contracts').TripImpactView>().handoffs,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceTransportEdgeId: edge.id,
+          readiness: 'READY',
+          originBasis: 'CONFIRMED_EXECUTION_NODE',
+          query: expect.objectContaining({
+            fromNodeId: f.B.id,
+            toNodeId: f.D.id,
+            basisVersion: f.first.trip.version,
+          }),
+        }),
+      ]),
+    );
+    expect(await repairDurableState(f.first.trip.id)).toEqual(before);
+  });
+
+  it.each(['CANCELLED', 'SHORT_TURN'] as const)(
+    'P6C impact explains %s and exposes the same read-only handoff',
+    async (scenario) => {
+      const { trip, leg } = await adoptedFixedGroundTrip();
+      await app.close();
+      app = buildTestApi(
+        new SyntheticRouteProvider((input) => {
+          providerInputs.push(input);
+          return providerResult;
+        }),
+        groundSequence([scenario]),
+      );
+      const refresh = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/refresh`,
+        headers: bearer(userA),
+      });
+      expect(refresh.statusCode).toBe(200);
+      const footprint = () =>
+        Promise.all([
+          managed.client.trip.findUnique({ where: { id: trip.id } }),
+          managed.client.groundTransitObservation.findMany({
+            where: { legExecutionId: leg.id },
+          }),
+          managed.client.groundTransitStateTransition.findMany({
+            where: { legExecutionId: leg.id },
+          }),
+          managed.client.executionEvent.count({ where: { tripId: trip.id } }),
+          managed.client.routeCandidateSnapshot.count({
+            where: { tripId: trip.id },
+          }),
+          managed.client.routePreview.count({ where: { tripId: trip.id } }),
+          managed.client.operationReceipt.count({ where: { tripId: trip.id } }),
+          managed.client.executionRisk.findMany({ where: { tripId: trip.id } }),
+          managed.client.notificationEvent.findMany({
+            where: { tripId: trip.id },
+          }),
+        ]);
+      const before = await footprint(),
+        providerCalls = providerInputs.length;
+      const response = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/impact`,
+        headers: bearer(userA),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json<import('@travel/contracts').TripImpactView>();
+      expect(body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            transportEdgeId: leg.transportEdgeId,
+            status: 'VIOLATED',
+            explanation: expect.stringContaining(
+              scenario === 'CANCELLED' ? '取消' : '终点',
+            ),
+          }),
+        ]),
+      );
+      const ownHandoff = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/execution/ground-transit/${leg.transportEdgeId}/route-reevaluation`,
+        headers: bearer(userA),
+      });
+      expect(body.handoffs).toContainEqual(ownHandoff.json());
+      expect(await footprint()).toEqual(before);
+      expect(providerInputs.length).toBe(providerCalls);
+      for (const who of [userB, admin])
+        expect(
+          (
+            await app.inject({
+              method: 'GET',
+              url: `/trips/${trip.id}/impact`,
+              headers: bearer(who),
+            })
+          ).statusCode,
+        ).toBe(404);
+    },
+  );
 
   it('hands off a cancelled active leg to explicit Query, Preview, and Adopt without planning side effects', async () => {
     const { trip, adopted, leg, from } = await adoptedFixedGroundTrip();

@@ -1,4 +1,5 @@
 import type {
+  TripImpactView,
   InTripView,
   GroundTransitExecutionResponse,
   FlightMovementView,
@@ -61,6 +62,7 @@ import {
   localBackups,
   saveLocalBackup,
 } from './essentials.js';
+import { impactSummary, impactDetails } from './impact.js';
 import './styles.css';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -73,6 +75,7 @@ let dayId = '';
 let viewMode: 'itinerary' | 'today' = 'itinerary';
 let inTrip: InTripView | null = null;
 let ground: GroundTransitExecutionResponse | null = null;
+let tripImpact: TripImpactView | null = null;
 let inTripReadAt: string | null = null;
 let inTripReadUnavailable = false;
 let temporaryDays: TemporaryDay[] = [];
@@ -454,11 +457,13 @@ function modeSwitch() {
   return `<div class="essentials-entry"><button data-action="essentials">旅行资料 / 备份</button></div><nav class="view-switch" aria-label="查看方式"><button data-view="today" aria-pressed="${viewMode === 'today'}">今天 / 下一步</button><button data-view="itinerary" aria-pressed="${viewMode === 'itinerary'}">全部日程</button></nav>`;
 }
 async function readInTrip(fresh: TripView, request: number) {
+  tripImpact = null;
   const results = await Promise.allSettled([
     api.request<InTripView>(`/trips/${fresh.id}/in-trip`),
     api.request<GroundTransitExecutionResponse>(
       `/trips/${fresh.id}/execution/ground-transit`,
     ),
+    api.request<TripImpactView>(`/trips/${fresh.id}/impact`),
   ]);
   if (request !== epoch) return;
   for (const result of results)
@@ -478,7 +483,9 @@ async function readInTrip(fresh: TripView, request: number) {
     if (
       result.status === 'fulfilled' &&
       (result.value.tripId !== fresh.id ||
-        result.value.tripVersion !== fresh.version)
+        ('tripVersion' in result.value
+          ? result.value.tripVersion
+          : result.value.basisVersion) !== fresh.version)
     )
       throw new WebError(
         409,
@@ -486,7 +493,14 @@ async function readInTrip(fresh: TripView, request: number) {
         '行程版本已变化，请重新载入。',
       );
   }
-  const [stored, transit] = results;
+  const [stored, transit, impact] = results;
+  tripImpact = impact.status === 'fulfilled' ? impact.value : null;
+  if (
+    impact.status === 'rejected' &&
+    impact.reason instanceof WebError &&
+    impact.reason.code === 'VERSION_CONFLICT'
+  )
+    throw impact.reason;
   inTrip =
     stored?.status === 'fulfilled' &&
     stored.value.tripId === fresh.id &&
@@ -714,7 +728,7 @@ function renderToday() {
     nextTransport.connection.transport?.mode === 'FLIGHT'
       ? nextTransport.connection.transport.id
       : null;
-  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${impactSummary(trip, tripImpact)}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
 }
 function render() {
   if (materialsOpen && (viewingBackup || trip)) {
@@ -1317,6 +1331,12 @@ root.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (target.dataset.action === 'view-impact' && trip) {
+    if (detail.open && !drawerClose()) return;
+    selection = null;
+    drawer.open(frame('查看影响', impactDetails(trip, tripImpact)));
+    return;
+  }
   if (target.dataset.view && trip) {
     if (detail.open && !drawerClose()) return;
     viewMode = target.dataset.view === 'today' ? 'today' : 'itinerary';
@@ -1440,6 +1460,19 @@ detail.addEventListener('input', (event) => {
   status(draftDirty ? '还有未保存的修改。' : '当前表单与已保存内容一致。');
 });
 detail.addEventListener('click', (event) => {
+  const handoffEntry = (event.target as HTMLElement).closest<HTMLElement>(
+    '[data-impact-handoff]',
+  );
+  if (handoffEntry) {
+    const entry =
+      handoffEntry.parentElement?.querySelector<HTMLElement>('.handoff-entry');
+    if (entry) {
+      entry.hidden = false;
+      handoffEntry.hidden = true;
+    }
+    return;
+  }
+
   const target = (event.target as HTMLElement).closest<HTMLElement>('button,a');
   if (!target) return;
   if (

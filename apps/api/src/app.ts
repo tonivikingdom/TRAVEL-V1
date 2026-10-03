@@ -1,4 +1,5 @@
 import {
+  TripImpactService,
   StaticBackupService,
   InTripReadService,
   AssistanceCapabilityService,
@@ -48,6 +49,7 @@ import {
 } from './credential-transport.js';
 
 export interface ApiDependencies {
+  readonly tripImpactService?: TripImpactService;
   readonly staticBackupService?: StaticBackupService;
   readonly inTripReadService?: InTripReadService;
   readonly readinessProbe: ReadinessProbe;
@@ -261,6 +263,28 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
           503,
         );
       return dependencies.inTripReadService.read(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/impact',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.tripImpactService)
+        throw new ApplicationError(
+          'SERVICE_UNAVAILABLE',
+          '后续影响暂时无法读取。',
+          503,
+        );
+      return dependencies.tripImpactService.read(
         authenticated.actor,
         request.params.tripId,
       );

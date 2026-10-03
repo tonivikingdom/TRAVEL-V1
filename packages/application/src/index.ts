@@ -228,3 +228,4 @@ export type {
   AuthoringPersistenceInput,
   AuthoringMutationResult,
 } from './trip-ports.js';
+export * from './static-backup-service.js';

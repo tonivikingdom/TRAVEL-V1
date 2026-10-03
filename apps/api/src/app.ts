@@ -1,4 +1,5 @@
 import {
+  StaticBackupService,
   InTripReadService,
   AssistanceCapabilityService,
   ApplicationError,
@@ -47,6 +48,7 @@ import {
 } from './credential-transport.js';
 
 export interface ApiDependencies {
+  readonly staticBackupService?: StaticBackupService;
   readonly inTripReadService?: InTripReadService;
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
@@ -198,6 +200,50 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       );
     },
   );
+
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/backup',
+    async (request, reply) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      reply.header('Cache-Control', 'private, no-store');
+      if (!dependencies.staticBackupService)
+        throw new ApplicationError(
+          'SERVICE_UNAVAILABLE',
+          '备份服务暂时不可用。',
+          503,
+        );
+      return dependencies.staticBackupService.latest(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+  app.post<{
+    Params: { tripId: string };
+    Body: import('@travel/contracts').GenerateStaticBackupRequest;
+  }>('/trips/:tripId/backup', async (request, reply) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    reply.header('Cache-Control', 'private, no-store');
+    if (!dependencies.staticBackupService)
+      throw new ApplicationError(
+        'SERVICE_UNAVAILABLE',
+        '备份服务暂时不可用。',
+        503,
+      );
+    return dependencies.staticBackupService.generate(
+      authenticated.actor,
+      request.params.tripId,
+      request.body,
+    );
+  });
 
   // P6B: stored evidence only; no execution trigger or Provider refresh.
   app.get<{ Params: { tripId: string } }>(

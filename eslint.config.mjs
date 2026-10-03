@@ -11,6 +11,10 @@ export default tseslint.config(
       '浏览器阅读版.html',
     ],
   },
+  {
+    files: ['apps/web/**/*.ts'],
+    languageOptions: { globals: globals.browser },
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -48,6 +48,7 @@ import {
 } from './route-snapshot.js';
 import {
   evaluateTripScheduleRecord,
+  evaluateRouteReplacementSchedule,
   externalRouteDestinationSchedule,
   orderedTripNodes,
 } from './schedule-evaluation.js';
@@ -169,7 +170,10 @@ export class RouteQueryService {
     const origin = requirePlaceEndpoint(fromNode);
     const destination = requirePlaceEndpoint(toNode);
 
-    const schedule = evaluateTripScheduleRecord(trip);
+    const schedule = evaluateRouteReplacementSchedule(
+      trip,
+      corridor.replacementTransportEdgeIds,
+    );
     if (schedule.conflicts.length > 0) {
       throw new ApplicationError(
         'CONSTRAINT_CONFLICT',

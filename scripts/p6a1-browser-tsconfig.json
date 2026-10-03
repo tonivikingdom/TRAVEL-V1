@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@travel/application": ["../packages/application/src/index.ts"],
+      "@travel/contracts": ["../packages/contracts/src/index.ts"],
+      "@travel/domain": ["../packages/domain/src/index.ts"],
+      "@travel/persistence": ["../packages/persistence/src/index.ts"],
+      "@travel/providers": ["../packages/providers/src/index.ts"],
+      "@travel/storage": ["../packages/storage/src/index.ts"]
+    }
+  }
+}

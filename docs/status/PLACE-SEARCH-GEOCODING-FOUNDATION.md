@@ -64,14 +64,14 @@ Maps/navigation use the selected Place's stored reliable coordinates through exi
 
 All test inputs/captures explicitly **SYNTHETIC**. Public-doc research is not a live Provider test.
 
-| Local check                                                                   | Result                                                                                                                                  |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Frozen install; Prisma generate / validate; format / lint / typecheck / build | PASS                                                                                                                                    |
-| Unit                                                                          | 768 passed (68 files)                                                                                                                   |
-| PostgreSQL integration                                                        | 619 passed: 106 persistence + 513 API; clean deploy 26 migrations                                                                       |
-| Chromium / WebKit                                                             | 152 passed per engine; 12 focused cases rerun per engine after final submit/recovery refinements                                        |
-| Compose / P5B                                                                 | Local environment build failed; Docker Hub diagnostics returned HTTP 503. Final Draft PR CI is required evidence, not these failed runs |
-| Schema / migrations                                                           | Both delta 0; count 26                                                                                                                  |
+| Local check                                                                   | Result                                                                                             |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Frozen install; Prisma generate / validate; format / lint / typecheck / build | PASS                                                                                               |
+| Unit                                                                          | 773 passed (69 files)                                                                              |
+| PostgreSQL integration                                                        | 627 passed: 106 persistence + 521 API; clean deploy 26 migrations                                  |
+| Chromium / WebKit                                                             | 152 passed per engine on the repaired fixture HEAD; final CI is blocked by the later-main conflict |
+| Compose / P5B                                                                 | Compose and P5B PASS locally on repair HEAD; final CI blocked by later-main conflict               |
+| Schema / migrations                                                           | Both delta 0; count 26                                                                             |
 
 Final committed HEAD, exact CI URL/results (including Chromium + WebKit, Compose and P5B) are recorded in the Draft PR. Required runs include frozen install, Prisma generate/validate, format/lint/typecheck, Unit, actual PostgreSQL integration (26 migrations), build, full Chromium and WebKit, Compose and P5B. New regressions verify search zero writes, explicit ambiguous candidate choice, reliable/missing coordinates, tampering/expiry/restart, per-process request guards, Provider/core error separation, candidate reselection after an accepted write, Enter-only search, saved/candidate confirmation switching, local outage/saved fallback, owner/admin/Trip isolation, original authoring receipt replay and atomic version conflict, cancel, unknown write followed by expired evidence (including an already-committed lost response and a failed core reread) with authoritative recovery, Japanese text/scroll at 320/375/390/430/enlarged/desktop.
 
@@ -92,6 +92,10 @@ Focused regression: five Unit cases include immediately before/after Tokyo midni
 Repair delta is confined to acceptance fixtures/helpers/regressions and documentation. Production application/Domain/Provider/Web code and Prisma are unchanged relative to the reviewed product. Migration total remains **26**, schema/migration delta **0/0**. Real Geoapify/F-05 stay **OPEN/PARTIAL**, disabled by default, with no live/paid call.
 
 Main advanced during this task to `f407765675b3290a6aac01fbfd90506c150943bb` (mobile Safari/touch hardening). PR #46 has Web conflicts with this later batch. No rebase or integration is performed without scope clarification; fixture validation does not claim that later-main integration passed. Final exact HEAD, CI and validation results are recorded in PR #46.
+
+Validated repair HEAD: `0f49f2e3b9a75cf2c9844cd67ff0a7e84575d659`. Frozen install, Prisma generate/validate, format/lint/typecheck/build, Unit **773/69 files**, PostgreSQL **627 (106 persistence + 521 API)**, Chromium **152**, WebKit **152**, clean migration deploy **26**, and full Compose **PASS** locally. The eight PostgreSQL boundary regressions pass within the complete API suite; the two original-fixture negative controls retain their exact Preview errors. Full Compose passes Ground/handoff/suffix and trusted external-origin Query/Preview/Adopt/Undo, along with the existing lifecycle, persistence, outage/recovery and private-storage checks. An initial local run failed earlier in F-09 location with HTTP 503, before reaching Ground; this is recorded as nonpassing evidence, and the frozen-source full run passes all assertions. No test or TLS change was made. P5B **PASS**: 5 users, 200 observed requests, 0 isolation failures, 0 unexpected 5xx and 0 network failures.
+
+**NOT RESOLVED / CI BLOCKED:** GitHub confirms `CONFLICTING / DIRTY` against the later Safari/touch main commit. No Actions run/checks exists for the repair HEAD. Earlier green runs are historical only. Do not claim final-head CI PASS or later-main integration; the active CURRENT-TASK remains until the requested successful final CI is possible. A documentation-only follow-up records completed local evidence; its exact final SHA is recorded in PR #46. All runtime/fixture/test files remain identical to the validated repair HEAD.
 
 ## Visual review
 

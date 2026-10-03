@@ -1133,3 +1133,92 @@ form button {
     flex-wrap: wrap;
   }
 }
+
+/* Static insurance entrance stays secondary to Today and authoring. */
+.essentials-entry {
+  max-width: 1280px;
+  margin: 0.4rem auto 0;
+  padding: 0 1rem;
+  text-align: right;
+}
+.essentials-entry button {
+  color: var(--muted);
+  font-size: 0.95rem;
+  background: transparent;
+}
+.essentials {
+  max-width: 780px;
+  margin: auto;
+  padding: 1.25rem max(1rem, env(safe-area-inset-right))
+    calc(2rem + env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  overflow-wrap: anywhere;
+}
+.essentials h1 {
+  font-size: 1.6rem;
+}
+.essentials p,
+.essentials strong,
+.essentials summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.essential-card {
+  background: white;
+  border: 1px solid #dce7f3;
+  border-radius: 16px;
+  padding: 1rem;
+  margin: 0.8rem 0;
+}
+.essential-card strong {
+  font-size: 1.1rem;
+}
+.essential-card p {
+  margin: 0.55rem 0;
+}
+.essential-leg {
+  border-top: 1px solid #e2ebf5;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.essentials details {
+  margin-top: 0.8rem;
+}
+.essentials summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+}
+.backup-label {
+  color: #245e98;
+  font-weight: 700;
+}
+.backup-stamp {
+  font-size: 1.1rem;
+  line-height: 1.8;
+}
+.backup-warning,
+.backup-fallback {
+  background: #edf4fe;
+  padding: 1rem;
+  border-radius: 14px;
+}
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: center;
+}
+.backup-actions button,
+.backup-fallback button {
+  max-width: 100%;
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.backup-fallback {
+  margin-top: 1rem;
+  overflow-wrap: anywhere;
+}
+.essential-note {
+  white-space: pre-wrap;
+}

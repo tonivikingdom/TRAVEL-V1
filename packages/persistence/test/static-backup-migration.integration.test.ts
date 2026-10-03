@@ -14,46 +14,48 @@ if (databaseUrl === undefined || databaseUrl.trim() === '') {
 const migrationsPath = fileURLToPath(
   new URL('../../../prisma/migrations/', import.meta.url),
 );
-const migration = '20261003090000_p6a2_trip_authoring_receipts';
+const migration = '20261003100000_p6b2_static_backup';
 const splitMigrations = new Set([
   '20260920110000_p4b2_route_adoption',
   '20260920150000_p4b3_route_undo',
 ]);
 
-describe('P6A-2 additive authoring receipt migration', () => {
-  it('applies 25 clean migrations with owner-scoped receipt uniqueness', async () => {
-    const names = (await migrationNames()).filter((n) => n <= migration);
-    expect(names).toHaveLength(25);
+describe('P6B-2 SYNTHETIC additive backup migration', () => {
+  it('deploys 26 clean migrations and enforces owner-trip FK and idempotency', async () => {
+    const names = await migrationNames();
+    expect(names).toHaveLength(26);
     await withDatabase('clean', async (client) => {
       for (const name of names) await applyMigration(client, name);
-      const columns = (
+      const owner = randomUUID(),
+        stranger = randomUUID(),
+        trip = randomUUID();
+      for (const id of [owner, stranger])
         await client.query(
-          `SELECT column_name FROM information_schema.columns WHERE table_name='TripAuthoringReceipt'`,
-        )
-      ).rows;
-      expect(columns.map((r) => r.column_name)).toEqual(
-        expect.arrayContaining([
-          'tripId',
-          'ownerUserId',
-          'requestHash',
-          'result',
-          'baseTripVersion',
-          'resultingTripVersion',
-        ]),
+          `INSERT INTO "User" (id,email,"normalizedEmail","updatedAt") VALUES ($1,$2,$2,now())`,
+          [id, `SYNTHETIC-${id}@synthetic.example.test`],
+        );
+      await client.query(
+        `INSERT INTO "Trip" (id,"ownerUserId",name,"planningAnchorDate","defaultPeopleCount","updatedAt") VALUES ($1,$2,'SYNTHETIC','2031-10-01',1,now())`,
+        [trip, owner],
       );
+      const insert = `INSERT INTO "TripStaticBackup" (id,"ownerUserId","tripId","tripVersion","idempotencyKey",artifact) VALUES ($1,$2,$3,1,'SYNTHETIC-key','{}')`;
+      await client.query(insert, [randomUUID(), owner, trip]);
+      await expect(
+        client.query(insert, [randomUUID(), owner, trip]),
+      ).rejects.toMatchObject({ code: '23505' });
+      await expect(
+        client.query(insert, [randomUUID(), stranger, trip]),
+      ).rejects.toMatchObject({ code: '23503' });
+      await client.query(`DELETE FROM "Trip" WHERE id=$1`, [trip]);
       expect(
-        (
-          await client.query(
-            `SELECT indexname FROM pg_indexes WHERE tablename='TripAuthoringReceipt'`,
-          )
-        ).rows.map((r) => r.indexname),
-      ).toContain('TripAuthoringReceipt_ownerUserId_idempotencyKey_key');
+        (await client.query(`SELECT * FROM "TripStaticBackup"`)).rows,
+      ).toHaveLength(0);
     });
   });
-  it('preserves populated 24-migration facts exactly and permits Trip deletion without receipt history FK cycles', async () => {
+  it('preserves populated 25-migration Trip/authoring/date/notes and all tables exactly during 25→26', async () => {
     await withDatabase('populated', async (client) => {
       const names = (await migrationNames()).filter((n) => n < migration);
-      expect(names).toHaveLength(24);
+      expect(names).toHaveLength(25);
       for (const name of names) await applyMigration(client, name);
       const owner = randomUUID(),
         trip = randomUUID(),
@@ -75,29 +77,23 @@ describe('P6A-2 additive authoring receipt migration', () => {
         `INSERT INTO "ItineraryNode" (id,"tripId",kind,"dayOccurrenceId",position,note,"updatedAt") VALUES ($1,$2,'FREE_ACTION',$3,0,'SYNTHETIC activity',now())`,
         [node, trip, day],
       );
-      const tables = ['User', 'Trip', 'DayOccurrence', 'ItineraryNode'];
-      const before = await Promise.all(
-        tables.map((t) => client.query(`SELECT * FROM "${t}" ORDER BY id`)),
-      );
-      await applyMigration(client, migration);
-      for (const [i, t] of tables.entries())
-        expect(
-          (await client.query(`SELECT * FROM "${t}" ORDER BY id`)).rows,
-        ).toEqual(before[i]!.rows);
       await client.query(
         `INSERT INTO "TripAuthoringReceipt" (id,"ownerUserId","tripId","idempotencyKey","requestHash","baseTripVersion","resultingTripVersion",result) VALUES ($1,$2,$3,'SYNTHETIC-key',$4,1,2,'{}')`,
         [randomUUID(), owner, trip, 'a'.repeat(64)],
       );
-      await expect(
-        client.query(
-          `INSERT INTO "TripAuthoringReceipt" (id,"ownerUserId","tripId","idempotencyKey","requestHash","baseTripVersion","resultingTripVersion",result) VALUES ($1,$2,$3,'SYNTHETIC-key',$4,1,2,'{}')`,
-          [randomUUID(), owner, trip, 'a'.repeat(64)],
-        ),
-      ).rejects.toMatchObject({ code: '23505' });
-      await client.query(`DELETE FROM "Trip" WHERE id=$1`, [trip]);
-      expect(
-        (await client.query(`SELECT * FROM "TripAuthoringReceipt"`)).rows,
-      ).toHaveLength(0);
+      const tables = (
+        await client.query(
+          `SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename`,
+        )
+      ).rows.map((r) => r.tablename as string);
+      const before = await Promise.all(
+        tables.map((t) => client.query(`SELECT * FROM "${t}"`)),
+      );
+      await applyMigration(client, migration);
+      for (const [i, t] of tables.entries())
+        expect((await client.query(`SELECT * FROM "${t}"`)).rows).toEqual(
+          before[i]!.rows,
+        );
     });
   });
 });
@@ -127,7 +123,7 @@ async function withDatabase(
   suffix: string,
   run: (client: Client) => Promise<void>,
 ): Promise<void> {
-  const name = `travel_p6a2_${suffix}_${randomUUID().replaceAll('-', '')}`;
+  const name = `travel_p6b2_${suffix}_${randomUUID().replaceAll('-', '')}`;
   const adminUrl = new URL(databaseUrl!);
   adminUrl.pathname = '/postgres';
   const admin = new Client({ connectionString: adminUrl.toString() });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   AuthService,
+  StaticBackupService,
   InTripReadService,
   digestOpaqueToken,
   ExecutionRiskService,
@@ -43,6 +44,7 @@ import {
   createPrismaClient,
   hashPreservedRoutePrefix,
   PrismaAuthRepository,
+  PrismaStaticBackupRepository,
   PrismaInTripReadRepository,
   PrismaExecutionRiskRepository,
   PrismaExecutionLocationRepository,
@@ -289,6 +291,47 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     );
     return { trip, adopted, leg, from: from! };
   }
+
+  it('P6B-2 preserves adopted saved route legs without Query/Preview/Adopt or Trip writes', async () => {
+    const f = await adoptedFixedGroundTrip();
+    const t = f.adopted.trip;
+    const backup = new StaticBackupService(
+      new PrismaStaticBackupRepository(managed.client),
+    );
+    const before = await externalDurableState(t.id),
+      calls = providerInputs.length;
+    const saved = await backup.generate(userA.actor, t.id, {
+      baseTripVersion: t.version,
+      idempotencyKey: randomUUID(),
+    });
+    expect(saved.routes[0]!.legs).toEqual(
+      t.savedRoutes![0]!.legs.map((l) => ({
+        mode: l.mode,
+        from: {
+          name: l.from.name,
+          address: null,
+          latitude: l.from.latitude,
+          longitude: l.from.longitude,
+        },
+        to: {
+          name: l.to.name,
+          address: null,
+          latitude: l.to.latitude,
+          longitude: l.to.longitude,
+        },
+        departure: l.departure,
+        arrival: l.arrival,
+        durationSeconds: l.durationSeconds,
+        fixedService: l.fixedService,
+        serviceLabel: l.serviceLabel,
+      })),
+    );
+    expect(saved.transports.map((e) => e.id)).toEqual(
+      t.connections.flatMap((c) => (c.transport ? [c.transport.id] : [])),
+    );
+    expect(await externalDurableState(t.id)).toEqual(before);
+    expect(providerInputs.length).toBe(calls);
+  });
 
   it('P6A-2 authoring cannot silently archive or move the endpoints of adopted transport', async () => {
     const f = await adoptedFixedGroundTrip();

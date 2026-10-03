@@ -465,6 +465,7 @@ model Trip {
   routePreviews           RoutePreview[]
   adoptedRoutes           AdoptedRoute[]
   transportDayProjections TransportDayProjection[]
+  staticBackups          TripStaticBackup[]
   authoringReceipts       TripAuthoringReceipt[]
   operationReceipts       OperationReceipt[]
   outboxEvents            OutboxEvent[]
@@ -1255,4 +1256,18 @@ model TripAuthoringReceipt {
 
   @@unique([ownerUserId, idempotencyKey])
   @@index([tripId, createdAt])
+}
+
+model TripStaticBackup {
+  id             String   @id @default(uuid()) @db.Uuid
+  ownerUserId    String   @db.Uuid
+  tripId         String   @db.Uuid
+  tripVersion    Int
+  generatedAt    DateTime @default(now()) @db.Timestamptz(3)
+  idempotencyKey String   @db.VarChar(80)
+  artifact       Json     @db.JsonB
+  trip           Trip     @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@unique([ownerUserId, tripId, idempotencyKey])
+  @@index([ownerUserId, tripId, generatedAt(sort: Desc), id(sort: Desc)])
 }

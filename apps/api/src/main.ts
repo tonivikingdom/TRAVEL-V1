@@ -1,4 +1,5 @@
 import {
+  StaticBackupService,
   InTripReadService,
   AssistanceCapabilityService,
   AuthService,
@@ -17,6 +18,7 @@ import {
   TripService,
 } from '@travel/application';
 import {
+  PrismaStaticBackupRepository,
   PrismaInTripReadRepository,
   createPostgresReadiness,
   createPrismaClient,
@@ -72,6 +74,7 @@ let routeQueryService: RouteQueryService | undefined;
 let routePreviewService: RoutePreviewService | undefined;
 let routeAdoptionService: RouteAdoptionService | undefined;
 let routeUndoService: RouteUndoService | undefined;
+let staticBackupService: StaticBackupService | undefined;
 let inTripReadService: InTripReadService | undefined;
 let tripService: TripService | undefined;
 
@@ -87,6 +90,9 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
   );
   notificationService = new NotificationService(
     new PrismaNotificationRepository(managedPrisma.client),
+  );
+  staticBackupService = new StaticBackupService(
+    new PrismaStaticBackupRepository(managedPrisma.client),
   );
   inTripReadService = new InTripReadService(
     new PrismaInTripReadRepository(managedPrisma.client),
@@ -209,6 +215,7 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
 
 const app = buildApi({
   readinessProbe: managedProbe.probe,
+  ...(staticBackupService ? { staticBackupService } : {}),
   ...(inTripReadService ? { inTripReadService } : {}),
   ...(authService === undefined ? {} : { authService }),
   ...(assistanceCapabilityService === undefined

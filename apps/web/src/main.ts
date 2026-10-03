@@ -51,6 +51,16 @@ import {
   arrangementName,
   type TemporaryDay,
 } from './authoring.js';
+import {
+  backupOwner,
+  bindBackupOwner,
+  backupTimestamp,
+  downloadBackup,
+  essentialsBody,
+  liveEssentials,
+  localBackups,
+  saveLocalBackup,
+} from './essentials.js';
 import './styles.css';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -74,7 +84,194 @@ let selection:
   | { type: 'route'; from: string; to: string }
   | null = null;
 let draftDirty = false;
-let currentUserId: string | null = null;
+let currentUserId: string | null = backupOwner();
+let requestedTripId: string | null = null;
+let materialsOpen = false;
+let materialsVerifying = false;
+let materialsRead = 0;
+let viewingBackup: import('@travel/contracts').StaticBackupView | null = null;
+let latestBackup: import('@travel/contracts').StaticBackupView | null = null;
+let backupNotice = '';
+let backupPending: {
+  tripId: string;
+  baseTripVersion: number;
+  idempotencyKey: string;
+} | null = null;
+function backupFallback() {
+  const saved = localBackups(currentUserId).filter(
+    (b) => !requestedTripId || b.tripId === requestedTripId,
+  );
+  return `<section class="backup-fallback"><h2>静态行程备份</h2><p>与在线行程独立，此内容不会自动更新。</p>${saved.length ? saved.map((b) => `<button data-local-backup="${b.tripId}">查看最近备份 · ${esc(b.name)}</button><p class="muted">备份生成于 ${esc(backupTimestamp(b.generatedAt))} · Trip version ${b.tripVersion}</p>`).join('') : '<p>暂无可用备份。本机没有保存的静态备份；服务恢复后可查看或生成。</p>'}</section>`;
+}
+function renderMaterials() {
+  if (materialsVerifying && !viewingBackup) {
+    root.innerHTML =
+      '<header><button data-action="close-materials">‹ 返回行程</button><div class="brand">TRAVEL</div></header><main class="essentials"><h1>旅行资料 / 备份</h1><p role="status">正在核验在线行程资料…</p></main>';
+    return;
+  }
+  const value = viewingBackup ?? (trip ? liveEssentials(trip, inTrip) : null);
+  root.innerHTML = `<header><button data-action="close-materials">‹ ${trip ? '返回行程' : '返回'}</button><div class="brand">TRAVEL</div></header><main class="essentials">${viewingBackup ? `<p class="backup-label">正在查看备份</p><h1>静态行程备份</h1><p class="backup-stamp">备份生成于 ${esc(backupTimestamp(viewingBackup.generatedAt))}<br>Trip version ${viewingBackup.tripVersion}</p><p class="backup-warning">此内容不会自动更新。${trip && trip.id === viewingBackup.tripId ? (trip.version !== viewingBackup.tripVersion ? `在线行程已修改为版本 ${trip.version}，这份备份保留旧版本。` : '版本与已读取的在线行程一致，交通和航班信息仍是保存时的内容。') : '服务暂时不可用，无法核验在线版本。'} 保存时预计时间不是现在重新查询的结果。</p><div class="backup-actions"><button data-action="download-backup">下载静态文件</button>${trip ? `<button data-action="live-essentials" ${materialsVerifying ? 'disabled' : ''}>查看在线旅行资料</button>` : ''}</div>` : `<p class="eyebrow">在线行程资料</p><h1>旅行资料 / 备份</h1><p>地点、备注与已保存的交通信息。先查看在线行程；备份由你主动更新。</p><div class="backup-actions"><button class="primary" data-action="generate-backup" ${busy ? 'disabled' : ''}>更新离线备份</button>${latestBackup ? '<button data-action="view-backup">查看最近备份</button>' : '<span>暂无可用备份</span>'}</div><p class="muted">更新后会在此浏览器保存一份私人备份，包含备注。共享设备请退出以清除本机副本；下载文件需自行保管。</p>${latestBackup ? `<p>最近备份生成于 ${esc(backupTimestamp(latestBackup.generatedAt))} · Trip version ${latestBackup.tripVersion}</p>` : ''}`}<p role="status">${esc(backupNotice)}</p>${value ? essentialsBody(value, !!viewingBackup) : '<p>暂无可用资料。</p>'}${viewingBackup ? '<p class="muted">此备份只供查看。行程修改后，请主动更新备份。</p>' : ''}</main>`;
+}
+async function openMaterials() {
+  if (!trip || busy || (detail.open && !drawerClose())) return;
+  const basis = trip,
+    owner = currentUserId,
+    credential = sessionStorage.getItem(tokenKey),
+    navigation = epoch,
+    request = ++materialsRead;
+  const active = () =>
+    request === materialsRead &&
+    materialsOpen &&
+    navigation === epoch &&
+    currentUserId === owner &&
+    sessionStorage.getItem(tokenKey) === credential &&
+    trip?.id === basis.id &&
+    trip.version === basis.version;
+  materialsOpen = true;
+  materialsVerifying = true;
+  // Keep the explicitly opened static artifact while verifying either entry.
+  backupNotice = viewingBackup ? '正在核验在线行程资料…' : '';
+  inTrip = null;
+  inTripReadUnavailable = true;
+  render();
+  try {
+    // Auxiliary failures do not establish a core outage. Verify the authority.
+    const fresh = await api.request<TripView>(`/trips/${basis.id}`);
+    if (!active()) return;
+    if (fresh.id !== basis.id || fresh.version !== basis.version)
+      throw new WebError(409, 'VERSION_CONFLICT', '行程已变化，请重新载入。');
+    trip = fresh;
+    const reads = await Promise.allSettled([
+      api.request<import('@travel/contracts').LatestStaticBackupResponse>(
+        `/trips/${basis.id}/backup`,
+      ),
+      api.request<InTripView>(`/trips/${basis.id}/in-trip`),
+    ]);
+    if (!active()) return;
+    backupNotice = '';
+    const [backup, evidence] = reads;
+    for (const result of reads)
+      if (
+        result.status === 'rejected' &&
+        result.reason instanceof WebError &&
+        [401, 403, 404].includes(result.reason.status)
+      )
+        throw result.reason;
+    if (backup.status === 'fulfilled') latestBackup = backup.value.backup;
+    else {
+      latestBackup =
+        viewingBackup ??
+        localBackups(owner).find((b) => b.tripId === basis.id) ??
+        null;
+      backupNotice = latestBackup
+        ? '未能读取服务器备份；已有静态备份仍可查看。'
+        : '未能读取服务器备份；暂无可用备份。';
+    }
+    if (evidence.status === 'fulfilled') {
+      if (
+        evidence.value.tripId !== basis.id ||
+        evidence.value.tripVersion !== basis.version
+      )
+        throw new WebError(409, 'VERSION_CONFLICT', '行程已变化，请重新载入。');
+      inTrip = evidence.value;
+      inTripReadUnavailable = false;
+      inTripReadAt = new Date().toISOString();
+    } else backupNotice += ' 航班资料暂时无法读取。';
+    materialsVerifying = false;
+    viewingBackup = null;
+    render();
+  } catch (error) {
+    if (!active()) return;
+    // An explicitly opened artifact may have no persistent device copy.
+    const keepStatic =
+      !!viewingBackup &&
+      error instanceof WebError &&
+      (error.status >= 500 || (error.status === 0 && error.code === 'NETWORK'));
+    materialsOpen = keepStatic;
+    materialsVerifying = false;
+    if (!keepStatic) viewingBackup = null;
+    trip = null;
+    schedule = null;
+    inTrip = null;
+    ground = null;
+    notice = errorText(error);
+    backupNotice = keepStatic ? notice : '';
+    if (error instanceof WebError && error.status === 401) {
+      sessionStorage.removeItem(tokenKey);
+      bindBackupOwner(null);
+      currentUserId = null;
+      latestBackup = null;
+    }
+    render();
+  }
+}
+async function generateBackup() {
+  if (!trip || !currentUserId || busy) return;
+  const basis = trip,
+    owner = currentUserId;
+  backupPending ??= {
+    tripId: basis.id,
+    baseTripVersion: basis.version,
+    idempotencyKey: crypto.randomUUID(),
+  };
+  if (backupPending.tripId !== basis.id)
+    backupPending = {
+      tripId: basis.id,
+      baseTripVersion: basis.version,
+      idempotencyKey: crypto.randomUUID(),
+    };
+  busy = true;
+  backupNotice = '正在生成备份…';
+  render();
+  try {
+    const b = await api.request<import('@travel/contracts').StaticBackupView>(
+      `/trips/${basis.id}/backup`,
+      {
+        baseTripVersion: backupPending.baseTripVersion,
+        idempotencyKey: backupPending.idempotencyKey,
+      },
+    );
+    backupPending = null;
+    if (currentUserId !== owner || b.tripId !== basis.id) return;
+    latestBackup = b;
+    try {
+      saveLocalBackup(owner, b);
+      backupNotice =
+        '备份已生成并保存在此浏览器。可下载静态文件，离开网页后也能查看。';
+    } catch {
+      backupNotice =
+        '服务器备份已生成，但本机保存失败。请下载静态文件以供断网时查看。';
+    }
+    viewingBackup = b;
+  } catch (e) {
+    if (
+      e instanceof WebError &&
+      !['NETWORK', 'SERVICE_UNAVAILABLE'].includes(e.code)
+    )
+      backupPending = null;
+    backupNotice = errorText(e) + ' 旧备份仍保留。';
+    if (
+      e instanceof WebError &&
+      ([401, 403, 404].includes(e.status) ||
+        ['NETWORK', 'SERVICE_UNAVAILABLE'].includes(e.code))
+    ) {
+      trip = null;
+      schedule = null;
+      materialsOpen = false;
+      viewingBackup = null;
+      notice = errorText(e);
+      if (e.status === 401) {
+        sessionStorage.removeItem(tokenKey);
+        bindBackupOwner(null);
+        currentUserId = null;
+      }
+    }
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
 let detailBasis: { userId: string; tripId: string; nodeId: string } | null =
   null;
 let recoveryRequired = false;
@@ -254,7 +451,7 @@ function banner() {
   return notice ? `<p class="message" role="status">${esc(notice)}</p>` : '';
 }
 function modeSwitch() {
-  return `<nav class="view-switch" aria-label="查看方式"><button data-view="today" aria-pressed="${viewMode === 'today'}">今天 / 下一步</button><button data-view="itinerary" aria-pressed="${viewMode === 'itinerary'}">全部日程</button></nav>`;
+  return `<div class="essentials-entry"><button data-action="essentials">旅行资料 / 备份</button></div><nav class="view-switch" aria-label="查看方式"><button data-view="today" aria-pressed="${viewMode === 'today'}">今天 / 下一步</button><button data-view="itinerary" aria-pressed="${viewMode === 'itinerary'}">全部日程</button></nav>`;
 }
 async function readInTrip(fresh: TripView, request: number) {
   const results = await Promise.allSettled([
@@ -520,12 +717,16 @@ function renderToday() {
   root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
 }
 function render() {
+  if (materialsOpen && (viewingBackup || trip)) {
+    renderMaterials();
+    return;
+  }
   if (!sessionStorage.getItem(tokenKey)) {
     root.innerHTML = `<main class="login"><div class="brand">${icon('route')} TRAVEL</div><h1>把旅行安排好</h1><p>使用受邀邮箱登录，查看你的旅行。</p>${banner()}<form id="login"><label>邮箱<input name="email" type="email" autocomplete="email" required></label><button class="primary">发送登录链接</button></form><p class="muted">登录链接将发送到你的邮箱。不提供公开注册。</p></main>`;
     return;
   }
   if (!trip) {
-    root.innerHTML = `<header><div class="brand">${icon('route')} TRAVEL</div><div class="header-actions"><button data-action="reload">重新载入</button><button data-action="logout">退出</button></div></header><main class="trip-list"><div class="page-heading"><h1>你的旅行</h1><button data-action="create-trip" class="primary"><span class="control-content">${icon('calendar')}新建旅行</span></button></div>${banner()}<div id="trips">正在读取旅行…</div></main>`;
+    root.innerHTML = `<header><div class="brand">${icon('route')} TRAVEL</div><div class="header-actions"><button data-action="reload">重新载入</button><button data-action="logout">退出</button></div></header><main class="trip-list"><div class="page-heading"><h1>你的旅行</h1><button data-action="create-trip" class="primary"><span class="control-content">${icon('calendar')}新建旅行</span></button></div>${banner()}<div id="trips">${notice ? '暂时无法读取在线行程。' : '正在读取旅行…'}</div>${notice ? backupFallback() : ''}</main>`;
     return;
   }
   if (viewMode === 'today') {
@@ -989,9 +1190,15 @@ async function act(operation: () => Promise<void>) {
     if (!detail.open) render();
   } finally {
     disableBusy(false);
+    if (materialsOpen) render();
   }
 }
 async function loadTrip(id: string) {
+  requestedTripId = id;
+  materialsOpen = false;
+  viewingBackup = null;
+  latestBackup =
+    localBackups(currentUserId).find((b) => b.tripId === id) ?? null;
   const request = ++epoch;
   const fresh = await api.request<TripView>(`/trips/${id}`);
   const evaluated = await api.request<ScheduleProjectionView>(
@@ -1012,6 +1219,9 @@ async function loadTrip(id: string) {
   render();
 }
 async function listTrips() {
+  requestedTripId = null;
+  materialsOpen = false;
+  viewingBackup = null;
   temporaryDays = [];
   dayId = '';
   trip = null;
@@ -1065,6 +1275,48 @@ async function command(
 root.addEventListener('click', (event) => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('button');
   if (!target) return;
+  if (target.dataset.localBackup) {
+    const b = localBackups(currentUserId).find(
+      (b) => b.tripId === target.dataset.localBackup,
+    );
+    if (b) {
+      materialsOpen = true;
+      viewingBackup = b;
+      backupNotice = '';
+      render();
+    }
+    return;
+  }
+  if (target.dataset.action === 'essentials') {
+    void openMaterials();
+    return;
+  }
+  if (target.dataset.action === 'generate-backup') {
+    void generateBackup();
+    return;
+  }
+  if (target.dataset.action === 'view-backup' && latestBackup) {
+    viewingBackup = latestBackup;
+    render();
+    return;
+  }
+  if (target.dataset.action === 'download-backup' && viewingBackup) {
+    downloadBackup(viewingBackup);
+    return;
+  }
+  if (target.dataset.action === 'live-essentials') {
+    void openMaterials();
+    return;
+  }
+  if (target.dataset.action === 'close-materials') {
+    if (busy) return;
+    materialsRead++;
+    materialsVerifying = false;
+    materialsOpen = false;
+    viewingBackup = null;
+    render();
+    return;
+  }
   if (target.dataset.view && trip) {
     if (detail.open && !drawerClose()) return;
     viewMode = target.dataset.view === 'today' ? 'today' : 'itinerary';
@@ -1129,11 +1381,20 @@ root.addEventListener('click', (event) => {
     void act(() => (trip ? loadTrip(trip.id) : listTrips()));
   if (target.dataset.action === 'logout')
     void act(async () => {
-      await api.request('/auth/logout', {});
-      sessionStorage.removeItem(tokenKey);
-      trip = null;
-      schedule = null;
-      render();
+      try {
+        await api.request('/auth/logout', {});
+      } finally {
+        sessionStorage.removeItem(tokenKey);
+        bindBackupOwner(null);
+        currentUserId = null;
+        materialsOpen = false;
+        viewingBackup = null;
+        latestBackup = null;
+        backupPending = null;
+        trip = null;
+        schedule = null;
+        render();
+      }
     });
   if (target.dataset.action === 'undo' && receipt && trip)
     void act(async () => {
@@ -1381,6 +1642,7 @@ detail.addEventListener('submit', (event) => {
           throw new Error('请使用原账户恢复，草稿不能转交其他账户。');
         sessionStorage.setItem(tokenKey, result.credential);
         currentUserId = result.user.id;
+        bindBackupOwner(currentUserId);
         await authoring.recover();
       });
       return;
@@ -1415,6 +1677,7 @@ detail.addEventListener('submit', (event) => {
         throw new Error('请使用原账户登录；这份草稿不能转交其他账户。');
       sessionStorage.setItem(tokenKey, result.credential);
       currentUserId = result.user.id;
+      bindBackupOwner(currentUserId);
       await recoverDraft();
     });
     return;
@@ -1536,6 +1799,7 @@ window.addEventListener('beforeunload', (event) => {
 });
 window.addEventListener('offline', () => {
   epoch++;
+  if (!viewingBackup) materialsOpen = false;
   trip = null;
   schedule = null;
   notice =
@@ -1554,6 +1818,8 @@ async function start() {
   const url = new URL(location.href);
   const token = new URLSearchParams(url.hash.slice(1)).get('token');
   if (token) {
+    bindBackupOwner(null);
+    currentUserId = null;
     url.hash = '';
     history.replaceState(null, '', url);
     try {
@@ -1571,15 +1837,27 @@ async function start() {
   if (sessionStorage.getItem(tokenKey)) {
     try {
       currentUserId = (await api.request<UserView>('/me')).id;
+      bindBackupOwner(currentUserId);
       await listTrips();
     } catch (error) {
-      sessionStorage.removeItem(tokenKey);
-      notice = errorText(error);
-      render();
+      if (
+        error instanceof WebError &&
+        (error.code === 'NETWORK' || error.code === 'SERVICE_UNAVAILABLE')
+      ) {
+        notice = errorText(error);
+        render();
+      } else {
+        sessionStorage.removeItem(tokenKey);
+        bindBackupOwner(null);
+        currentUserId = null;
+        notice = errorText(error);
+        render();
+      }
     }
   }
 }
 setInterval(() => {
-  if (viewMode === 'today' && trip && !busy && !detail.open) render();
+  if (viewMode === 'today' && trip && !busy && !detail.open && !materialsOpen)
+    render();
 }, 30000);
 void start();

@@ -194,3 +194,4 @@ export type {
   TripAuthoringCommandInput,
   TripAuthoringRequest,
 } from './trips.js';
+export * from './static-backup.js';

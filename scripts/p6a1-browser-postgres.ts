@@ -66,7 +66,7 @@ const actor = {
   status: 'ACTIVE' as const,
 };
 let trip = await service.createTrip(actor, {
-  name: '东京慢旅行 · SYNTHETIC / PostgreSQL',
+  name: '东京慢旅行 · SYNTHETIC',
   planningAnchorDate: '2030-10-01',
   defaultPeopleCount: 1,
 });
@@ -630,6 +630,11 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
     path: 'docs/status/assets/p6a-1/postgres-mobile-current-transport.png',
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: '搜索路线' }).scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: 'docs/status/assets/p6a-1/postgres-mobile-transport-search.png',
     fullPage: true,
   });
   console.log(

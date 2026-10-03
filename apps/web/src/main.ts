@@ -39,6 +39,7 @@ import {
   times,
 } from './model.js';
 import { navigation, placeMap, mapMode, type MapLocation } from './maps.js';
+import { transportClockPair } from './transport-display.js';
 import './styles.css';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -322,7 +323,7 @@ function wholeRouteMap(
         : null;
   const link = navigation(to, from, mode);
   return link
-    ? `<div class="map-links"><a class="whole-route-map" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${icon('route')}在地图中查询整段</a></div><p class="muted">外部地图重新查询，不锁定原班次、日期或票价。${mode ? '' : '未指定方式，请在地图中选择。'}</p>`
+    ? `<div class="map-links"><a class="whole-route-map" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${icon('route')}在地图中查询整段</a></div><p class="muted map-disclaimer">外部查询不锁定原班次、日期或票价。${mode ? '' : '请在地图中选择方式。'}</p>`
     : '<p class="muted">原起终点或方式不完整，无法在地图中查询原路线。</p>';
 }
 function selectedLegForEdge(edgeId: string) {
@@ -358,31 +359,32 @@ function transportClock(
     edge ? transportTime(edge.timeValues, 'ARRIVAL') : null,
     leg?.arrival?.timeZone,
   );
-  const zones =
-    departure && arrival && departure.timeZone !== arrival.timeZone
-      ? `<small>时区切换：出发 ${esc(departure.timeZone.split('/').at(-1)?.replaceAll('_', ' '))} 当地时间 → 到达 ${esc(arrival.timeZone.split('/').at(-1)?.replaceAll('_', ' '))} 当地时间</small>`
-      : `<small>${
-          [departure, arrival].find((v) => v)?.timeZone
-            ? `时间按 ${esc(
-                [departure, arrival]
-                  .find((v) => v)!
-                  .timeZone.replace('Etc/', '')
-                  .split('/')
-                  .at(-1)
-                  ?.replaceAll('_', ' '),
-              )} 显示`
-            : '时间未知'
-        }</small>`;
-  const vehicle = [departure, arrival].some(
-    (v) => v?.layer === 'ACTUAL' && v.sourceKind === 'PROVIDER_OBSERVATION',
+  return clockPairView(departure, arrival, true);
+}
+function clockPairView(
+  departure: Pick<
+    TemporalValueView,
+    'instant' | 'timeZone' | 'layer' | 'sourceKind'
+  > | null,
+  arrival: Pick<
+    TemporalValueView,
+    'instant' | 'timeZone' | 'layer' | 'sourceKind'
+  > | null,
+  saved: boolean,
+) {
+  const pair = transportClockPair(departure, arrival);
+  const ends = (
+    [
+      ['出发', departure, pair.from],
+      ['到达', arrival, pair.to],
+    ] as const
   )
-    ? '<small>车辆实测不表示你本人已经出发或到达。</small>'
-    : '';
-  return (
-    `<small class="current-transport-times">出发${departure ? ` · ${temporalLabel(departure)}` : ''} ${esc(formatTime(departure))} → 到达${arrival ? ` · ${temporalLabel(arrival)}` : ''} ${esc(formatTime(arrival))}</small>` +
-    zones +
-    vehicle
-  );
+    .map(
+      ([label, value, parts]) =>
+        `<div class="clock-end"><span>${label} · ${value ? temporalLabel(value) : '未知'}</span><strong>${esc(parts?.clock ?? (value ? '时间不可用' : '待定'))}</strong>${!pair.sharedContext && parts ? `<small title="${esc(parts.timeZone)}">${esc(parts.date)}<br>${esc(parts.zone)}</small>` : ''}</div>`,
+    )
+    .join('<span class="clock-arrow" aria-hidden="true">→</span>');
+  return `<div class="${saved ? 'current-transport-times' : 'candidate-transport-times'}">${pair.sharedContext ? `<p class="clock-context" title="${esc(pair.from!.timeZone)}">${esc(pair.sharedContext)}</p>` : ''}<div class="clock-pair">${ends}</div>${pair.zoneChange ? '<small class="clock-context">时区切换 · 两端各按当地时间</small>' : ''}</div>${[departure, arrival].some((v) => v?.layer === 'ACTUAL' && v.sourceKind === 'PROVIDER_OBSERVATION') ? '<small class="vehicle-note">车辆实测不表示你本人已经出发或到达。</small>' : ''}`;
 }
 function legTimes(
   l: RouteCandidateLegView,
@@ -390,8 +392,17 @@ function legTimes(
   saved = false,
   originalPlan = true,
 ) {
-  if (!saved)
-    return `<small>方案计划：${esc(formatTime(l.departure))} → ${esc(formatTime(l.arrival))} · 当地时间</small>`;
+  if (!saved) {
+    const planned = (value: RouteCandidateLegView['departure']) =>
+      value
+        ? {
+            ...value,
+            layer: 'PLANNED' as const,
+            sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
+          }
+        : null;
+    return clockPairView(planned(l.departure), planned(l.arrival), false);
+  }
   const departure = edge ? transportTime(edge.timeValues, 'DEPARTURE') : null;
   const arrival = edge ? transportTime(edge.timeValues, 'ARRIVAL') : null;
   const historical =
@@ -402,22 +413,24 @@ function legTimes(
       arrival.instant !== l.arrival?.instant ||
       departure.layer !== 'PLANNED' ||
       arrival.layer !== 'PLANNED');
-  const originalZones =
-    historical &&
-    l.departure &&
-    l.arrival &&
-    l.departure.timeZone !== l.arrival.timeZone
-      ? `<small>原方案时区：${esc(l.departure.timeZone.split('/').at(-1)?.replaceAll('_', ' '))} → ${esc(l.arrival.timeZone.split('/').at(-1)?.replaceAll('_', ' '))}</small>`
-      : '';
+  const original = transportClockPair(l.departure, l.arrival);
+  const current = transportClockPair(
+    localTransportTime(departure, l.departure?.timeZone),
+    localTransportTime(arrival, l.arrival?.timeZone),
+  );
+  const originalEnd = (parts: typeof original.from) =>
+    parts
+      ? `${parts.clock}${original.sharedContext ? '' : `（${parts.date} · ${parts.zone}）`}`
+      : '待定';
   return (
     transportClock(edge, l) +
     (historical
-      ? `<small class="original-plan">原方案计划：${esc(formatTime(l.departure))} → ${esc(formatTime(l.arrival))}</small>`
+      ? `<div class="original-plan"><span>原方案计划：${esc(originalEnd(original.from))} → ${esc(originalEnd(original.to))}</span>${original.sharedContext && original.sharedContext !== current.sharedContext ? `<small>${esc(original.sharedContext)}</small>` : ''}</div>`
       : '') +
-    originalZones +
     (!edge ? '<small>当前分段时间暂无可靠对应。</small>' : '')
   );
 }
+
 function legView(
   l: RouteCandidateLegView,
   current?: TransportEdgeView | null,
@@ -439,7 +452,7 @@ function legView(
         : `<span>${i === 0 ? '起点' : '终点'}位置未知</span>`;
     })
     .join('');
-  return `<li><strong>${esc(modeLabel[l.mode])} ${esc(l.serviceLabel ?? '')}</strong><p>${publicTransport ? '上车' : '起点'}：${esc(l.from.name)} → ${publicTransport ? '下车' : '终点'}：${esc(l.to.name)}</p>${legTimes(l, current, saved, originalPlan)}<div class="map-links">${links}${nav ? `<a class="segment-navigation" href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${publicTransport ? '步行到上车点' : l.mode === 'WALKING' ? '步行到分段终点' : '驾车到分段终点'}</a>` : '<span>暂无可靠导航目标</span>'}</div></li>`;
+  return `<li class="transport-segment"><div class="segment-heading"><span class="segment-mode">${icon('route')}${esc(modeLabel[l.mode])}</span>${saved && current?.provider === 'SYNTHETIC' ? '<span class="source-tag">合成数据</span>' : ''}</div><strong class="segment-service">${esc(l.serviceLabel ?? modeLabel[l.mode])}</strong>${legTimes(l, current, saved, originalPlan)}<dl class="segment-stops"><div><dt>${publicTransport ? '上车' : '起点'}</dt><dd>${esc(l.from.name)}</dd></div><div><dt>${publicTransport ? '下车' : '终点'}</dt><dd>${esc(l.to.name)}</dd></div></dl><div class="segment-actions">${nav ? `<a class="segment-navigation" href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${icon('pin')}${publicTransport ? '步行到上车点' : l.mode === 'WALKING' ? '步行到分段终点' : '驾车到分段终点'}</a>` : '<span class="muted">暂无可靠导航目标</span>'}<div class="map-links secondary-map-links">${links}</div></div></li>`;
 }
 function savedTransport(chain: readonly ConnectionView[]) {
   const ids = chain.map((c) => c.transport?.id);
@@ -502,7 +515,7 @@ function openRoute(from: string, to: string) {
   drawer.open(
     frame(
       '交通与路线',
-      `<p class="route-endpoints">${esc(nodeTitle(origin))}<span>→</span>${esc(nodeTitle(destination))}</p>${
+      `<p class="route-endpoints"><strong>${esc(nodeTitle(origin))}</strong><span aria-hidden="true">→</span><strong>${esc(nodeTitle(destination))}</strong></p><section class="selected-transport"><h3>当前交通</h3>${connection?.transport ? savedTransport(chain) : '<p class="muted">尚未选择交通</p>'}</section><aside class="route-map-note">${
         origin.place && destination.place
           ? wholeRouteMap(
               origin.place,
@@ -510,11 +523,7 @@ function openRoute(from: string, to: string) {
               chain.map((c) => c.transport?.mode ?? 'OTHER'),
             )
           : '<p>这段交通尚无完整起终点信息，不能查询原路线。</p>'
-      }<p class="map-status">内嵌路线图尚未配置；可展开分段查看地点，或在外部地图中查询。</p><section><h3>当前交通</h3>${
-        connection?.transport
-          ? savedTransport(chain)
-          : '<p class="muted">尚未选择交通</p>'
-      }</section><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
+      }<p class="map-status">内嵌地图未配置；可用外部地图查询。</p></aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
     ),
   );
 }

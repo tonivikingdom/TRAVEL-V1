@@ -1244,14 +1244,16 @@ test('R3 adopted times retain cross-day local dates and different event zones', 
   await page.locator('[data-trip]').click();
   await page.locator('.connection').click();
   await expect(page.locator('.current-transport-times')).toContainText(
-    '2030-10-01 23:30',
+    '2030年10月1日',
   );
   await expect(page.locator('.current-transport-times')).toContainText(
-    '2030-10-02 01:00',
+    '2030年10月2日',
   );
+  await expect(page.locator('.clock-end strong').first()).toHaveText('23:30');
+  await expect(page.locator('.clock-end strong').last()).toHaveText('01:00');
   await expect(page.locator('.saved-legs')).toContainText('时区切换');
-  await expect(page.locator('.saved-legs')).toContainText('Tokyo');
-  await expect(page.locator('.saved-legs')).toContainText('Shanghai');
+  await expect(page.locator('.saved-legs')).toContainText('东京');
+  await expect(page.locator('.saved-legs')).toContainText('上海');
 });
 test('R3 manual public transport keeps service and authoritative times without invented boarding data', async ({
   page,
@@ -1301,4 +1303,319 @@ test('R3 manual public transport keeps service and authoritative times without i
   await expect(page.locator('.saved-legs')).toContainText('上/下车地点未保存');
   await expect(page.getByRole('link', { name: '步行到上车点' })).toHaveCount(0);
   expect(calls).toEqual(before);
+});
+
+function selectedTimingFixture(longNames = false, crossZone = false) {
+  const leg = {
+    ...candidate.legs[0]!,
+    mode: 'BUS' as const,
+    serviceLabel: 'SYNTHETIC 验收公交',
+    ...(longNames
+      ? {
+          from: {
+            ...candidate.legs[0]!.from,
+            name: 'SYNTHETIC 很长的上车站名・中央交通枢纽東口バスターミナル'.repeat(
+              2,
+            ),
+          },
+          to: {
+            ...candidate.legs[0]!.to,
+            name: 'SYNTHETIC 很长的下车站名・旅行目的地サービスセンター'.repeat(
+              2,
+            ),
+          },
+        }
+      : {}),
+    ...(crossZone
+      ? {
+          departure: {
+            instant: '2030-10-01T14:30:00Z',
+            timeZone: 'Asia/Tokyo',
+          },
+          arrival: {
+            instant: '2030-10-01T17:00:00Z',
+            timeZone: 'Asia/Shanghai',
+          },
+        }
+      : {}),
+  };
+  const template = trip.days[0]!.nodes[0]!.timeValues[0]!;
+  trip = {
+    ...trip,
+    connections: [
+      {
+        fromNodeId: fromId,
+        toNodeId: toId,
+        state: 'ACTIVE',
+        transport: {
+          id: tripId,
+          fromNodeId: fromId,
+          toNodeId: toId,
+          mode: 'BUS',
+          fixedService: true,
+          serviceLabel: leg.serviceLabel,
+          note: null,
+          source: 'ADOPTED_ROUTE',
+          adoptedRouteId: tripId,
+          provider: 'SYNTHETIC',
+          providerRef: null,
+          createdAt: trip.createdAt,
+          updatedAt: trip.updatedAt,
+          timeValues: (
+            [
+              ['DEPARTURE', leg.departure],
+              ['ARRIVAL', leg.arrival],
+            ] as const
+          ).map(([pointKind, value]) => ({
+            ...template,
+            pointKind,
+            layer: 'ESTIMATED',
+            sourceKind: 'PROVIDER_OBSERVATION',
+            instant: new Date(
+              Date.parse(value!.instant) + (crossZone ? 0 : 20 * 60000),
+            ).toISOString(),
+            timeZone: value!.timeZone,
+          })),
+        },
+      },
+    ],
+    savedRoutes: [
+      {
+        adoptedRouteId: tripId,
+        transportEdgeIds: [tripId],
+        legs: [leg],
+        legTransportEdges: [{ legIndex: 0, transportEdgeId: tripId }],
+      },
+    ],
+  };
+}
+for (const width of [320, 375, 390, 430, 1440]) {
+  test(`transport refinement ${width}px keeps clock hierarchy, navigation and scroll reachability`, async ({
+    page,
+  }) => {
+    selectedTimingFixture();
+    await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
+    await enter(page);
+    await page.locator('.connection').click();
+    const before = [...calls];
+    await expect(page.locator('.clock-end strong').first()).toHaveText('14:20');
+    await expect(page.locator('.clock-end strong').last()).toHaveText('14:50');
+    await expect(
+      page.locator('.current-transport-times .clock-context'),
+    ).toHaveText('2030年10月1日 · 东京当地时间');
+    await expect(page.locator('.original-plan')).toHaveText(
+      '原方案计划：14:00 → 14:30',
+    );
+    await expect(page.locator('.segment-stops dt')).toHaveText([
+      '上车',
+      '下车',
+    ]);
+    await expect(page.locator('.source-tag')).toHaveText('合成数据');
+    expect(
+      await page
+        .locator('.clock-end strong')
+        .first()
+        .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+    ).toBeGreaterThanOrEqual(20);
+    const nav = page.getByRole('link', { name: '步行到上车点' });
+    expect(
+      await nav.evaluate((el) => el.getBoundingClientRect().height),
+    ).toBeGreaterThanOrEqual(44);
+    expect(
+      await page
+        .locator('.segment-actions')
+        .evaluate((el) =>
+          el.firstElementChild!.classList.contains('segment-navigation'),
+        ),
+    ).toBe(true);
+    if (width === 390) await screenshot(page, 'ui-mobile-transport-first');
+    if (width === 1440) await screenshot(page, 'ui-desktop-transport');
+    const search = page.getByRole('button', { name: '搜索路线' });
+    await search.scrollIntoViewIfNeeded();
+    await expect(search).toBeInViewport();
+    if (width !== 1440)
+      expect(
+        await page
+          .locator('#detail')
+          .evaluate((el) => el.scrollHeight > el.clientHeight),
+      ).toBe(true);
+    if (width === 390) await screenshot(page, 'ui-mobile-transport-search');
+    expect(
+      await page
+        .locator('#detail')
+        .evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+    expect(calls).toEqual(before);
+  });
+}
+for (const width of [320, 375, 390, 430]) {
+  test(`transport refinement long cross-zone content and enlarged text at ${width}px`, async ({
+    page,
+  }) => {
+    selectedTimingFixture(true, true);
+    await page.setViewportSize({ width, height: 844 });
+    await enter(page);
+    await page.locator('.connection').click();
+    await expect(page.locator('.clock-end strong')).toHaveText([
+      '23:30',
+      '01:00',
+    ]);
+    await expect(page.locator('.current-transport-times')).toContainText(
+      '2030年10月2日',
+    );
+    await expect(page.locator('.current-transport-times')).toContainText(
+      '上海当地时间',
+    );
+    for (const enlarged of [false, true]) {
+      if (enlarged)
+        await page.addStyleTag({ content: ':root { font-size: 28px; }' });
+      expect(
+        await page
+          .locator('#detail')
+          .evaluate((el) => el.scrollWidth <= el.clientWidth),
+      ).toBe(true);
+      for (const clock of await page.locator('.clock-end strong').all()) {
+        const box = await clock.boundingBox();
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      }
+      if (width === 320)
+        await screenshot(
+          page,
+          enlarged
+            ? 'ui-mobile-cross-zone-enlarged'
+            : 'ui-mobile-cross-zone-long',
+        );
+    }
+    await page
+      .getByRole('button', { name: '搜索路线' })
+      .scrollIntoViewIfNeeded();
+    await expect(
+      page.getByRole('button', { name: '搜索路线' }),
+    ).toBeInViewport();
+  });
+}
+test('transport refinement captures place default and expanded editor without changing drafts', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enter(page);
+  await screenshot(page, 'ui-mobile-day');
+  await page.locator('[data-node]').first().click();
+  await expect(page.getByRole('dialog').locator('.times')).toContainText(
+    '停留',
+  );
+  await screenshot(page, 'ui-mobile-place');
+  await page.locator('.edit > summary').click();
+  await screenshot(page, 'ui-mobile-place-edit');
+});
+
+test('transport refinement preserves ordered transfer segments and their distinct navigation', async ({
+  page,
+}) => {
+  selectedTimingFixture();
+  const original = trip.savedRoutes![0]!.legs[0]!;
+  const midpoint = {
+    ...original.to,
+    name: 'SYNTHETIC 中央换乘站',
+    latitude: 35.7,
+    longitude: 139.77,
+  };
+  const midId = '10000000-0000-4000-8000-000000000006';
+  const first = { ...original, to: midpoint };
+  const second = {
+    ...original,
+    mode: 'WALKING' as const,
+    serviceLabel: 'SYNTHETIC 站间步行',
+    from: midpoint,
+    departure: { instant: '2030-10-01T05:50:00Z', timeZone: 'Asia/Tokyo' },
+    arrival: { instant: '2030-10-01T06:00:00Z', timeZone: 'Asia/Tokyo' },
+  };
+  const oldEdge = trip.connections[0]!.transport!;
+  const midNode = {
+    ...trip.days[0]!.nodes[1]!,
+    id: midId,
+    position: 1,
+    place: { ...trip.days[0]!.nodes[1]!.place!, ...midpoint, id: midId },
+    source: 'ROUTE_GENERATED' as const,
+    adoptedRouteId: tripId,
+    autoReplaceable: true,
+  };
+  trip = {
+    ...trip,
+    days: trip.days.map((d, i) =>
+      i === 0
+        ? {
+            ...d,
+            nodes: [d.nodes[0]!, midNode, { ...d.nodes[1]!, position: 2 }],
+          }
+        : d,
+    ),
+    connections: [
+      {
+        ...trip.connections[0]!,
+        toNodeId: midId,
+        transport: { ...oldEdge, toNodeId: midId },
+      },
+      {
+        fromNodeId: midId,
+        toNodeId: toId,
+        state: 'ACTIVE',
+        transport: {
+          ...oldEdge,
+          id: fromId,
+          fromNodeId: midId,
+          mode: 'WALKING',
+          fixedService: false,
+          serviceLabel: second.serviceLabel,
+          timeValues: oldEdge.timeValues.map((v) => ({
+            ...v,
+            layer: 'PLANNED',
+            instant:
+              v.pointKind === 'DEPARTURE'
+                ? second.departure.instant
+                : second.arrival.instant,
+          })),
+        },
+      },
+    ],
+    savedRoutes: [
+      {
+        adoptedRouteId: tripId,
+        transportEdgeIds: [tripId, fromId],
+        legs: [first, second],
+        legTransportEdges: [
+          { legIndex: 0, transportEdgeId: tripId },
+          { legIndex: 1, transportEdgeId: fromId },
+        ],
+      },
+    ],
+  };
+  await page.setViewportSize({ width: 390, height: 844 });
+  await enter(page);
+  const reads = [...calls];
+  await page.locator('.connection').first().click();
+  await expect(page.locator('.saved-legs > li')).toHaveCount(2);
+  await expect(page.locator('.segment-service')).toHaveText([
+    'SYNTHETIC 验收公交',
+    'SYNTHETIC 站间步行',
+  ]);
+  const boarding = new URL(
+    (await page
+      .getByRole('link', { name: '步行到上车点' })
+      .getAttribute('href'))!,
+  );
+  const walking = new URL(
+    (await page
+      .getByRole('link', { name: '步行到分段终点' })
+      .getAttribute('href'))!,
+  );
+  expect(boarding.searchParams.get('destination')).toBe(
+    `${first.from.latitude},${first.from.longitude}`,
+  );
+  expect(walking.searchParams.get('destination')).toBe(
+    `${second.to.latitude},${second.to.longitude}`,
+  );
+  expect(calls).toEqual(reads);
+  await screenshot(page, 'ui-mobile-transfer');
 });

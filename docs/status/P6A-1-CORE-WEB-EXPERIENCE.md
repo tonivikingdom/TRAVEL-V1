@@ -99,6 +99,33 @@ Historical Preview/Snapshot data, route adoption/Undo, independent time requirem
 
 Embedded maps remain **PARTIAL**; real timetable/fare validation and iPhone touch/soft-keyboard acceptance remain unverified. No real paid call, merge, public/production deployment or next batch is authorized by this repair.
 
+## Transport visual refinement (same Draft PR #40)
+
+Starting HEAD `16111cab94463d8a125e956a9653afad7a85b093`; main/base `d5350fc051bd4a3ff7b50c1aae5605007e0a3ab2`. The supplied ZIP contained `CODEX_TASK.md` and exactly two reference PNGs (desktop 1440×1000, mobile 390×844). Both PNGs were actually opened before the task was read. They showed selected transport only, not unobscured itinerary/place detail or real-device behavior.
+
+Changes are limited to `apps/web/src/main.ts` display templates, scoped transport CSS, `transport-display.ts` date/clock display, presentation tests and capture evidence. Existing segment/edge provenance, selection of current time facts, constraints, draft lifecycle, R1/R2/R3, command requests and Adopt/Undo semantics are retained. No Application/Persistence/contract/schema/migration/CI/deployment changes; no embedded map or Google route-tool cloud migration.
+
+- Current departure/arrival uses two labelled, unbroken 20–24px clocks. Original plan is visibly secondary. Date and timezone are shared only when both known endpoints prove the same local date and exact zone; otherwise each known endpoint retains its date/zone. Unknown current time never inherits the old plan. This is formatting only, with no browser timezone fallback or new delay calculation.
+- Segment cards keep order, mode/service, separate boarding/alighting rows and navigation. Walking to the real boarding point is the main public-transport action; saved location links are secondary. Walking/driving targets and unknown-position degradation are unchanged. No additional Query/Preview/Adopt/Provider call or execution write for navigation.
+- The original whole-route external query remains between current transport and the existing search form. Concise supporting text retains the absence of embedded maps and the fact that external lookup does not lock the original service/date/fare. SYNTHETIC names remain intact; each reliably associated synthetic segment additionally shows a visible source badge. No regex stripping of real names. Only the explicitly synthetic HTTP fixture title drops the implementation word PostgreSQL.
+- Desktop sidebar/mobile bottom sheet, grab handle/X, symmetric action padding and grouped icon/text alignment are retained. Long names wrap; current clocks do not. Text enlargement can stack the clock ends rather than clip them. Scrolling to the existing search button remains supported. Native date/time inputs stay unchanged, so browser-specific input formatting is not claimed as a custom Chinese date control.
+
+Validation: frozen install, Prisma generate/validate, format/lint/full typecheck, **740 Unit**, **102 persistence + 486 API = 588 PostgreSQL 17 integration**, and build passed. Full Chromium presentation/regression suite has **65 cases**, including the existing R1/R2/R3, race/recovery/owner/constraint/explicit Adopt/Undo checks plus 320/375/390/430px and desktop, large text, cross-day/zones, long stations, ordered multi-leg navigation and search reachability. The real PostgreSQL/HTTP/Chromium chain passed again, including old 15:00 → 14:15, persisted removals/new drafts, owner/session/offline recovery and selected Provider estimate/navigation without new planning or execution writes. The first new browser run had two test-only failures: an unjustified non-scroll expectation at desktop and an ambiguous `.times` locator including background cards; the corrected tests retain the required reachability and scoped detail assertions.
+
+API/Worker/Debug Web runtime health and Compose passed. P5B passed **5 users, 200 requests, 0 isolation failures, 0 unexpected 5xx, 0 network failures**. The first local Compose build exceeded the existing 300-second build timeout; with stable source inputs, the unchanged acceptance passed on retry. No timeout or assertion was weakened. Final-HEAD independent CI results are recorded in the PR report after execution. Migration count remains **24**. Screenshots below were generated and actually opened; they are visual evidence for their shown states only. Maps remain PARTIAL; real timetable/fare and iPhone touch/soft keyboard remain unverified.
+
+### Current visual review captures
+
+- [Mobile complete day, no overlay](assets/p6a-1/ui-mobile-day.png)
+- [Mobile place detail](assets/p6a-1/ui-mobile-place.png)
+- [Mobile place editor expanded](assets/p6a-1/ui-mobile-place-edit.png)
+- [Selected transport first screen, real PostgreSQL](assets/p6a-1/postgres-mobile-current-transport.png)
+- [Selected transport scrolled to search, real PostgreSQL](assets/p6a-1/postgres-mobile-transport-search.png)
+- [Desktop selected transport, real PostgreSQL](assets/p6a-1/postgres-desktop-current-transport.png)
+- [320px long stations and cross-day/cross-zone](assets/p6a-1/ui-mobile-cross-zone-long.png)
+- [320px enlarged text](assets/p6a-1/ui-mobile-cross-zone-enlarged.png)
+- [Ordered transfer segments](assets/p6a-1/ui-mobile-transfer.png)
+
 ## Review screenshots
 
 All data shown is labeled SYNTHETIC; no credentials/private production content appears.

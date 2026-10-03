@@ -195,3 +195,9 @@ export type {
   TripAuthoringRequest,
 } from './trips.js';
 export * from './static-backup.js';
+export type {
+  PlaceSearchCandidate,
+  PlaceSearchResult,
+  PlaceSearchResponse,
+  PlaceSelectionRequest,
+} from './place-search.js';

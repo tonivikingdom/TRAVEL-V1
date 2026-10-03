@@ -7,6 +7,7 @@ import type {
   TripView,
   UserView,
 } from '@travel/contracts';
+import { PlaceSearchPicker } from './place-search.js';
 import { TravelApi, WebError } from './api.js';
 import { esc, orderedNodes } from './model.js';
 
@@ -122,7 +123,11 @@ export class TripAuthoringEditor {
     beforeNodeIds: readonly string[];
   } | null = null;
   private acceptedSnapshot: string | null = null;
-  constructor(private readonly h: Hooks) {}
+  private selectionOutcomeUnknown = false;
+  private readonly placeSearch: PlaceSearchPicker;
+  constructor(private readonly h: Hooks) {
+    this.placeSearch = new PlaceSearchPicker(h.api);
+  }
   get dayKey() {
     return this.context?.dayKey ?? '';
   }
@@ -133,6 +138,8 @@ export class TripAuthoringEditor {
     return this.context !== null;
   }
   reset() {
+    this.placeSearch.reset();
+    this.selectionOutcomeUnknown = false;
     this.context = null;
     this.pending = null;
     this.recoveryRequired = false;
@@ -144,6 +151,8 @@ export class TripAuthoringEditor {
   private begin(mode: 'add' | 'move' | 'create', dayKey = '', nodeId?: string) {
     const owner = this.h.getOwner();
     if (!owner) throw new Error('请先核验登录账户。');
+    this.placeSearch.reset();
+    this.selectionOutcomeUnknown = false;
     this.context = {
       owner,
       tripId: mode === 'create' ? null : this.h.getTrip()!.id,
@@ -220,10 +229,21 @@ export class TripAuthoringEditor {
     const place = kind === 'place';
     this.h.open(
       place ? '添加地点' : '添加自由行动',
-      `<p class="authoring-date">${esc(day.label)}</p><form id="authoring-add" data-authoring data-kind="${place ? 'place' : 'activity'}">${place ? '<p class="muted">从本人已保存的地点选择。地点搜索尚未接入；不会猜测位置。</p><label>已保存的地点<select name="place" required><option value="">正在读取地点…</option></select></label><label>备注（可选）<textarea name="note" maxlength="2000" rows="3"></textarea></label>' : '<label>活动名称<input name="title" maxlength="200" required autocomplete="off" placeholder="例如：附近散步、休息"></label>'}<button class="primary">${content(place ? '添加地点' : '添加自由行动')}</button></form>${place ? '<p data-place-availability role="status"></p>' : ''}<p class="muted">到达、出发和停留可稍后设置，不自动填时间。</p><p id="save-status" role="status"></p>`,
+      `<p class="authoring-date">${esc(day.label)}</p><form id="authoring-add" data-authoring data-kind="${place ? 'place' : 'activity'}">${place ? '<p class="muted">搜索新地点，或从本人已保存的地点选择。</p><label>已保存的地点<select name="place" required><option value="">正在读取地点…</option></select></label><label>备注（可选）<textarea name="note" maxlength="2000" rows="3"></textarea></label>' : '<label>活动名称<input name="title" maxlength="200" required autocomplete="off" placeholder="例如：附近散步、休息"></label>'}<button class="primary">${content(place ? '添加地点' : '添加自由行动')}</button></form>${place ? '<p data-place-availability role="status"></p>' : ''}<p class="muted">到达、出发和停留可稍后设置，不自动填时间。</p><p id="save-status" role="status"></p>`,
     );
     this.baselineForm();
-    if (place) this.h.act(() => this.loadPlaces(true));
+    if (place) {
+      this.placeSearch.mount(
+        this.form()!,
+        this.context.tripId!,
+        () => this.input(),
+        (error) =>
+          this.h.act(async () => {
+            throw error;
+          }),
+      );
+      this.h.act(() => this.loadPlaces(true));
+    }
   }
   private async loadPlaces(initial: boolean) {
     const context = this.context;
@@ -253,7 +273,13 @@ export class TripAuthoringEditor {
         )
         .join('');
     if (selected && places.has(selected)) select.value = selected;
-    else if (selected) {
+    else if (selected.startsWith('search:') && this.placeSearch.candidate) {
+      const candidate = this.placeSearch.candidate;
+      const option = new Option(`搜索候选 · ${candidate.name}`, selected);
+      option.dataset.searchedPlace = 'true';
+      select.add(option);
+      select.value = selected;
+    } else if (selected) {
       select.insertAdjacentHTML(
         'afterbegin',
         '<option value="">原地点已不可用，请重新选择</option>',
@@ -263,12 +289,12 @@ export class TripAuthoringEditor {
     this.h.detail.querySelector('[data-place-availability]')!.innerHTML =
       places.size
         ? ''
-        : '没有已保存的可靠地点。可先添加自由行动；本批不支持名称定位或虚构搜索结果。';
+        : '没有已保存的可靠地点。可以搜索新地点，或先添加自由行动。';
     if (initial)
       this.baseline = JSON.stringify(
         [...new FormData(this.form()!).entries()].map(([k, v]) => [
           k,
-          k === 'note' ? '' : v,
+          k === 'note' || k === 'place' ? '' : v,
         ]),
       );
     this.input();
@@ -327,7 +353,28 @@ export class TripAuthoringEditor {
       } catch (error) {
         if (error instanceof WebError && error.code === 'VERSION_CONFLICT')
           this.pending = null;
-        else throw error;
+        else if (
+          pending.path.endsWith('/place-selection') &&
+          error instanceof WebError &&
+          error.code === 'VALIDATION_ERROR'
+        ) {
+          // The old evidence cannot be resubmitted. Read authority before any fresh selection;
+          // neither acknowledge the unknown write nor discard the user's note draft.
+          this.pending = null;
+          const form = this.form();
+          const current = form ? this.placeSearch.selection(form) : null;
+          if (
+            !current ||
+            current.selectionToken === pending.body.selectionToken
+          ) {
+            this.placeSearch.reset();
+            form?.querySelector('[data-searched-place]')?.remove();
+            this.h.detail
+              .querySelector('[data-selected-summary]')
+              ?.replaceChildren();
+          }
+          this.selectionOutcomeUnknown = true;
+        } else throw error;
       }
     }
     const oldForm = this.form();
@@ -371,7 +418,17 @@ export class TripAuthoringEditor {
       this.context.mode === 'add' &&
       !this.h.days().some((d) => d.key === this.context!.dayKey);
     this.h.detail.querySelector('#authoring-recovery')!.innerHTML =
-      `<p>已重新读取当前版本。草稿尚未提交，请核对目标日期、位置及当前安排。</p>${missingTarget ? `<label>原日期卡已变化，请重新选择目标日期<select id="authoring-retarget"><option value="">请选择日期</option>${this.dayOptions('')}</select></label>` : ''}<button data-authoring-ack><span class="control-content">已核对，继续编辑</span></button>`;
+      `<p>已重新读取当前版本。${this.selectionOutcomeUnknown ? '旧地点候选已失效，上次写入结果仍需核对。请先确认当前安排是否已有该地点，再搜索和明确选择；备注草稿保留。' : '草稿尚未提交，请核对目标日期、位置及当前安排。'}</p>${
+        this.selectionOutcomeUnknown
+          ? `<p>当前安排：${
+              this.h
+                .days()
+                .flatMap((d) => d.nodes.map(arrangementName))
+                .map(esc)
+                .join('、') || '暂无安排'
+            }</p>`
+          : ''
+      }${missingTarget ? `<label>原日期卡已变化，请重新选择目标日期<select id="authoring-retarget"><option value="">请选择日期</option>${this.dayOptions('')}</select></label>` : ''}<button data-authoring-ack><span class="control-content">已核对，继续编辑</span></button>`;
   }
   acknowledge() {
     const retarget = this.h.detail.querySelector<HTMLSelectElement>(
@@ -392,6 +449,7 @@ export class TripAuthoringEditor {
       this.acceptedSnapshot = null;
     }
     this.recoveryRequired = false;
+    this.selectionOutcomeUnknown = false;
     this.h.detail.querySelector('#authoring-recovery')?.remove();
     this.input();
   }
@@ -413,6 +471,7 @@ export class TripAuthoringEditor {
       this.context.dayKey =
         orderedNodes(fresh).find((n) => n.id === this.context!.nodeId)
           ?.dayOccurrenceId ?? this.context.dayKey;
+    this.selectionOutcomeUnknown = false;
     this.baseline = pending.submitted;
     this.acceptedSnapshot = pending.submitted;
     this.pending = null;
@@ -427,6 +486,8 @@ export class TripAuthoringEditor {
     }
     const submitted = value(form),
       data = new FormData(form);
+    const searched =
+      this.context.mode === 'add' ? this.placeSearch.selection(form) : null;
     if (this.acceptedSnapshot === submitted) {
       this.h.message('这份内容已保存，请修改后再提交。');
       return;
@@ -486,6 +547,17 @@ export class TripAuthoringEditor {
           idempotencyKey: crypto.randomUUID(),
           command,
         } satisfies TripAuthoringRequest;
+      }
+      if (searched && command?.type === 'ADD_PLACE_VISIT') {
+        path = `/trips/${context.tripId}/place-selection`;
+        body = {
+          selectionToken: searched.selectionToken,
+          baseTripVersion: this.h.getTrip()!.version,
+          idempotencyKey: body.idempotencyKey,
+          targetDay: command.targetDay,
+          position: command.position,
+          note: command.note,
+        };
       }
       const pending = this.pending ?? {
         path,

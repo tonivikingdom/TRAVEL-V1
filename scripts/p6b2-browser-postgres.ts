@@ -126,6 +126,20 @@ const app = buildApi({
     new PrismaStaticBackupRepository(db.client),
   ),
 });
+let outage: 'backup' | 'evidence' | 'core' | null = null;
+app.addHook('onRequest', async (request, reply) => {
+  if (
+    (outage === 'core' && request.url.startsWith('/trips')) ||
+    (outage === 'backup' && request.url.endsWith('/backup')) ||
+    (outage === 'evidence' && request.url.endsWith('/in-trip'))
+  )
+    return reply.code(503).send({
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'SYNTHETIC injected outage',
+      },
+    });
+});
 const apiOrigin = await app.listen({ host: '127.0.0.1', port: 0 });
 const web = spawn(
   'pnpm',
@@ -181,13 +195,75 @@ try {
     snapshot.displayFlightNumber,
   );
   await page.locator('[data-action=close-materials]').click();
+  const counts = () =>
+    Promise.all([
+      db.client.tripStaticBackup.count(),
+      db.client.tripAuthoringReceipt.count(),
+      db.client.executionEvent.count(),
+      db.client.routeCandidateSnapshot.count(),
+      db.client.routePreview.count(),
+      db.client.operationReceipt.count(),
+      db.client.adoptedRoute.count(),
+    ]);
+  const beforeReads = await counts();
+  outage = 'backup';
+  await page.locator('[data-action=essentials]').click();
+  await expect(page.locator('.essentials [role=status]')).toContainText(
+    '未能读取服务器备份',
+  );
+  await expect(page.locator('.essentials')).toContainText(
+    snapshot.displayFlightNumber,
+  );
+  await page.locator('[data-action=close-materials]').click();
+  outage = 'evidence';
+  await page.locator('[data-action=essentials]').click();
+  await expect(page.locator('.essentials [role=status]')).toContainText(
+    '航班资料暂时无法读取',
+  );
+  await expect(page.getByText('选定航班快照', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('保存的航班信息', { exact: false })).toHaveCount(
+    0,
+  );
+  await expect(page.locator('.essentials')).toContainText(
+    snapshot.displayFlightNumber,
+  );
+  await page.locator('[data-action=close-materials]').click();
+  const emptyContext = await browser.newContext();
+  const emptyPage = await emptyContext.newPage();
+  await emptyPage.addInitScript(
+    (value) => sessionStorage.setItem('travel.web.session', value),
+    credential,
+  );
+  await emptyPage.goto('http://127.0.0.1:5178');
+  await emptyPage.locator('[data-trip]').click();
+  await expect(emptyPage.locator('[data-action=essentials]')).toBeVisible();
+  outage = 'core';
+  await emptyPage.locator('[data-action=essentials]').click();
+  await expect(emptyPage.locator('.backup-fallback')).toContainText(
+    '暂无可用备份',
+  );
+  await expect(emptyPage.locator('.essentials')).toHaveCount(0);
+  await emptyContext.close();
+  await page.locator('[data-action=essentials]').click();
+  await expect(page.locator('.message')).toContainText('核心服务暂时不可用');
+  await expect(page.locator('.essentials')).toHaveCount(0);
+  await page.locator('[data-local-backup]').click();
+  await expect(page.locator('.backup-warning')).toContainText(
+    '无法核验在线版本',
+  );
+  assert.deepEqual(await service.getTrip(actor, trip.id), trip);
+  assert.deepEqual(await counts(), beforeReads);
+  await page.locator('[data-action=close-materials]').click();
   const edited = await service.executeCommand(actor, trip.id, trip.version, {
     type: 'SET_NODE_NOTE',
     nodeId: from!.id,
     note: 'SYNTHETIC 后续修改',
   });
+  outage = null;
   await page.locator('[data-action=reload]').click();
+  await page.locator('[data-trip]').click();
   await page.locator('[data-action=essentials]').click();
+  await expect(page.locator('.essentials')).toContainText('SYNTHETIC 后续修改');
   await page.locator('[data-action=view-backup]').click();
   await expect(page.locator('.backup-warning')).toContainText(
     `在线行程已修改为版本 ${edited.version}`,
@@ -202,13 +278,15 @@ try {
   );
   await page.locator('[data-action=close-materials]').click();
   await app.close();
-  await page.locator('[data-action=reload]').click();
+  await page.locator('[data-action=essentials]').click();
+  await expect(page.locator('.essentials')).toHaveCount(0);
   await page.locator('[data-local-backup]').click();
   await expect(page.locator('.backup-label')).toBeVisible();
   await page.reload();
   await page.locator('[data-local-backup]').click();
   await expect(page.locator('.backup-label')).toBeVisible();
   assert.deepEqual(await service.getTrip(actor, trip.id), edited);
+  assert.deepEqual(await counts(), beforeReads);
   console.log(
     JSON.stringify({
       synthetic: true,
@@ -217,6 +295,11 @@ try {
       tripVersion: stored.tripVersion,
       immutableAfterEdit: true,
       coreFailureAndReload: true,
+      directCore503AndConnectionFailure: true,
+      directNoLocalBackup: true,
+      auxiliaryOutagesKeepVerifiedTrip: true,
+      recoveredVersion: edited.version,
+      unchangedBackupAuthoringExecutionQueryPreviewAdoptCounts: true,
       backupTripWrites: 0,
     }),
   );

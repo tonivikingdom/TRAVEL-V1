@@ -87,6 +87,8 @@ let draftDirty = false;
 let currentUserId: string | null = backupOwner();
 let requestedTripId: string | null = null;
 let materialsOpen = false;
+let materialsVerifying = false;
+let materialsRead = 0;
 let viewingBackup: import('@travel/contracts').StaticBackupView | null = null;
 let latestBackup: import('@travel/contracts').StaticBackupView | null = null;
 let backupNotice = '';
@@ -102,50 +104,94 @@ function backupFallback() {
   return `<section class="backup-fallback"><h2>静态行程备份</h2><p>与在线行程独立，此内容不会自动更新。</p>${saved.length ? saved.map((b) => `<button data-local-backup="${b.tripId}">查看最近备份 · ${esc(b.name)}</button><p class="muted">备份生成于 ${esc(backupTimestamp(b.generatedAt))} · Trip version ${b.tripVersion}</p>`).join('') : '<p>暂无可用备份。本机没有保存的静态备份；服务恢复后可查看或生成。</p>'}</section>`;
 }
 function renderMaterials() {
+  if (materialsVerifying && !viewingBackup) {
+    root.innerHTML =
+      '<header><button data-action="close-materials">‹ 返回行程</button><div class="brand">TRAVEL</div></header><main class="essentials"><h1>旅行资料 / 备份</h1><p role="status">正在核验在线行程资料…</p></main>';
+    return;
+  }
   const value = viewingBackup ?? (trip ? liveEssentials(trip, inTrip) : null);
   root.innerHTML = `<header><button data-action="close-materials">‹ ${trip ? '返回行程' : '返回'}</button><div class="brand">TRAVEL</div></header><main class="essentials">${viewingBackup ? `<p class="backup-label">正在查看备份</p><h1>静态行程备份</h1><p class="backup-stamp">备份生成于 ${esc(backupTimestamp(viewingBackup.generatedAt))}<br>Trip version ${viewingBackup.tripVersion}</p><p class="backup-warning">此内容不会自动更新。${trip && trip.id === viewingBackup.tripId ? (trip.version !== viewingBackup.tripVersion ? `在线行程已修改为版本 ${trip.version}，这份备份保留旧版本。` : '版本与已读取的在线行程一致，交通和航班信息仍是保存时的内容。') : '服务暂时不可用，无法核验在线版本。'} 保存时预计时间不是现在重新查询的结果。</p><div class="backup-actions"><button data-action="download-backup">下载静态文件</button>${trip ? '<button data-action="live-essentials">查看在线旅行资料</button>' : ''}</div>` : `<p class="eyebrow">在线行程资料</p><h1>旅行资料 / 备份</h1><p>地点、备注与已保存的交通信息。先查看在线行程；备份由你主动更新。</p><div class="backup-actions"><button class="primary" data-action="generate-backup" ${busy ? 'disabled' : ''}>更新离线备份</button>${latestBackup ? '<button data-action="view-backup">查看最近备份</button>' : '<span>暂无可用备份</span>'}</div><p class="muted">更新后会在此浏览器保存一份私人备份，包含备注。共享设备请退出以清除本机副本；下载文件需自行保管。</p>${latestBackup ? `<p>最近备份生成于 ${esc(backupTimestamp(latestBackup.generatedAt))} · Trip version ${latestBackup.tripVersion}</p>` : ''}`}<p role="status">${esc(backupNotice)}</p>${value ? essentialsBody(value, !!viewingBackup) : '<p>暂无可用资料。</p>'}${viewingBackup ? '<p class="muted">此备份只供查看。行程修改后，请主动更新备份。</p>' : ''}</main>`;
 }
 async function openMaterials() {
-  if (!trip || (detail.open && !drawerClose())) return;
+  if (!trip || busy || (detail.open && !drawerClose())) return;
+  const basis = trip,
+    owner = currentUserId,
+    credential = sessionStorage.getItem(tokenKey),
+    navigation = epoch,
+    request = ++materialsRead;
+  const active = () =>
+    request === materialsRead &&
+    materialsOpen &&
+    navigation === epoch &&
+    currentUserId === owner &&
+    sessionStorage.getItem(tokenKey) === credential &&
+    trip?.id === basis.id &&
+    trip.version === basis.version;
   materialsOpen = true;
+  materialsVerifying = true;
   viewingBackup = null;
   backupNotice = '';
+  inTrip = null;
+  inTripReadUnavailable = true;
   render();
-  const basis = trip;
-  const reads = await Promise.allSettled([
-    api.request<import('@travel/contracts').LatestStaticBackupResponse>(
-      `/trips/${basis.id}/backup`,
-    ),
-    api.request<InTripView>(`/trips/${basis.id}/in-trip`),
-  ]);
-  if (!materialsOpen || trip?.id !== basis.id || trip.version !== basis.version)
-    return;
-  const [backup, evidence] = reads;
-  for (const result of reads)
-    if (
-      result.status === 'rejected' &&
-      result.reason instanceof WebError &&
-      [401, 403, 404].includes(result.reason.status)
-    ) {
-      materialsOpen = false;
-      throw result.reason;
+  try {
+    // Auxiliary failures do not establish a core outage. Verify the authority.
+    const fresh = await api.request<TripView>(`/trips/${basis.id}`);
+    if (!active()) return;
+    if (fresh.id !== basis.id || fresh.version !== basis.version)
+      throw new WebError(409, 'VERSION_CONFLICT', '行程已变化，请重新载入。');
+    trip = fresh;
+    const reads = await Promise.allSettled([
+      api.request<import('@travel/contracts').LatestStaticBackupResponse>(
+        `/trips/${basis.id}/backup`,
+      ),
+      api.request<InTripView>(`/trips/${basis.id}/in-trip`),
+    ]);
+    if (!active()) return;
+    const [backup, evidence] = reads;
+    for (const result of reads)
+      if (
+        result.status === 'rejected' &&
+        result.reason instanceof WebError &&
+        [401, 403, 404].includes(result.reason.status)
+      )
+        throw result.reason;
+    if (backup.status === 'fulfilled') latestBackup = backup.value.backup;
+    else {
+      latestBackup =
+        localBackups(owner).find((b) => b.tripId === basis.id) ?? null;
+      backupNotice = '未能读取服务器备份；本机备份仍可查看。';
     }
-  if (backup.status === 'fulfilled') latestBackup = backup.value.backup;
-  else {
-    latestBackup =
-      localBackups(currentUserId).find((b) => b.tripId === basis.id) ?? null;
-    backupNotice = '未能读取服务器备份；本机备份仍可查看。';
-  }
-  if (
-    evidence.status === 'fulfilled' &&
-    evidence.value.tripVersion === basis.version
-  )
-    inTrip = evidence.value;
-  else if (evidence.status === 'fulfilled') {
+    if (evidence.status === 'fulfilled') {
+      if (
+        evidence.value.tripId !== basis.id ||
+        evidence.value.tripVersion !== basis.version
+      )
+        throw new WebError(409, 'VERSION_CONFLICT', '行程已变化，请重新载入。');
+      inTrip = evidence.value;
+      inTripReadUnavailable = false;
+      inTripReadAt = new Date().toISOString();
+    } else backupNotice += ' 航班资料暂时无法读取。';
+    materialsVerifying = false;
+    render();
+  } catch (error) {
+    if (!active()) return;
     materialsOpen = false;
-    throw new WebError(409, 'VERSION_CONFLICT', '行程已变化，请重新载入。');
-  } else backupNotice += ' 航班资料暂时无法读取。';
-  render();
+    materialsVerifying = false;
+    viewingBackup = null;
+    trip = null;
+    schedule = null;
+    inTrip = null;
+    ground = null;
+    notice = errorText(error);
+    if (error instanceof WebError && error.status === 401) {
+      sessionStorage.removeItem(tokenKey);
+      bindBackupOwner(null);
+      currentUserId = null;
+      latestBackup = null;
+    }
+    render();
+  }
 }
 async function generateBackup() {
   if (!trip || !currentUserId || busy) return;
@@ -1230,7 +1276,7 @@ root.addEventListener('click', (event) => {
     return;
   }
   if (target.dataset.action === 'essentials') {
-    void act(openMaterials);
+    void openMaterials();
     return;
   }
   if (target.dataset.action === 'generate-backup') {
@@ -1253,6 +1299,8 @@ root.addEventListener('click', (event) => {
   }
   if (target.dataset.action === 'close-materials') {
     if (busy) return;
+    materialsRead++;
+    materialsVerifying = false;
     materialsOpen = false;
     viewingBackup = null;
     render();

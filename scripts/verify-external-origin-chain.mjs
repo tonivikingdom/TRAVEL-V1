@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { syntheticRouteEndpointDates } from './synthetic-route-endpoint-dates.mjs';
 /** All confirmations are explicit synthetic HTTP actions. Monitoring never confirms. */
 export async function verifyExternalOriginChain({
   apiJson: adminJson,
@@ -80,12 +81,10 @@ export async function verifyExternalOriginChain({
   };
   const departure = new Date(Date.now() - 15 * 60_000);
   const zone = 'Asia/Tokyo';
-  const date = new Intl.DateTimeFormat('en-CA', {
-    timeZone: zone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(departure);
+  const { departureDate: date, arrivalDate } = syntheticRouteEndpointDates(
+    departure,
+    zone,
+  );
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 external hub execution',
     planningAnchorDate: date,
@@ -100,13 +99,17 @@ export async function verifyExternalOriginChain({
       command: {
         type: 'ADD_PLACE_VISIT',
         targetDay:
-          position === 0
-            ? { type: 'NEW', localDate: date, sequence: 0 }
+          position === 0 || date !== arrivalDate
+            ? {
+                type: 'NEW',
+                localDate: position === 0 ? date : arrivalDate,
+                sequence: position,
+              }
             : {
                 type: 'EXISTING',
                 dayOccurrenceId: trip.days[0].dayOccurrenceId,
               },
-        position,
+        position: position === 0 || date !== arrivalDate ? 0 : 1,
         place: {
           type: 'CUSTOM',
           name,
@@ -116,7 +119,7 @@ export async function verifyExternalOriginChain({
       },
     });
   }
-  const [a, d] = trip.days[0].nodes;
+  const [a, d] = trip.days.flatMap((day) => day.nodes);
   const initial = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
     basisVersion: trip.version,
     fromNodeId: a.id,

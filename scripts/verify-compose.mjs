@@ -407,6 +407,28 @@ async function verifyCompose(compose, composeQuiet, env) {
       },
     },
   );
+  // SYNTHETIC-only diagnostics: retain the exact time/day basis on CI failures.
+  process.stdout.write(
+    `${JSON.stringify({
+      scenario: 'SYNTHETIC P4B2 preview basis',
+      routeDate,
+      days: routeTrip.days.map((day) => ({
+        localDate: day.localDate,
+        sequence: day.sequence,
+        nodes: day.nodes.map((node) => ({
+          id: node.id,
+          position: node.position,
+        })),
+      })),
+      timeCondition: queryResult.timeCondition,
+      overall: queryResult.candidates[0]?.overall,
+      legs: queryResult.candidates[0]?.legs.map((leg) => ({
+        mode: leg.mode,
+        departure: leg.departure,
+        arrival: leg.arrival,
+      })),
+    })}\n`,
+  );
   const routePreview = await apiJson(
     `/trips/${routeTrip.id}/previews`,
     'POST',

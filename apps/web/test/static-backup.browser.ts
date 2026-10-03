@@ -1039,3 +1039,20 @@ for (const endpoint of ['core', 'backup'] as const)
       ),
     ).toEqual([]);
   });
+
+test('SYNTHETIC touch backup remains read-only and reachable in landscape with large text', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await generate(page);
+  await page.addStyleTag({ content: 'html { font-size: 24px !important; }' });
+  await noOverflow(page);
+  await expect(page.locator('.backup-label')).toHaveText('正在查看备份');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  if (process.env.WEB_TEST_SCREENSHOTS === 'true')
+    await page.screenshot({
+      path: 'docs/status/assets/mobile-hardening/landscape-backup.png',
+      fullPage: true,
+    });
+  noPlanning();
+});

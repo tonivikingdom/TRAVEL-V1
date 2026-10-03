@@ -23,6 +23,8 @@ export class DetailDrawer {
         event.target.closest('button,a,input,textarea,select')
       )
         return;
+      // The handle owns this gesture; native text dragging can swallow pointer-up.
+      event.preventDefault();
       this.pointer = { id: event.pointerId, y: event.clientY };
       element.setPointerCapture(event.pointerId);
     });

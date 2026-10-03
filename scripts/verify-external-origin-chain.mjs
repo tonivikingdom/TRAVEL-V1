@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { syntheticExternalWindow } from './synthetic-route-day.mjs';
 /** All confirmations are explicit synthetic HTTP actions. Monitoring never confirms. */
 export async function verifyExternalOriginChain({
   apiJson: adminJson,
@@ -78,14 +79,13 @@ export async function verifyExternalOriginChain({
   const assert = (value, message) => {
     if (!value) throw new Error(`P5E2 5A ${message}`);
   };
-  const departure = new Date(Date.now() - 15 * 60_000);
-  const zone = 'Asia/Tokyo';
-  const date = new Intl.DateTimeFormat('en-CA', {
+  const {
+    departure,
+    arrival,
     timeZone: zone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(departure);
+    fromDate: date,
+    toDate,
+  } = syntheticExternalWindow(new Date());
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 external hub execution',
     planningAnchorDate: date,
@@ -100,13 +100,17 @@ export async function verifyExternalOriginChain({
       command: {
         type: 'ADD_PLACE_VISIT',
         targetDay:
-          position === 0
-            ? { type: 'NEW', localDate: date, sequence: 0 }
+          position === 0 || date !== toDate
+            ? {
+                type: 'NEW',
+                localDate: position === 0 ? date : toDate,
+                sequence: position,
+              }
             : {
                 type: 'EXISTING',
                 dayOccurrenceId: trip.days[0].dayOccurrenceId,
               },
-        position,
+        position: position === 0 || date !== toDate ? 0 : 1,
         place: {
           type: 'CUSTOM',
           name,
@@ -116,7 +120,21 @@ export async function verifyExternalOriginChain({
       },
     });
   }
-  const [a, d] = trip.days[0].nodes;
+  const [a, d] = trip.days.flatMap((day) => day.nodes);
+  // An explicit SYNTHETIC user deadline keeps replacement arrival on D's date,
+  // including the intentional one-leg cross-day endpoint case. No transfer rule changes.
+  trip = await apiJson(`/trips/${trip.id}/commands`, 'POST', {
+    baseTripVersion: trip.version,
+    command: {
+      type: 'SET_TIME_INTENT',
+      nodeId: d.id,
+      pointKind: 'ARRIVAL',
+      operator: 'NOT_AFTER',
+      instant: arrival.toISOString(),
+      timeZone: zone,
+      locked: true,
+    },
+  });
   const initial = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
     basisVersion: trip.version,
     fromNodeId: a.id,

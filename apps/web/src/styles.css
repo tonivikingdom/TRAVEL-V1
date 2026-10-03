@@ -650,6 +650,9 @@ form button {
     align-items: center;
     padding: 8px 0 13px;
     touch-action: none;
+    /* A handle gesture must not start native text selection/dragging in Safari. */
+    -webkit-user-select: none;
+    user-select: none;
   }
   .handle {
     display: block;
@@ -1119,6 +1122,13 @@ form button {
   min-width: 0;
   max-width: 100%;
 }
+/* WebKit native option text can escape the select's own overflow boundary. */
+[data-authoring] label:has(> select[name='place']) {
+  overflow: clip;
+}
+[data-authoring] select[name='place']:focus-visible {
+  outline-offset: -3px;
+}
 [data-authoring] button {
   width: 100%;
 }
@@ -1242,6 +1252,49 @@ form button {
 }
 .essential-note {
   white-space: pre-wrap;
+}
+
+.place-search {
+  border-bottom: 1px solid #dce7f1;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+}
+.place-search input,
+.place-search select {
+  width: 100%;
+  min-width: 0;
+}
+.place-search button {
+  min-height: 44px;
+  margin-top: 0.5rem;
+}
+.place-candidate {
+  padding: 0.9rem;
+  background: #f3f8fc;
+  border: 1px solid #dce7f1;
+  border-radius: 12px;
+  margin-top: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.place-candidate strong,
+.place-candidate small {
+  display: block;
+}
+.place-candidate button {
+  width: 100%;
+}
+.place-candidate [aria-pressed='true'] {
+  background: #d8ebfb;
+}
+.place-attribution {
+  max-width: 60rem;
+  margin: 1rem auto;
+  padding: 0 1rem max(1rem, env(safe-area-inset-bottom));
+  font-size: 0.8rem;
+  color: #52667a;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 /* Touch forms avoid Safari focus zoom; text remains scalable. */

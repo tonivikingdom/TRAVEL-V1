@@ -16,6 +16,10 @@ let groundUnavailable = false;
 let inTripUnavailable = false;
 let delayEvidence = false;
 let evidenceForbidden = false;
+let holdEvidence = false;
+let releaseEvidence: (() => void) | undefined;
+let authoringNetworkFailure = false;
+let authoringBodies: Record<string, unknown>[] = [];
 
 test.beforeEach(async ({ page }) => {
   fixture = inTripFixture();
@@ -25,6 +29,10 @@ test.beforeEach(async ({ page }) => {
   inTripUnavailable = false;
   delayEvidence = false;
   evidenceForbidden = false;
+  holdEvidence = false;
+  releaseEvidence = undefined;
+  authoringNetworkFailure = false;
+  authoringBodies = [];
   await page.clock.install({ time: new Date('2030-10-01T05:11:00Z') });
   await page.addInitScript(() =>
     sessionStorage.setItem('travel.web.session', 'SYNTHETIC_P6B_ONLY'),
@@ -45,9 +53,50 @@ test.beforeEach(async ({ page }) => {
       return coreUnavailable
         ? send({ error: { code: 'SERVICE_UNAVAILABLE' } }, 503)
         : send(fixture.trip);
+    if (path.endsWith('/authoring')) {
+      const body = request.postDataJSON();
+      authoringBodies.push(body);
+      if (authoringNetworkFailure) {
+        authoringNetworkFailure = false;
+        return route.abort('failed');
+      }
+      const day = fixture.trip.days[0]!;
+      fixture.trip = {
+        ...fixture.trip,
+        version: fixture.trip.version + 1,
+        days: [
+          {
+            ...day,
+            nodes: [
+              ...day.nodes,
+              {
+                ...day.nodes.at(-1)!,
+                id: crypto.randomUUID(),
+                kind: 'FREE_ACTION',
+                place: null,
+                note: body.command.note,
+                position: day.nodes.length,
+                timeValues: [],
+                timeIntents: [],
+              },
+            ],
+          },
+        ],
+      };
+      fixture.evidence = {
+        ...fixture.evidence,
+        tripVersion: fixture.trip.version,
+      };
+      fixture.ground = { ...fixture.ground, tripVersion: fixture.trip.version };
+      return send(fixture.trip);
+    }
     if (path.endsWith('/schedule/evaluate'))
       return send(fixtureSchedule(fixture.trip));
     if (path.endsWith('/in-trip')) {
+      if (holdEvidence)
+        await new Promise<void>((r) => {
+          releaseEvidence = r;
+        });
       if (evidenceForbidden) return send({ error: { code: 'FORBIDDEN' } }, 403);
       if (delayEvidence)
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -90,6 +139,93 @@ function noWrites() {
     ),
   ).toBe(false);
 }
+
+test('integrated authoring and Today coexist; another device version invalidates the pending read', async ({
+  page,
+}) => {
+  await enter(page);
+  await expect(page.locator('[data-action=add-arrangement]')).toBeVisible();
+  await capture(page, 'mobile-authoring-and-today');
+  holdEvidence = true;
+  await page.getByRole('button', { name: '重新载入' }).click();
+  await expect.poll(() => !!releaseEvidence).toBe(true);
+  await page.evaluate(
+    async ({ id, version, day }) => {
+      const response = await fetch(`/api/trips/${id}/authoring`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          baseTripVersion: version,
+          idempotencyKey: 'SYNTHETIC-other-device',
+          command: {
+            type: 'ADD_FREE_ACTION',
+            targetDay: { type: 'EXISTING', dayOccurrenceId: day },
+            position: 99,
+            note: 'SYNTHETIC other device',
+          },
+        }),
+      });
+      if (!response.ok) throw new Error('SYNTHETIC authoring failed');
+    },
+    {
+      id: tripId,
+      version: fixture.trip.version,
+      day: fixture.trip.days[0]!.dayOccurrenceId,
+    },
+  );
+  holdEvidence = false;
+  releaseEvidence!();
+  await expect(page.locator('.in-trip')).toHaveCount(0);
+  await expect(page.getByText('行程或方案已变化')).toBeVisible();
+  await enter(page);
+  await expect(page.locator('.next-leg .segment-service')).toContainText('BUS');
+  expect(authoringBodies).toHaveLength(1);
+});
+
+test('integrated in-trip read failure preserves an authoring draft and its unknown-outcome retry key', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.locator('[data-action=add-arrangement]').click();
+  await page.getByRole('button', { name: '自由行动', exact: true }).click();
+  const title = page.locator('#authoring-add input[name=title]');
+  await title.fill('SYNTHETIC retained authoring draft');
+  inTripUnavailable = true;
+  expect(
+    await page.evaluate(
+      async (id) => (await fetch(`/api/trips/${id}/in-trip`)).status,
+      tripId,
+    ),
+  ).toBe(503);
+  await expect(title).toHaveValue('SYNTHETIC retained authoring draft');
+  await expect(page.locator('#save-status')).toContainText('未保存');
+  page.once('dialog', (d) => d.dismiss());
+  await page
+    .locator('.view-switch [data-view=itinerary]')
+    .evaluate((b: HTMLButtonElement) => b.click());
+  await expect(title).toHaveValue('SYNTHETIC retained authoring draft');
+  expect(authoringBodies).toHaveLength(0);
+  authoringNetworkFailure = true;
+  const initialVersion = fixture.trip.version;
+  await page.getByRole('button', { name: '添加自由行动', exact: true }).click();
+  await expect(page.locator('#authoring-recovery')).toBeVisible();
+  await expect(title).toHaveValue('SYNTHETIC retained authoring draft');
+  await page
+    .getByRole('button', { name: '重新读取并核对', exact: true })
+    .click();
+  await expect(page.locator('[data-authoring-ack]')).toBeVisible();
+  expect(authoringBodies).toHaveLength(2);
+  expect(authoringBodies[0]).toEqual(authoringBodies[1]);
+  expect(authoringBodies[1]?.baseTripVersion).toBe(initialVersion);
+  await expect(title).toHaveValue('SYNTHETIC retained authoring draft');
+  await expect(page.locator('.in-trip')).toBeVisible();
+  await expect(page.locator('.next-leg .segment-service')).toContainText('BUS');
+  await page.locator('[data-authoring-ack]').click();
+  await page.getByRole('button', { name: '关闭详情' }).click();
+  await page.locator('.view-switch [data-view=itinerary]').click();
+  await page.locator('[data-node]').first().click();
+  await expect(page.locator('#note-edit')).toBeVisible();
+});
 
 test('future place, unknown progress, reliable navigation and original detail', async ({
   page,

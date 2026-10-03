@@ -1,4 +1,10 @@
+import { resolveTripAuthoringImpact } from '@travel/domain';
+import { createHash } from 'node:crypto';
+import { toTripView } from '@travel/application';
+import type { TripView } from '@travel/contracts';
 import type {
+  AuthoringMutationResult,
+  AuthoringPersistenceInput,
   PlaceRecord,
   RepositoryDayOccurrenceTarget,
   RepositoryPlaceInput,
@@ -168,6 +174,191 @@ export class PrismaTripRepository implements TripRepository {
         };
       });
     } catch (error) {
+      return failureResult(error);
+    }
+  }
+
+  async createAuthoringTrip(input: {
+    readonly ownerUserId: string;
+    readonly name: string;
+    readonly planningAnchorDate: Date;
+    readonly defaultPeopleCount: number;
+    readonly idempotencyKey: string;
+  }): Promise<AuthoringMutationResult> {
+    return this.client.$transaction(async (tx) => {
+      await lockOwner(tx, input.ownerUserId);
+      const requestHash = hashAuthoringRequest({
+        type: 'CREATE_TRIP',
+        name: input.name,
+        planningAnchorDate: input.planningAnchorDate,
+        defaultPeopleCount: input.defaultPeopleCount,
+      });
+      const replay = await readAuthoringReplay(
+        tx,
+        input.ownerUserId,
+        input.idempotencyKey,
+        requestHash,
+      );
+      if (replay) return replay;
+      const record = await tx.trip.create({
+        data: {
+          ownerUserId: input.ownerUserId,
+          name: input.name,
+          planningAnchorDate: input.planningAnchorDate,
+          defaultPeopleCount: input.defaultPeopleCount,
+        },
+        include: tripInclude,
+      });
+      const trip = toTripView(toTripRecord(record));
+      await saveAuthoringReceipt(
+        tx,
+        { ...input, tripId: trip.id, baseTripVersion: 0 },
+        requestHash,
+        trip,
+      );
+      return { status: 'SUCCESS', trip };
+    });
+  }
+
+  async executeAuthoringCommand(
+    input: AuthoringPersistenceInput,
+  ): Promise<AuthoringMutationResult> {
+    try {
+      return await this.client.$transaction(async (tx) => {
+        await lockOwner(tx, input.ownerUserId);
+        const requestHash = hashAuthoringRequest({
+          tripId: input.tripId,
+          baseTripVersion: input.baseTripVersion,
+          command: input.command,
+        });
+        const replay = await readAuthoringReplay(
+          tx,
+          input.ownerUserId,
+          input.idempotencyKey,
+          requestHash,
+        );
+        if (replay) return replay;
+        await requireLockedTrip(tx, input);
+        // Parent locks also serialize raw FK execution/protection inserts.
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "ItineraryNode" WHERE "tripId" = ${input.tripId}::uuid ORDER BY id FOR UPDATE`,
+        );
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "TransportEdge" WHERE "tripId" = ${input.tripId}::uuid ORDER BY id FOR UPDATE`,
+        );
+        const before = await tx.itineraryNode.findMany({
+          where: { tripId: input.tripId },
+          select: { id: true, dayOccurrenceId: true },
+          orderBy: [
+            { dayOccurrence: { sequence: 'asc' } },
+            { position: 'asc' },
+          ],
+        });
+        const day = await resolveTargetDayOccurrence(
+          tx,
+          input.tripId,
+          input.command.targetDay,
+        );
+        if (input.command.type === 'MOVE_NODE') {
+          const node = await requireTripNode(
+            tx,
+            input.tripId,
+            input.command.nodeId,
+          );
+          const protectedNode = await tx.itineraryNode.findUniqueOrThrow({
+            where: { id: node.id },
+            include: {
+              temporalValues: { where: { layer: 'ACTUAL' } },
+              timeIntents: { where: { locked: true } },
+              executionEvents: { where: { undoneAt: null } },
+            },
+          });
+          if (
+            node.source === 'ROUTE_GENERATED' ||
+            protectedNode.temporalValues.length ||
+            protectedNode.timeIntents.length ||
+            protectedNode.executionEvents.length
+          )
+            throw new TripTransactionAbort('FACT_PROTECTED');
+          await moveNode(tx, input.tripId, node, day, input.command.position);
+        } else {
+          const place =
+            input.command.type === 'ADD_PLACE_VISIT'
+              ? await resolvePlace(tx, input.ownerUserId, input.command.place)
+              : null;
+          await insertNode(tx, {
+            tripId: input.tripId,
+            kind:
+              input.command.type === 'ADD_PLACE_VISIT'
+                ? 'PLACE_VISIT'
+                : 'FREE_ACTION',
+            dayOccurrenceId: day,
+            position: input.command.position,
+            placeId: place?.id ?? null,
+            note: input.command.note,
+          });
+        }
+        const after = await tx.itineraryNode.findMany({
+          where: { tripId: input.tripId },
+          select: { id: true, dayOccurrenceId: true },
+          orderBy: [
+            { dayOccurrence: { sequence: 'asc' } },
+            { position: 'asc' },
+          ],
+        });
+        const edges = await tx.transportEdge.findMany({
+          where: { tripId: input.tripId },
+          select: { fromNodeId: true, toNodeId: true },
+        });
+        const executionNodes =
+          input.command.type === 'MOVE_NODE'
+            ? await tx.itineraryNode.findMany({
+                where: {
+                  tripId: input.tripId,
+                  OR: [
+                    { temporalValues: { some: { layer: 'ACTUAL' } } },
+                    { executionEvents: { some: { undoneAt: null } } },
+                  ],
+                },
+                select: { id: true },
+              })
+            : [];
+        const impact = resolveTripAuthoringImpact({
+          before,
+          after,
+          transports: edges,
+          executedNodeIds: executionNodes.map((n) => n.id),
+          ...(input.command.type === 'MOVE_NODE'
+            ? { movedNodeId: input.command.nodeId }
+            : {}),
+        });
+        if (impact === 'TRANSPORT_CONFLICT') returnRollbackTransportConflict();
+        if (impact === 'EXECUTION_ORDER_CONFLICT')
+          throw new TripTransactionAbort('FACT_PROTECTED');
+        const range = await reconcileDateOwnership(tx, input);
+        await tx.trip.update({
+          where: { id: input.tripId },
+          data: {
+            effectiveStartDate: range?.minimum ?? null,
+            effectiveEndDate: range?.maximum ?? null,
+            version: { increment: 1 },
+          },
+        });
+        await stopTripAssistanceIfNaturallyComplete(
+          tx,
+          input.tripId,
+          new Date(),
+        );
+        const trip = toTripView(
+          toTripRecord(await loadTrip(tx, input.tripId, input.ownerUserId)),
+        );
+        await saveAuthoringReceipt(tx, input, requestHash, trip);
+        return { status: 'SUCCESS', trip };
+      });
+    } catch (error) {
+      if (error instanceof AuthoringTransportConflict)
+        return { status: 'TRANSPORT_CONFLICT' };
+      if (isDateOwnershipConflict(error)) return { status: 'DATE_OWNED' };
       return failureResult(error);
     }
   }
@@ -1598,7 +1789,9 @@ function addUtcDays(value: Date, days: number): Date {
   return result;
 }
 
-function failureResult(error: unknown): TripMutationResult {
+function failureResult(
+  error: unknown,
+): Exclude<TripMutationResult, { status: 'SUCCESS' }> {
   if (error instanceof TripTransactionAbort) {
     return { status: error.status };
   }
@@ -1639,4 +1832,61 @@ export async function readTripAggregateRecord(
     include: tripInclude,
   });
   return trip === null ? null : toTripRecord(trip);
+}
+
+class AuthoringTransportConflict extends Error {}
+function returnRollbackTransportConflict(): never {
+  throw new AuthoringTransportConflict();
+}
+function hashAuthoringRequest(value: unknown): string {
+  function canonical(item: unknown): unknown {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item && typeof item === 'object')
+      return Object.fromEntries(
+        Object.entries(item)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, v]) => [k, canonical(v)]),
+      );
+    return item;
+  }
+  return createHash('sha256')
+    .update(JSON.stringify(canonical(JSON.parse(JSON.stringify(value)))))
+    .digest('hex');
+}
+async function readAuthoringReplay(
+  tx: Transaction,
+  ownerUserId: string,
+  idempotencyKey: string,
+  requestHash: string,
+): Promise<AuthoringMutationResult | null> {
+  const receipt = await tx.tripAuthoringReceipt.findUnique({
+    where: { ownerUserId_idempotencyKey: { ownerUserId, idempotencyKey } },
+  });
+  if (!receipt) return null;
+  if (receipt.requestHash !== requestHash)
+    return { status: 'IDEMPOTENCY_CONFLICT' };
+  return { status: 'SUCCESS', trip: receipt.result as unknown as TripView };
+}
+async function saveAuthoringReceipt(
+  tx: Transaction,
+  input: {
+    ownerUserId: string;
+    tripId: string;
+    idempotencyKey: string;
+    baseTripVersion: number;
+  },
+  requestHash: string,
+  trip: TripView,
+): Promise<void> {
+  await tx.tripAuthoringReceipt.create({
+    data: {
+      ownerUserId: input.ownerUserId,
+      tripId: input.tripId,
+      idempotencyKey: input.idempotencyKey,
+      requestHash,
+      baseTripVersion: input.baseTripVersion,
+      resultingTripVersion: trip.version,
+      result: JSON.parse(JSON.stringify(trip)) as Prisma.InputJsonValue,
+    },
+  });
 }

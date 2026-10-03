@@ -189,3 +189,8 @@ export type {
   ExternalRouteOriginSnapshot,
 } from './routes.js';
 export type { InTripView } from './in-trip.js';
+
+export type {
+  TripAuthoringCommandInput,
+  TripAuthoringRequest,
+} from './trips.js';

@@ -137,6 +137,24 @@ describe('P6B real PostgreSQL and authenticated read API', () => {
     const receipts = await managed.client.operationReceipt.count({
       where: { tripId: trip.id },
     });
+    const readSnapshot = () =>
+      Promise.all([
+        managed.client.tripAuthoringReceipt.findMany({
+          where: { tripId: trip.id },
+        }),
+        managed.client.dateOwnership.findMany({ where: { tripId: trip.id } }),
+        managed.client.dayOccurrence.findMany({ where: { tripId: trip.id } }),
+        managed.client.itineraryNode.findMany({ where: { tripId: trip.id } }),
+        managed.client.temporalValue.findMany({
+          where: {
+            OR: [
+              { node: { tripId: trip.id } },
+              { transportEdge: { tripId: trip.id } },
+            ],
+          },
+        }),
+      ]);
+    const unchanged = await readSnapshot();
     const responses = await Promise.all([
       get(trip.id),
       get(trip.id),
@@ -166,6 +184,7 @@ describe('P6B real PostgreSQL and authenticated read API', () => {
         .statusCode,
     ).toBe(401);
     expect((await get('bad')).statusCode).toBe(400);
+    expect(await readSnapshot()).toEqual(unchanged);
   });
   it('reads saved revised/runway facts without any Provider call or fabricated user execution', async () => {
     const { trip, edge } = await fixture();
@@ -285,5 +304,70 @@ describe('P6B real PostgreSQL and authenticated read API', () => {
       where: { id: owner.actor.userId },
       data: { status: 'ACTIVE' },
     });
+  });
+
+  it('integrates authoring/read owner isolation, version updates and transport adjacency rollback', async () => {
+    const { trip, edge } = await fixture();
+    const command = {
+      type: 'ADD_FREE_ACTION',
+      targetDay: {
+        type: 'EXISTING',
+        dayOccurrenceId: trip.days[0]!.dayOccurrenceId,
+      },
+      position: 1,
+      note: 'SYNTHETIC must not split transport',
+    };
+    const author = (credential: string, position: number) =>
+      app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/authoring`,
+        headers: { authorization: `Bearer ${credential}` },
+        payload: {
+          baseTripVersion: trip.version,
+          idempotencyKey: randomUUID(),
+          command: { ...command, position },
+        },
+      });
+    for (const actor of [stranger, admin]) {
+      expect((await author(actor.credential, 2)).statusCode).toBe(404);
+      expect((await get(trip.id, actor.credential)).statusCode).toBe(404);
+    }
+    const before = (await get(trip.id)).json();
+    const conflict = await author(owner.credential, 1);
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({
+      error: { code: 'CONSTRAINT_CONFLICT' },
+    });
+    expect((await get(trip.id)).json()).toEqual(before);
+    expect(
+      await managed.client.transportEdge.findUnique({ where: { id: edge.id } }),
+    ).not.toBeNull();
+    expect(
+      await managed.client.tripAuthoringReceipt.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(0);
+    const accepted = await author(owner.credential, 2);
+    expect(accepted.statusCode).toBe(200);
+    const fresh = accepted.json<import('@travel/contracts').TripView>();
+    expect(fresh.version).toBe(trip.version + 1);
+    expect(
+      fresh.connections.find((c) => c.transport?.id === edge.id),
+    ).toBeDefined();
+    expect(fresh.days[0]!.nodes.at(-1)!.timeValues).toEqual([]);
+    expect(fresh.days[0]!.nodes.at(-1)!.timeIntents).toEqual([]);
+    const reads = await Promise.all([get(trip.id), get(trip.id)]);
+    expect(reads.map((r) => r.json().tripVersion)).toEqual([
+      fresh.version,
+      fresh.version,
+    ]);
+    expect(
+      await managed.client.tripAuthoringReceipt.count({
+        where: { tripId: trip.id },
+      }),
+    ).toBe(1);
+    expect(
+      await managed.client.executionEvent.count({ where: { tripId: trip.id } }),
+    ).toBe(0);
   });
 });

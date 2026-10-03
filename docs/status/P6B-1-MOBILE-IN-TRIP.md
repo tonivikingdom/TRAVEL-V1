@@ -2,7 +2,44 @@
 
 Status: implemented for human review; keep Draft. No Ready, merge, deployment, P6B-2 or P6C work.
 
-## Baseline and isolation
+## Integration with merged P6A-2
+
+Integration base: **`c6164fb824ca73d7a075e872407335603ceed7ec`**. PR #42 is merged. This is an integration-only revision of the same B branch / Draft PR #43. Original B HEAD: `1a1509c332be16f9cf31467f0678057864535e45`. The new HEAD and final CI link are recorded in PR #43. Old CI `37107266180` is historical standalone evidence and is **not** A+B integration evidence.
+
+### Preserved behavior and conflict resolution
+
+- **P6A-2 inherited behavior:** empty Trip/create, saved Place/FreeAction addition, date/order moves, temporary edge days, draft/version and removed-date retarget recovery, owner-scoped TripAuthoringReceipt and migration #25. `authoring.ts`, Domain/storage semantics, schema and migrations are inherited without reconstruction.
+- **P6B-1 behavior:** Today/Next, neutral progress, next Place/transport, ordered transfer expansion, ESTIMATED/vehicle ACTUAL separation, stored Flight snapshots, unknown/unavailable and trusted navigation remain present.
+- Normal merge of `origin/main` retains A history and original B history. No cherry-pick, force push or whole-file ours/theirs replacement. Actual conflicts: `apps/web/src/main.ts` (both imports/state, mode switch, editor date identity, page rendering and handlers), `apps/web/src/styles.css` (both scoped style blocks), `packages/application/src/index.ts` and `packages/contracts/src/index.ts` (both export sets). API and persistence merged automatically and were inspected.
+- Both itinerary and Today keep the authoring entry. Today uses the explicit current DayOccurrence identity for addition; no new navigation level or bottom bar. A successful authoring write clears old B evidence/ground data, evaluates the new basis and reloads stored B evidence when Today is active. Draft form/baseline/pending retry key is not acknowledged by a read. Provider/read unavailability does not turn a saved write into a rejected write.
+- The APIs stay separate: `POST /trips/:id/authoring` is the explicit write; `GET /trips/:tripId/in-trip` remains read-only. Navigation/viewing adds no receipt, execution fact or version and changes no date, node, itinerary or Provider state.
+
+**Migration count = 25. B schema delta = 0. B migration delta = 0.** No migration #26. TripAuthoringReceipt schema is unchanged from integration main.
+
+### Integrated regression evidence
+
+| Check                                               | A+B result                                                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen install; Prisma generate/validate            | PASS                                                                                                                                  |
+| Format, lint, typecheck, build                      | PASS                                                                                                                                  |
+| Unit                                                | 754 passed                                                                                                                            |
+| PostgreSQL integration                              | 104 persistence + 501 API = 605 passed                                                                                                |
+| Clean migration deploy                              | 25; PASS                                                                                                                              |
+| Populated migration compatibility                   | Inherited real PostgreSQL populated 24→25 receipt migration test and historical storage migration paths; PASS                         |
+| Chromium full formal Web suite                      | 98 passed                                                                                                                             |
+| WebKit                                              | 98 local cases passed; final HEAD CI includes both browsers; integrated run/link and counts in PR #43                                 |
+| Actual PostgreSQL + HTTP + Chromium authoring chain | PASS: create/saved Place/FreeAction/date/order, temporary blank zero write, version/draft/removed-date recovery, atomic date conflict |
+| Compose / P5B                                       | PASS; P5B 5 users, 200 requests, zero isolation/unexpected-5xx/network failures                                                       |
+
+New integration regressions cover: a held Today read followed by another-device authoring and a changed version (mixed projection hidden, fresh reread recovers); in-trip 503 during a dirty authoring draft (form and unsaved state preserved); cancelled mode-switch discard, unknown write outcome and retry with identical key/body/base version; accepted authoring despite unavailable B read and existing detail still reachable. Real PostgreSQL/API checks prove reads preserve receipts/date ownership/day occurrences/nodes/time values/version, both endpoints reject foreign owners/admins, adjacency insertion rolls back, and a successful unrelated authoring advances the read version without creating user execution/time facts. The existing adopted-route API regression now reads B before and after each rejected authoring operation, preserving the original selected route. A date-line/repeated-occurrence/date-collision/empty-Trip/intermediate-blank suite is rerun intact.
+
+Evidence boundaries remain explicit: B UI/concurrency fixtures are SYNTHETIC contract browser tests; owner/version/adjacency/write-boundary tests use actual PostgreSQL plus authenticated API; the unchanged A harness separately runs real HTTP+browser+PostgreSQL. No real timetable/fare or paid Provider claim.
+
+Local cloud repair: a first parallel browser/container attempt exhausted VFS disk and the reused Chromium-owned dev server ended during WebKit. Only known unused images from this task's earlier runs were removed; a persistent dev server was verified with agent-browser before rerunning WebKit, and P5B was rerun after Compose cleanup. Failed attempts are not passing evidence. No TLS, assertion, CI or schema changes were made to accommodate the environment.
+
+All B screenshots below were regenerated on A+B source and actually opened. [Review contact sheet](assets/p6b-1/review-contact-sheet.png): **1488 × 6492**, nine titled SYNTHETIC panels, original proportions preserved without crop; desktop has its own row. [Authoring + Today coexistence](assets/p6b-1/mobile-authoring-and-today.png) shows both entries. These artifacts are committed in the GitHub branch; viewport automation does not verify iPhone hardware/Safari/soft keyboard.
+
+## Original standalone baseline (historical)
 
 - Starting `origin/main`: `6871aa1f88964f8590ca61e3d368bb4da67072d3`; fetched and verified before development. The pre-submission fetch is recorded in the PR report.
 - Branch: `feat/p6b-1-mobile-in-trip`.
@@ -25,7 +62,7 @@ Owned changes are limited to formal Web projection/styles and B-specific tests; 
 
 `GET /trips/:tripId/in-trip` returns the owned Trip version, explicit execution frontier and saved Flight snapshots. It requires an active authenticated actor and existing private-resource authorization. Foreign owners, including administrators, receive no private Trip data. Invalid IDs fail validation. The repository uses one repeatable-read transaction; no commands, Provider refreshes, receipts, events or Trip updates occur. Flight snapshots require the exact active edge/provider binding identity.
 
-**Schema changes: 0. New migrations: 0. Existing migrations: 24.** DateOwnership, DayOccurrence/sequence, schedule storage, Route Query/Preview/Adopt/Undo and Provider semantics are unchanged. CI, lockfile and repository Compose configuration are unchanged.
+**Original standalone schema changes: 0. New migrations: 0. Baseline migrations: 24. Integrated total: 25 inherited from A; B delta stays 0.** DateOwnership, DayOccurrence/sequence, schedule storage, Route Query/Preview/Adopt/Undo and Provider semantics are unchanged. CI, lockfile and repository Compose configuration are unchanged.
 
 ## Product behavior
 
@@ -54,7 +91,7 @@ Action hints use existing plan/intents/minimum dwell only. No station/airport/gl
 
 P6B-1 adds **no user execution command**, automatic route change, automatic skip/dwell extension or new formal Trip write.
 
-## Verification
+## Original standalone verification (historical)
 
 | Check                                                   | Result                                                                                                                  |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -104,7 +141,8 @@ All screenshots use clearly marked **SYNTHETIC** fixtures. Each linked image was
 - Progress needs existing explicit user execution records; no GPS, background location, boarding inference or newly created execution facts. External-origin-only evidence does not become a recorded node position in this view.
 - Saved Provider observations require explicit reload to read newer stored data; they are not continuous live tracking. Provider unavailability reflects existing persisted evidence, not a new health probe.
 - No complete offline mode/static backup. Core service failure hides the current view; embedded maps remain **PARTIAL** with external navigation only.
-- WebKit desktop automation is covered; physical iOS/Safari/device accessibility verification remains a human review activity.
+- WebKit desktop automation is covered; physical iPhone touch/Safari/soft keyboard and device accessibility remain unverified.
+- Formal Place Search/geocoding is not connected. Real timetable/fare is unverified. G / Google Transit remains **PARTIAL**; PR #41 is untouched.
 - If main changes, especially when task A merges, integration must be reconciled without overwriting either feature and the full regression rerun before merge. No automatic force rebase.
 
 Keep the PR **Draft** for human review. No deployment or follow-on task is authorized by this delivery.

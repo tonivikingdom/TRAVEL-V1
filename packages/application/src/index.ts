@@ -126,7 +126,7 @@ export {
   deriveMagicLinkToken,
   digestOpaqueToken,
 } from './tokens.js';
-export { TripService } from './trip-service.js';
+export { TripService, toTripView } from './trip-service.js';
 export { RouteQueryService } from './route-query-service.js';
 export { RoutePreviewService } from './route-preview-service.js';
 export { ROUTE_PREVIEW_POLICY_VERSION } from './route-preview-service.js';
@@ -222,3 +222,9 @@ export {
   InTripReadService,
   type InTripReadRepository,
 } from './in-trip-read-service.js';
+
+export type {
+  RepositoryAuthoringCommand,
+  AuthoringPersistenceInput,
+  AuthoringMutationResult,
+} from './trip-ports.js';

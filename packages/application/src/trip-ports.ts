@@ -1,4 +1,5 @@
 import type {
+  TripView,
   TemporalLayer,
   TemporalPointKind,
   TemporalSourceKind,
@@ -306,6 +307,17 @@ export type TripMutationResult =
     };
 
 export interface TripRepository {
+  executeAuthoringCommand?(
+    input: AuthoringPersistenceInput,
+  ): Promise<AuthoringMutationResult>;
+  createAuthoringTrip?(input: {
+    readonly ownerUserId: string;
+    readonly name: string;
+    readonly planningAnchorDate: Date;
+    readonly defaultPeopleCount: number;
+    readonly idempotencyKey: string;
+  }): Promise<AuthoringMutationResult>;
+
   create(input: {
     readonly ownerUserId: string;
     readonly name: string;
@@ -350,3 +362,30 @@ export interface TripRepository {
     readonly tripId: string;
   }): Promise<readonly TransportHistoryRecord[] | null>;
 }
+
+export type RepositoryAuthoringCommand =
+  | Extract<
+      RepositoryTripCommand,
+      { type: 'ADD_PLACE_VISIT' | 'ADD_FREE_ACTION' }
+    >
+  | {
+      readonly type: 'MOVE_NODE';
+      readonly nodeId: string;
+      readonly targetDay: RepositoryDayOccurrenceTarget;
+      readonly position: number;
+    };
+export interface AuthoringPersistenceInput {
+  readonly ownerUserId: string;
+  readonly tripId: string;
+  readonly baseTripVersion: number;
+  readonly idempotencyKey: string;
+  readonly command: RepositoryAuthoringCommand;
+}
+export type AuthoringMutationResult =
+  | { readonly status: 'SUCCESS'; readonly trip: TripView }
+  | {
+      readonly status:
+        | Exclude<TripMutationResult['status'], 'SUCCESS'>
+        | 'IDEMPOTENCY_CONFLICT'
+        | 'TRANSPORT_CONFLICT';
+    };

@@ -285,6 +285,51 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     return { trip, adopted, leg, from: from! };
   }
 
+  it('P6A-2 authoring cannot silently archive or move the endpoints of adopted transport', async () => {
+    const f = await adoptedFixedGroundTrip();
+    const trip = f.adopted.trip;
+    const before = await externalDurableState(trip.id);
+    const count = await managed.client.tripAuthoringReceipt.count({
+      where: { tripId: trip.id },
+    });
+    for (const command of [
+      {
+        type: 'MOVE_NODE',
+        nodeId: f.from.id,
+        targetDay: { type: 'NEW', localDate: '2030-10-02', sequence: 1 },
+        position: 0,
+      },
+      {
+        type: 'ADD_FREE_ACTION',
+        targetDay: {
+          type: 'EXISTING',
+          dayOccurrenceId: trip.days[0]!.dayOccurrenceId,
+        },
+        position: 1,
+        note: 'SYNTHETIC insert between selected transport',
+      },
+    ]) {
+      const r = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/authoring`,
+        headers: bearer(userA),
+        payload: {
+          baseTripVersion: trip.version,
+          idempotencyKey: randomUUID(),
+          command,
+        },
+      });
+      expect(r.statusCode, r.body).toBe(409);
+      expect(r.json().error.code).toBe('CONSTRAINT_CONFLICT');
+      expect(await externalDurableState(trip.id)).toEqual(before);
+      expect(
+        await managed.client.tripAuthoringReceipt.count({
+          where: { tripId: trip.id },
+        }),
+      ).toBe(count);
+    }
+  });
+
   function groundSequence(
     changes: readonly (
       | 'CANCELLED'

@@ -40,6 +40,13 @@ import {
 } from './model.js';
 import { navigation, placeMap, mapMode, type MapLocation } from './maps.js';
 import { transportClockPair } from './transport-display.js';
+import {
+  TripAuthoringEditor,
+  editorDays,
+  shiftedDate,
+  arrangementName,
+  type TemporaryDay,
+} from './authoring.js';
 import './styles.css';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -49,6 +56,7 @@ const api = new TravelApi(() => sessionStorage.getItem(tokenKey));
 let trip: TripView | null = null;
 let schedule: ScheduleProjectionView | null = null;
 let dayId = '';
+let temporaryDays: TemporaryDay[] = [];
 let busy = false;
 let notice = '';
 let epoch = 0;
@@ -134,6 +142,7 @@ const drawer = new DetailDrawer(
   () =>
     !busy && (!draftDirty || confirm('还有未保存的修改。放弃这些修改并关闭？')),
   () => {
+    authoring.reset();
     selection = null;
     preview = null;
     routeCandidates = [];
@@ -145,6 +154,43 @@ const drawer = new DetailDrawer(
     epoch++;
   },
 );
+const authoring = new TripAuthoringEditor({
+  api,
+  detail,
+  getTrip: () => trip,
+  getOwner: () => currentUserId,
+  days: () => (trip ? editorDays(trip, temporaryDays) : []),
+  open: (title, html) => {
+    selection = null;
+    detailBasis = null;
+    recoveryRequired = false;
+    drawer.open(frame(title, html));
+  },
+  act: (operation) => {
+    void act(operation);
+  },
+  dirty: (value) => {
+    draftDirty = value;
+  },
+  message: status,
+  load: loadTrip,
+  accepted: async (fresh, command) => {
+    trip = fresh;
+    notice = '';
+    acceptedWrite = '本次提交已保存到服务器';
+    if (!command || command.targetDay.type === 'NEW') temporaryDays = [];
+    dayId = authoring.dayKey;
+    routeCandidates = [];
+    preview = null;
+    receipt = null;
+    epoch++;
+    schedule = await api.request<ScheduleProjectionView>(
+      `/trips/${fresh.id}/schedule/evaluate`,
+      { basisVersion: fresh.version },
+    );
+    render();
+  },
+});
 const icon = (name: string) =>
   `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${({ pin: 'M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12Zm0-9a3 3 0 1 0 0-6 3 3 0 0 0 0 6', arrow: 'm5 12 14 0m-5-5 5 5-5 5', close: 'm6 6 12 12M6 18 18 6', calendar: 'M5 5h14v15H5zM8 2v6m8-6v6M5 10h14', route: 'M6 5a2 2 0 1 0 0 .1M18 19a2 2 0 1 0 0 .1M8 5h6a4 4 0 0 1 0 8h-4a4 4 0 0 0 0 6h6', clock: 'M12 3a9 9 0 1 0 .1 0M12 7v5l3 2' } as Record<string, string>)[name] ?? 'M5 12h14'}"/></svg>`;
 function projection(id: string): ScheduleNodeProjectionView | undefined {
@@ -154,7 +200,7 @@ function node(id: string) {
   return trip ? orderedNodes(trip).find((n) => n.id === id) : undefined;
 }
 function nodeTitle(n: ItineraryNodeView) {
-  return n.place?.name ?? '自由行动';
+  return arrangementName(n);
 }
 function dayDate(id: string) {
   return trip?.days.find((d) => d.dayOccurrenceId === id)?.localDate;
@@ -192,16 +238,15 @@ function render() {
     return;
   }
   if (!trip) {
-    root.innerHTML = `<header><div class="brand">${icon('route')} TRAVEL</div><div class="header-actions"><button data-action="reload">重新载入</button><button data-action="logout">退出</button></div></header><main class="trip-list"><h1>你的旅行</h1>${banner()}<div id="trips">正在读取旅行…</div></main>`;
+    root.innerHTML = `<header><div class="brand">${icon('route')} TRAVEL</div><div class="header-actions"><button data-action="reload">重新载入</button><button data-action="logout">退出</button></div></header><main class="trip-list"><div class="page-heading"><h1>你的旅行</h1><button data-action="create-trip" class="primary"><span class="control-content">${icon('calendar')}新建旅行</span></button></div>${banner()}<div id="trips">正在读取旅行…</div></main>`;
     return;
   }
-  const day =
-    trip.days.find((d) => d.dayOccurrenceId === dayId) ?? trip.days[0];
-  dayId = day?.dayOccurrenceId ?? '';
+  const days = editorDays(trip, temporaryDays);
+  const day = days.find((d) => d.key === dayId) ?? days[0];
+  dayId = day?.key ?? '';
   const shownNodes =
     day?.nodes.filter((n) => !isFoldedTransfer(trip!, n)) ?? [];
-  const days = [...trip.days].sort((a, b) => a.sequence - b.sequence);
-  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header><main class="workspace"><aside class="date-sidebar"><p class="eyebrow">这次旅行</p><h1>${esc(trip.name)}</h1><p class="muted">${trip.defaultPeopleCount} 人 · ${esc(trip.effectiveStartDate ?? trip.planningAnchorDate)}</p><nav aria-label="旅行日期">${days.map((d, i) => `<button data-day="${d.dayOccurrenceId}" class="${d.dayOccurrenceId === dayId ? 'selected' : ''}">${icon('calendar')}<span>第 ${i + 1} 天<small>${esc(d.localDate)}</small></span></button>`).join('')}</nav></aside><section class="itinerary"><div class="page-heading"><div><p class="eyebrow">按计划查看</p><h2>${esc(day?.localDate ?? '日程')}</h2><p class="mobile-trip">${esc(trip.name)}</p></div><span class="badge">${shownNodes.length} 个安排</span></div>${banner()}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo">撤销刚才的路线修改</button></div>' : ''}<div class="timeline">${
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header><main class="workspace"><aside class="date-sidebar"><p class="eyebrow">这次旅行</p><h1>${esc(trip.name)}</h1><p class="muted">${trip.defaultPeopleCount} 人 · ${esc(trip.effectiveStartDate ?? trip.planningAnchorDate)}</p><nav aria-label="旅行日期">${days.map((d, i) => `<button data-day="${d.key}" class="${d.key === dayId ? 'selected' : ''}"><span class="control-content">${icon('calendar')}<span>第 ${i + 1} 天<small>${esc(d.localDate)}${d.temporary ? ' · 待添加' : ''}</small></span></span></button>`).join('')}</nav><div class="date-extension"><button data-action="previous-day"><span class="control-content">${icon('calendar')}添加前一天</span></button><button data-action="next-day"><span class="control-content">${icon('calendar')}添加下一天</span></button></div></aside><section class="itinerary"><div class="page-heading"><div><p class="eyebrow">按计划查看</p><h2>${esc(day?.localDate ?? '日程')}</h2><p class="mobile-trip">${esc(trip.name)}</p></div><span class="badge"><span class="control-content">${shownNodes.length} 个安排</span></span></div>${day?.temporary ? '<p class="temporary-day-note">这是临时规划日，添加有效安排后才占用日期；离开或刷新不会保留空白日。</p>' : ''}<div class="authoring-toolbar"><button class="primary" data-action="add-arrangement" ${day?.occupied ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>${banner()}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo">撤销刚才的路线修改</button></div>' : ''}<div class="timeline">${
     shownNodes.length
       ? shownNodes
           .map((n) => {
@@ -209,7 +254,7 @@ function render() {
             const connection = chain[0]
               ? { ...chain[0], toNodeId: chain.at(-1)!.toNodeId }
               : undefined;
-            return `<article class="place-card"><button class="place-open" data-node="${n.id}"><span class="place-icon">${icon('pin')}</span><span><strong>${esc(nodeTitle(n))}</strong><small>${esc(n.place?.address ?? (n.place ? '地址未提供' : '未指定地点'))}</small></span><span aria-hidden="true">›</span></button>${timeGrid(n)}${requirements(n)}${projection(n.id)?.status === 'VIOLATED' || projection(n.id)?.status === 'CONFLICT' ? '<p class="warning">当前安排与重要时间要求有冲突，请查看详情。</p>' : ''}</article>${connection ? connectionCard(connection) : ''}`;
+            return `<article class="place-card"><button class="place-open" data-node="${n.id}"><span class="place-icon">${icon('pin')}</span><span><strong>${esc(nodeTitle(n))}</strong><small>${esc(n.place?.address ?? (n.place ? '地址未提供' : '未指定地点'))}</small></span><span aria-hidden="true">›</span></button>${timeGrid(n)}${requirements(n)}${projection(n.id)?.status === 'VIOLATED' || projection(n.id)?.status === 'CONFLICT' ? '<p class="warning">当前安排与重要时间要求有冲突，请查看详情。</p>' : ''}<div class="arrangement-actions"><button data-authoring-move="${n.id}"><span class="control-content">${icon('calendar')}调整日期与顺序</span></button></div></article>${connection ? connectionCard(connection) : ''}`;
           })
           .join('')
       : `<div class="empty">${day?.nodes.length ? '这一天没有单独的地点安排；跨日交通请查看出发日的交通详情。' : '这一天还没有安排。'}</div>`
@@ -552,7 +597,11 @@ function showPreview(p: RoutePreviewView) {
   target.innerHTML = `<section class="choice"><h3>这条路线</h3><ol class="legs">${p.candidate.legs.map((leg) => legView(leg)).join('')}</ol><p>会${p.changeSummary.transportAction === 'REPLACE' ? '替换当前交通' : '新增交通'}；目的地保持不变。</p>${impact ? `<p>后续停留：${esc(duration(impact.projectedDwellSeconds))}${['INFEASIBLE', 'USER_REQUIREMENT_VIOLATION'].includes(impact.status) ? ' · 重要安排存在冲突' : ''}</p>` : ''}${adjustments.length ? `<label class="check"><input id="accept-adjustments" type="checkbox">我同意将以下最短停留改为：${adjustments.map((a) => `${esc(node(a.nodeId) ? nodeTitle(node(a.nodeId)!) : '相关地点')} ${duration(a.fromDurationSeconds)} → ${duration(a.toDurationSeconds)}`).join('；')}</label>` : ''}${!p.adoptable ? '<p class="warning">这条方案当前不能使用：存在受保护事实、时间冲突或已过期。请核对后重新查询。</p>' : ''}<button class="primary" data-action="adopt" ${p.adoptable ? '' : 'disabled'}>使用这条路线</button></section>`;
   target.scrollIntoView({ block: 'start' });
 }
-function showRecovery() {
+function showRecovery(error?: unknown) {
+  if (authoring.active) {
+    authoring.showRecovery(error ?? new WebError(0, 'NETWORK', '连接已中断'));
+    return;
+  }
   if (!detail.open || selection?.type !== 'place') return;
   recoveryRequired = true;
   let panel = detail.querySelector('#draft-recovery');
@@ -641,7 +690,7 @@ async function act(operation: () => Promise<void>) {
     const pending = detail.querySelector('#candidates');
     if (pending?.textContent === '正在查询…')
       pending.textContent = '未取得路线方案，请核对条件后重试。';
-    showRecovery();
+    showRecovery(error);
     status(
       `${acceptedWrite ? `${acceptedWrite}；后续读取/核对未完成。` : ''}${errorText(error)}`,
     );
@@ -659,11 +708,14 @@ async function loadTrip(id: string) {
     { basisVersion: fresh.version },
   );
   if (request !== epoch) return;
+  if (!authoring.active) temporaryDays = [];
   trip = fresh;
   schedule = evaluated;
   render();
 }
 async function listTrips() {
+  temporaryDays = [];
+  dayId = '';
   trip = null;
   schedule = null;
   receipt = null;
@@ -712,6 +764,45 @@ async function command(
 root.addEventListener('click', (event) => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('button');
   if (!target) return;
+  if (target.dataset.action === 'create-trip') {
+    if (detail.open && !drawerClose()) return;
+    authoring.openCreate();
+    return;
+  }
+  if (target.dataset.action === 'add-arrangement' && trip) {
+    const day = editorDays(trip, temporaryDays).find((d) => d.key === dayId);
+    if (day) {
+      if (detail.open && !drawerClose()) return;
+      authoring.openAdd(day);
+    }
+    return;
+  }
+  if (target.dataset.authoringMove && trip) {
+    if (detail.open && !drawerClose()) return;
+    const n = node(target.dataset.authoringMove);
+    if (n) authoring.openMove(n);
+    return;
+  }
+  if (
+    ['previous-day', 'next-day'].includes(target.dataset.action ?? '') &&
+    trip
+  ) {
+    if (busy) return;
+    const days = editorDays(trip, temporaryDays),
+      side = target.dataset.action === 'previous-day' ? 'before' : 'after';
+    const edge = side === 'before' ? days[0] : days.at(-1);
+    const localDate = shiftedDate(
+      edge?.localDate ?? trip.planningAnchorDate,
+      side === 'before' ? -1 : 1,
+    );
+    const key = `temporary:${crypto.randomUUID()}`;
+    const d = { key, localDate, side } as const;
+    temporaryDays =
+      side === 'before' ? [d, ...temporaryDays] : [...temporaryDays, d];
+    dayId = key;
+    render();
+    return;
+  }
   if (target.dataset.trip) void act(() => loadTrip(target.dataset.trip!));
   if (target.dataset.day) {
     if (detail.open && !drawerClose()) return;
@@ -756,6 +847,11 @@ root.addEventListener('submit', (event) => {
   });
 });
 detail.addEventListener('input', (event) => {
+  if (authoring.active) {
+    if ((event.target as HTMLElement).closest('[data-authoring]'))
+      authoring.input();
+    return;
+  }
   if ((event.target as HTMLElement).closest('#route-search')) {
     epoch++;
     routeCandidates = [];
@@ -780,6 +876,18 @@ detail.addEventListener('click', (event) => {
     !confirm('编辑尚未保存，仍要打开外部地图？当前草稿会保留。')
   ) {
     event.preventDefault();
+    return;
+  }
+  if (target.dataset.authoringKind) {
+    authoring.chooseKind(target.dataset.authoringKind);
+    return;
+  }
+  if (target.hasAttribute('data-authoring-recover')) {
+    void act(() => authoring.recover());
+    return;
+  }
+  if (target.hasAttribute('data-authoring-ack')) {
+    authoring.acknowledge();
     return;
   }
   if (target.dataset.action === 'recover-draft') void act(recoverDraft);
@@ -900,6 +1008,10 @@ detail.addEventListener('click', (event) => {
 });
 detail.addEventListener('change', (event) => {
   const target = event.target as HTMLSelectElement;
+  if (authoring.active) {
+    if (target.closest('[data-authoring]')) authoring.change(target);
+    return;
+  }
   if (target.hasAttribute('data-zone')) {
     const field = target
       .closest('form')
@@ -934,6 +1046,37 @@ detail.addEventListener('submit', (event) => {
   event.preventDefault();
   const form = event.target as HTMLFormElement;
   const data = new FormData(form);
+  if (authoring.active) {
+    if (form.id === 'authoring-login') {
+      void act(async () => {
+        await api.request('/auth/magic-link/request', {
+          email: data.get('email'),
+        });
+        status('请查看邮件并在此恢复登录。草稿仍保留。');
+      });
+      return;
+    }
+    if (form.id === 'authoring-consume') {
+      void act(async () => {
+        const url = new URL(String(data.get('link')));
+        const token = new URLSearchParams(url.hash.slice(1)).get('token');
+        if (!token) throw new Error('请粘贴完整登录链接。');
+        const result = await api.request<SessionResponse>(
+          '/auth/magic-link/consume',
+          { token },
+        );
+        form.reset();
+        if (result.user.id !== authoring.owner)
+          throw new Error('请使用原账户恢复，草稿不能转交其他账户。');
+        sessionStorage.setItem(tokenKey, result.credential);
+        currentUserId = result.user.id;
+        await authoring.recover();
+      });
+      return;
+    }
+    if (form.hasAttribute('data-authoring')) authoring.submit(form);
+    return;
+  }
   const submitted = formValue(form);
   const saved = () => savedForm(form.id, submitted);
   const message = (text: string) =>

@@ -17,3 +17,4 @@ infra/compose/mail-capture/
 infra/compose/object-storage/
 .travel-object-storage/
 artifacts/provider-probe/
+artifacts/google-consumer-transit/

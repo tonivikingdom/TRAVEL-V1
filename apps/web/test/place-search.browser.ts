@@ -458,15 +458,23 @@ test.describe('SYNTHETIC Place Search with integrated mobile touch hardening', (
       await page.mouse.move(handle.x + 15, handle.y + 2);
       await page.mouse.down();
       await page.mouse.move(handle.x + 15, handle.y + 60, { steps: 4 });
-      await page
-        .locator('#detail')
-        .dispatchEvent('lostpointercapture', { pointerId: 1 });
+      // Release real capture; a DOM-only lost event leaves native capture unchanged.
+      await page.locator('#detail').evaluate((element) => {
+        if (!element.hasPointerCapture(1))
+          throw new Error('SYNTHETIC drag must capture its active pointer');
+        element.releasePointerCapture(1);
+      });
+      await page.mouse.move(handle.x + 15, handle.y + 60);
       await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
       await page.mouse.up();
       await expect(page.getByRole('dialog')).toBeVisible();
 
       handle = (await page.locator('.handle').boundingBox())!;
-      page.once('dialog', (dialog) => dialog.dismiss());
+      let discardPrompts = 0;
+      page.once('dialog', async (dialog) => {
+        discardPrompts++;
+        await dialog.dismiss();
+      });
       await page.mouse.move(handle.x + 15, handle.y + 2);
       await page.mouse.down();
       await page.mouse.move(handle.x + 15, handle.y + 140, { steps: 8 });
@@ -479,6 +487,8 @@ test.describe('SYNTHETIC Place Search with integrated mobile touch hardening', (
         'search:SYNTHETIC-token-1',
       );
 
+      await expect.poll(() => discardPrompts).toBe(1);
+      await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
       await note.focus();
       await page.evaluate(() => {
         const viewport = window.visualViewport!;

@@ -650,6 +650,9 @@ form button {
     align-items: center;
     padding: 8px 0 13px;
     touch-action: none;
+    /* A handle gesture must not start native text selection/dragging in Safari. */
+    -webkit-user-select: none;
+    user-select: none;
   }
   .handle {
     display: block;
@@ -1118,6 +1121,13 @@ form button {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+/* WebKit native option text can escape the select's own overflow boundary. */
+[data-authoring] label:has(> select[name='place']) {
+  overflow: clip;
+}
+[data-authoring] select[name='place']:focus-visible {
+  outline-offset: -3px;
 }
 [data-authoring] button {
   width: 100%;

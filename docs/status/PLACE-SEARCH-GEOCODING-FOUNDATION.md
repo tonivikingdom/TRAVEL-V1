@@ -93,7 +93,7 @@ Repair delta is confined to acceptance fixtures/helpers/regressions and document
 
 The previous fixture-only delivery (`61733cd808a374826359db4e9b94d72979867838`) was blocked by later main Safari/touch changes and therefore was not marked RESOLVED. The user has now explicitly authorized integration of that exact main. Historical local results are not final integrated-head CI evidence.
 
-## Safari/touch integration — final acceptance in progress
+## Safari/touch integration — integrated acceptance passed
 
 Integration base: **`f407765675b3290a6aac01fbfd90506c150943bb`**. Merge commit `cae31e36f5f8d6aaff98ac83b7df441627a37566` retains both the existing feature parent and the main parent. No rebase, cherry-pick, ours/theirs whole-file replacement, main/PR #47/PR #41 change or migration.
 
@@ -107,7 +107,26 @@ Canonical midnight fixture files and all 13 boundary regression cases are byte-f
 
 Initial integrated HEAD `723b34231f2a5208432a9484af2d4e96996f5954`, CI [37135295594](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37135295594): Compose and P5B passed; verify passed Unit 773, PostgreSQL 627 and Chromium 166, but four new WebKit cases failed. Reproduction showed keyboard layout ended correctly at 400px; a preceding handle drag selected the title, then the next gesture started native WebKit text drag-and-drop, leaving a 17px transform and missing pointer-up. A narrow handle-only default-event/selection guard fixes the actual interaction. The next strict assertion also exposed long selected-place native text contributing horizontal overflow; only the selected-place control boundary contains its native text, preserving the full candidate/confirmation and unchanged no-overflow assertion. The joined tests now release native pointer capture (instead of dispatching only a DOM event), require exactly one discard confirmation, and require the transform to reset before testing the unchanged 401px keyboard bound. No assertion, scenario, timeout, browser or business guard is relaxed.
 
-Complete final validation is rerunning on this fix. Final HEAD/CI and totals will be recorded here and in PR #46. CURRENT-TASK remains ACTIVE until all final-head CI jobs succeed. Geoapify/F-05 remain **OPEN/PARTIAL**, with real calls disabled and no paid call.
+Validated integrated execution HEAD: **`79f54543fb848db404dd5f27cf6e60285153f8ba`**. CI [37136546370](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37136546370) completed/success; **verify, Compose verification and P5B acceptance all completed/success**. This replaces the failed initial integrated CI as passing evidence. CURRENT-TASK was marked **RESOLVED only after this integrated CI succeeded**. The following documentation/artifact commit changes no runtime or tests; its exact final HEAD and second complete all-green CI are recorded in [PR #46](https://github.com/tonivikingdom/TRAVEL-V1/pull/46) before handoff.
+
+| Integrated validation                    | Evidence                                                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen install                           | PASS, unchanged lockfile                                                                                                           |
+| Prisma generate / validate               | PASS                                                                                                                               |
+| format / lint / typecheck / build        | PASS                                                                                                                               |
+| Unit                                     | **773 / 69 files**, local + integrated CI                                                                                          |
+| PostgreSQL                               | **627 = 106 persistence + 521 API**, local + integrated CI                                                                         |
+| Clean migration deploy                   | **26 applied**, local + integrated CI                                                                                              |
+| Populated migration compatibility        | **26 / no pending**, existing populated SYNTHETIC DB and full integration paths pass                                               |
+| Chromium                                 | **166**, local + integrated CI                                                                                                     |
+| WebKit                                   | **166**, integrated CI                                                                                                             |
+| Joined mobile Place Search / touch tests | **4 Chromium + 4 WebKit**, all 320/375/390/430 at 24px root text; inherited mobile/desktop suites also pass                        |
+| Midnight boundary regression             | **13 = 5 Unit + 8 PostgreSQL**, full UTC-day minute sweep and exact original-fixture rejection retained                            |
+| Compose                                  | **PASS**, local + integrated CI; Ground/handoff/suffix/external Query/Preview/Adopt/Undo and lifecycle/storage assertions retained |
+| P5B                                      | **PASS**, local + integrated CI; local 5 users / 200 requests / 0 isolation failures / 0 unexpected 5xx / 0 network failures       |
+| Schema / migration delta                 | **0 / 0**, migration total **26**                                                                                                  |
+
+Read-only comparison proves that all main CSS rules and the entire original Place Search block remain after removing only the two scoped integration guards. `drawer.ts` equals main except accepted-handle default prevention; `authoring.ts` is unchanged. All eight canonical fixture/helper/test files are byte-for-byte unchanged from reviewed `61733cd`; production API/Domain/Provider/Prisma also have no delta from that HEAD. There is no automatic Provider query, weakened Preview/cross-day guard, new receipt/execution fact on reading, schema extension, or clock/buffer change. Real Geoapify/F-05 remain **OPEN/PARTIAL**, live disabled by default, no paid call.
 
 ## Visual review
 

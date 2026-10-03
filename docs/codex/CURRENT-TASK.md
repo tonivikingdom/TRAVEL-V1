@@ -1,4 +1,4 @@
-# CURRENT TASK — PR #46 integrated final acceptance (ACTIVE)
+# CURRENT TASK — PR #46 integrated final acceptance (RESOLVED)
 
 Recommendation: GPT-5.6 Sol / High; fallback available Sol / High. No runtime switch is claimed. Raise effort for time/concurrency regressions.
 
@@ -22,3 +22,17 @@ Run complete integrated-head frozen install, Prisma generate/validate, format/li
 Only mark RESOLVED after latest main is integrated, conflicts are resolved and final-head verify (Chromium + WebKit), Compose and P5B CI are completed/success. Record validated HEAD and CI, and final documentation HEAD/CI in PR #46. Stop if main changes from the authorized base.
 
 Do not Ready, merge, deploy, modify PR #47 or PR #41, or start another task. Stop for human review after final evidence.
+
+## Resolution evidence
+
+The authorized main was fetched again and remains `f407765675b3290a6aac01fbfd90506c150943bb`. Both parents are preserved in merge `cae31e36f5f8d6aaff98ac83b7df441627a37566`; the CSS conflict is resolved, all main and original Place Search rule blocks retained. The two narrow WebKit interaction repairs are documented in the status report; authoring and production API/Domain/Provider/Prisma remain unchanged from reviewed `61733cd`.
+
+- Validated integrated execution HEAD: `79f54543fb848db404dd5f27cf6e60285153f8ba`.
+- CI: [37136546370](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37136546370), completed/success.
+- verify, Compose verification, P5B acceptance: **all completed/success**.
+- Unit **773**, PostgreSQL **627**, Chromium **166**, WebKit **166** in CI.
+- Frozen install, Prisma generate/validate, format/lint/typecheck/build, full Unit/PostgreSQL/Chromium, Compose and P5B rerun locally on frozen integrated source and passed. Clean deploy **26**, populated deploy **26/no pending**, schema/migration delta **0/0**.
+- Canonical midnight helper and companion files remain unchanged, all **13** boundary cases pass; original invalid fixtures remain rejected by exact guards.
+- All **11** refreshed SYNTHETIC PNGs and the nine-panel contact sheet were actually opened.
+
+RESOLVED was recorded only after that integrated HEAD's CI succeeded. This following documentation/artifact commit does not change runtime or tests. Its exact final HEAD and a second complete final-head CI must be recorded in [PR #46](https://github.com/tonivikingdom/TRAVEL-V1/pull/46) and succeed before handoff; the file cannot embed its own commit hash. Keep Draft and stop for human review. All real Geoapify/F-05 and hardware/Provider limitations remain OPEN/PARTIAL. No Ready, merge, deploy, PR #47 / PR #41 change or next task.

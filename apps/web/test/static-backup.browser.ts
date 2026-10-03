@@ -790,3 +790,198 @@ test('direct materials version disagreement requires reload rather than mixing s
   await expect(page.locator('.essentials')).toHaveCount(0);
   expect(sentBodies).toEqual([]);
 });
+
+for (const mode of ['503', 'NETWORK'] as const)
+  test(`backup to live core ${mode} verifies authority and preserves explicit fallback`, async ({
+    page,
+  }) => {
+    seedSavedFlight();
+    await generate(page);
+    const immutable = JSON.stringify(backup),
+      before = calls.length;
+    unavailable = true;
+    coreNetwork = mode === 'NETWORK';
+    await page.locator('[data-action=live-essentials]').click();
+    await expect(page.locator('.message')).toContainText(
+      mode === '503' ? '核心服务暂时不可用' : '连接中断',
+    );
+    await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(
+      0,
+    );
+    expect(calls.slice(before)).toEqual([`GET /trips/${tripId}`]);
+    expect(JSON.stringify(backup)).toBe(immutable);
+    await page.locator('[data-local-backup]').click();
+    await expect(page.locator('.backup-label')).toHaveText('正在查看备份');
+    await expect(page.locator('.backup-warning')).toContainText(
+      '无法核验在线版本',
+    );
+    await expect(page.locator('.essentials')).toContainText('SY 123 SYNTHETIC');
+  });
+
+test('backup to live version change requires reload without mixing N and N+1', async ({
+  page,
+}) => {
+  await generate(page);
+  fixture.trip = {
+    ...fixture.trip,
+    version: 2,
+    name: 'SYNTHETIC 新权威版本 2',
+  };
+  fixture.evidence = { ...fixture.evidence, tripVersion: 2 };
+  const before = calls.length;
+  await page.locator('[data-action=live-essentials]').click();
+  await expect(page.locator('.message')).toContainText('行程或方案已变化');
+  await expect(page.locator('.essentials')).toHaveCount(0);
+  expect(calls.slice(before)).toEqual([`GET /trips/${tripId}`]);
+  await page.locator('[data-local-backup]').click();
+  await expect(page.locator('.backup-stamp')).toContainText('Trip version 1');
+  await page.locator('[data-action=close-materials]').click();
+  await page.locator('[data-action=reload]').click();
+  await page.locator('[data-trip]').click();
+  await page.locator('[data-action=essentials]').click();
+  await expect(page.locator('.essentials h2')).toHaveText(
+    'SYNTHETIC 新权威版本 2',
+  );
+  expect(backup!.tripVersion).toBe(1);
+});
+
+for (const endpoint of ['backup', 'flight'] as const)
+  test(`backup to live ${endpoint}-only failure degrades locally`, async ({
+    page,
+  }) => {
+    seedSavedFlight();
+    await generate(page);
+    backupUnavailable = endpoint === 'backup';
+    evidenceUnavailable = endpoint === 'flight';
+    const before = calls.length;
+    await page.locator('[data-action=live-essentials]').click();
+    await expect(page.locator('.essentials [role=status]')).toContainText(
+      endpoint === 'backup' ? '未能读取服务器备份' : '航班资料暂时无法读取',
+    );
+    await expect(page.getByText('在线行程资料', { exact: true })).toBeVisible();
+    await expect(page.locator('.essentials')).toContainText(
+      'SYNTHETIC 用户备注',
+    );
+    if (endpoint === 'flight')
+      await expect(page.locator('.essentials')).not.toContainText(
+        'SY 123 SYNTHETIC',
+      );
+    expect(calls.slice(before)).toContain(`GET /trips/${tripId}`);
+    expect(calls.slice(before).filter((c) => c.startsWith('POST'))).toEqual([]);
+    await page.locator('[data-action=view-backup]').click();
+    await expect(page.locator('.backup-label')).toBeVisible();
+  });
+
+for (const oldFailure of [false, true])
+  test(`backup to live delayed old ${oldFailure ? 'failure' : 'success'} cannot overwrite close/reopen success`, async ({
+    page,
+  }) => {
+    await generate(page);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let first = true;
+    await page.route(`**/api/trips/${tripId}`, async (route) => {
+      if (!first) return route.fallback();
+      first = false;
+      const saved = { ...fixture.trip, name: 'SYNTHETIC 迟到旧响应' };
+      await gate;
+      await route.fulfill({
+        status: oldFailure ? 503 : 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          oldFailure ? { error: { code: 'SERVICE_UNAVAILABLE' } } : saved,
+        ),
+      });
+    });
+    await page.locator('[data-action=live-essentials]').click();
+    await expect(page.locator('.essentials [role=status]')).toContainText(
+      '正在核验在线行程资料',
+    );
+    await expect(page.locator('.backup-label')).toBeVisible();
+    await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(page.locator('[data-action=download-backup]')).toBeVisible();
+    await page.locator('[data-action=close-materials]').click();
+    await page.locator('[data-action=essentials]').click();
+    await expect(page.getByText('在线行程资料', { exact: true })).toBeVisible();
+    const beforeRelease = [...calls];
+    const done = page.waitForResponse((r) =>
+      r.url().endsWith(`/trips/${tripId}`),
+    );
+    release();
+    await done;
+    await expect(page.getByText('在线行程资料', { exact: true })).toBeVisible();
+    await expect(page.locator('.message')).toHaveCount(0);
+    await expect(page.locator('.essentials')).not.toContainText(
+      'SYNTHETIC 迟到旧响应',
+    );
+    expect(calls).toEqual(beforeRelease);
+    await expect(page.locator('.backup-label')).toHaveCount(0);
+  });
+
+for (const destination of ['other-trip', 'logout', 'other-owner'] as const)
+  test(`backup to live delayed read cannot refill after ${destination}`, async ({
+    page,
+  }) => {
+    await generate(page);
+    let release!: () => void;
+    materialsGate = new Promise<void>((r) => {
+      release = r;
+    });
+    const before = calls.filter((c) => c.endsWith('/backup')).length;
+    await page.locator('[data-action=live-essentials]').click();
+    await expect
+      .poll(() => calls.filter((c) => c.endsWith('/backup')).length)
+      .toBe(before + 1);
+    await expect(page.locator('.backup-label')).toBeVisible();
+    await page.locator('[data-action=close-materials]').click();
+    materialsGate = null;
+    const cancelled =
+      destination === 'other-owner'
+        ? page.waitForEvent('requestfailed', (request) =>
+            request.url().endsWith(`/trips/${tripId}/in-trip`),
+          )
+        : null;
+    secondTrip = true;
+    await page.locator('[data-action=trips]').click();
+    if (destination === 'other-trip') {
+      await page.locator(`[data-trip="${secondTripId}"]`).click();
+      await page.locator('[data-action=essentials]').click();
+      await expect(page.locator('.essentials h2')).toHaveText(
+        'SYNTHETIC 第二趟旅行',
+      );
+    } else {
+      await page.locator('[data-action=logout]').click();
+      await expect(page.locator('.login')).toBeVisible();
+      if (destination === 'other-owner') {
+        otherOwner = true;
+        await page.reload();
+        await expect(page.locator('.trip-list')).toBeVisible();
+      }
+    }
+    const done =
+      cancelled ??
+      page.waitForResponse((r) => r.url().endsWith(`/trips/${tripId}/in-trip`));
+    release();
+    await done;
+    if (destination === 'other-trip')
+      await expect(page.locator('.essentials h2')).toHaveText(
+        'SYNTHETIC 第二趟旅行',
+      );
+    else if (destination === 'logout')
+      await expect(page.locator('.login')).toBeVisible();
+    else {
+      await expect(page.locator('.trip-list')).toBeVisible();
+      expect(
+        await page.evaluate(() =>
+          Object.keys(localStorage).filter((k) =>
+            k.startsWith('travel.static-backup.v1:'),
+          ),
+        ),
+      ).toEqual([]);
+    }
+    await expect(page.locator('.backup-label')).toHaveCount(0);
+  });

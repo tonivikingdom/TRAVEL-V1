@@ -194,7 +194,21 @@ try {
   await expect(page.locator('.essentials')).toContainText(
     snapshot.displayFlightNumber,
   );
+  // Same authority check from an explicitly opened backup, with real HTTP 503.
+  outage = 'core';
+  await page.locator('[data-action=live-essentials]').click();
+  await expect(page.locator('.message')).toContainText('核心服务暂时不可用');
+  await expect(page.getByText('在线行程资料', { exact: true })).toHaveCount(0);
+  await page.locator('[data-local-backup]').click();
+  await expect(page.locator('.backup-label')).toHaveText('正在查看备份');
+  await expect(page.locator('.essentials')).toContainText(
+    snapshot.displayFlightNumber,
+  );
+  assert.deepEqual(await service.getTrip(actor, trip.id), trip);
   await page.locator('[data-action=close-materials]').click();
+  outage = null;
+  await page.locator('[data-action=reload]').click();
+  await page.locator('[data-trip]').click();
   const counts = () =>
     Promise.all([
       db.client.tripStaticBackup.count(),
@@ -276,9 +290,23 @@ try {
     ).artifact,
     stored.artifact,
   );
-  await page.locator('[data-action=close-materials]').click();
+  const shutdownContext = await browser.newContext();
+  const shutdownPage = await shutdownContext.newPage();
+  await shutdownPage.addInitScript(
+    (value) => sessionStorage.setItem('travel.web.session', value),
+    credential,
+  );
+  await shutdownPage.goto('http://127.0.0.1:5178');
+  await shutdownPage.locator('[data-trip]').click();
+  await expect(shutdownPage.locator('[data-action=essentials]')).toBeVisible();
   await app.close();
-  await page.locator('[data-action=essentials]').click();
+  await shutdownPage.locator('[data-action=essentials]').click();
+  await expect(shutdownPage.locator('.essentials')).toHaveCount(0);
+  await expect(shutdownPage.locator('.backup-fallback')).toContainText(
+    '暂无可用备份',
+  );
+  await shutdownContext.close();
+  await page.locator('[data-action=live-essentials]').click();
   await expect(page.locator('.essentials')).toHaveCount(0);
   await page.locator('[data-local-backup]').click();
   await expect(page.locator('.backup-label')).toBeVisible();
@@ -296,6 +324,7 @@ try {
       immutableAfterEdit: true,
       coreFailureAndReload: true,
       directCore503AndConnectionFailure: true,
+      backupToLiveCore503AndConnectionFailure: true,
       directNoLocalBackup: true,
       auxiliaryOutagesKeepVerifiedTrip: true,
       recoveredVersion: edited.version,

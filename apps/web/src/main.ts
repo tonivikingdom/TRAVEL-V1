@@ -110,7 +110,7 @@ function renderMaterials() {
     return;
   }
   const value = viewingBackup ?? (trip ? liveEssentials(trip, inTrip) : null);
-  root.innerHTML = `<header><button data-action="close-materials">‹ ${trip ? '返回行程' : '返回'}</button><div class="brand">TRAVEL</div></header><main class="essentials">${viewingBackup ? `<p class="backup-label">正在查看备份</p><h1>静态行程备份</h1><p class="backup-stamp">备份生成于 ${esc(backupTimestamp(viewingBackup.generatedAt))}<br>Trip version ${viewingBackup.tripVersion}</p><p class="backup-warning">此内容不会自动更新。${trip && trip.id === viewingBackup.tripId ? (trip.version !== viewingBackup.tripVersion ? `在线行程已修改为版本 ${trip.version}，这份备份保留旧版本。` : '版本与已读取的在线行程一致，交通和航班信息仍是保存时的内容。') : '服务暂时不可用，无法核验在线版本。'} 保存时预计时间不是现在重新查询的结果。</p><div class="backup-actions"><button data-action="download-backup">下载静态文件</button>${trip ? '<button data-action="live-essentials">查看在线旅行资料</button>' : ''}</div>` : `<p class="eyebrow">在线行程资料</p><h1>旅行资料 / 备份</h1><p>地点、备注与已保存的交通信息。先查看在线行程；备份由你主动更新。</p><div class="backup-actions"><button class="primary" data-action="generate-backup" ${busy ? 'disabled' : ''}>更新离线备份</button>${latestBackup ? '<button data-action="view-backup">查看最近备份</button>' : '<span>暂无可用备份</span>'}</div><p class="muted">更新后会在此浏览器保存一份私人备份，包含备注。共享设备请退出以清除本机副本；下载文件需自行保管。</p>${latestBackup ? `<p>最近备份生成于 ${esc(backupTimestamp(latestBackup.generatedAt))} · Trip version ${latestBackup.tripVersion}</p>` : ''}`}<p role="status">${esc(backupNotice)}</p>${value ? essentialsBody(value, !!viewingBackup) : '<p>暂无可用资料。</p>'}${viewingBackup ? '<p class="muted">此备份只供查看。行程修改后，请主动更新备份。</p>' : ''}</main>`;
+  root.innerHTML = `<header><button data-action="close-materials">‹ ${trip ? '返回行程' : '返回'}</button><div class="brand">TRAVEL</div></header><main class="essentials">${viewingBackup ? `<p class="backup-label">正在查看备份</p><h1>静态行程备份</h1><p class="backup-stamp">备份生成于 ${esc(backupTimestamp(viewingBackup.generatedAt))}<br>Trip version ${viewingBackup.tripVersion}</p><p class="backup-warning">此内容不会自动更新。${trip && trip.id === viewingBackup.tripId ? (trip.version !== viewingBackup.tripVersion ? `在线行程已修改为版本 ${trip.version}，这份备份保留旧版本。` : '版本与已读取的在线行程一致，交通和航班信息仍是保存时的内容。') : '服务暂时不可用，无法核验在线版本。'} 保存时预计时间不是现在重新查询的结果。</p><div class="backup-actions"><button data-action="download-backup">下载静态文件</button>${trip ? `<button data-action="live-essentials" ${materialsVerifying ? 'disabled' : ''}>查看在线旅行资料</button>` : ''}</div>` : `<p class="eyebrow">在线行程资料</p><h1>旅行资料 / 备份</h1><p>地点、备注与已保存的交通信息。先查看在线行程；备份由你主动更新。</p><div class="backup-actions"><button class="primary" data-action="generate-backup" ${busy ? 'disabled' : ''}>更新离线备份</button>${latestBackup ? '<button data-action="view-backup">查看最近备份</button>' : '<span>暂无可用备份</span>'}</div><p class="muted">更新后会在此浏览器保存一份私人备份，包含备注。共享设备请退出以清除本机副本；下载文件需自行保管。</p>${latestBackup ? `<p>最近备份生成于 ${esc(backupTimestamp(latestBackup.generatedAt))} · Trip version ${latestBackup.tripVersion}</p>` : ''}`}<p role="status">${esc(backupNotice)}</p>${value ? essentialsBody(value, !!viewingBackup) : '<p>暂无可用资料。</p>'}${viewingBackup ? '<p class="muted">此备份只供查看。行程修改后，请主动更新备份。</p>' : ''}</main>`;
 }
 async function openMaterials() {
   if (!trip || busy || (detail.open && !drawerClose())) return;
@@ -129,8 +129,8 @@ async function openMaterials() {
     trip.version === basis.version;
   materialsOpen = true;
   materialsVerifying = true;
-  viewingBackup = null;
-  backupNotice = '';
+  // Keep the explicitly opened static artifact while verifying either entry.
+  backupNotice = viewingBackup ? '正在核验在线行程资料…' : '';
   inTrip = null;
   inTripReadUnavailable = true;
   render();
@@ -148,6 +148,7 @@ async function openMaterials() {
       api.request<InTripView>(`/trips/${basis.id}/in-trip`),
     ]);
     if (!active()) return;
+    backupNotice = '';
     const [backup, evidence] = reads;
     for (const result of reads)
       if (
@@ -173,6 +174,7 @@ async function openMaterials() {
       inTripReadAt = new Date().toISOString();
     } else backupNotice += ' 航班资料暂时无法读取。';
     materialsVerifying = false;
+    viewingBackup = null;
     render();
   } catch (error) {
     if (!active()) return;
@@ -1293,8 +1295,7 @@ root.addEventListener('click', (event) => {
     return;
   }
   if (target.dataset.action === 'live-essentials') {
-    viewingBackup = null;
-    render();
+    void openMaterials();
     return;
   }
   if (target.dataset.action === 'close-materials') {

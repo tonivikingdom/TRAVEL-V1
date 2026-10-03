@@ -188,3 +188,4 @@ export type {
   ExternalOriginRouteQueryResponse,
   ExternalRouteOriginSnapshot,
 } from './routes.js';
+export type { InTripView } from './in-trip.js';

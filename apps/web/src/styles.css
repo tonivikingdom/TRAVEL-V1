@@ -879,3 +879,156 @@ form button {
     font-size: max(16px, 1.07rem);
   }
 }
+
+/* P6B: one task at a time, with the existing itinerary and detail drawer. */
+.view-switch {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px max(16px, env(safe-area-inset-left)) 0;
+}
+.view-switch button[aria-pressed='true'] {
+  background: #eaf1ff;
+  border-color: #b5cef7;
+  color: #1f55be;
+}
+.view-switch button,
+.in-trip button,
+.in-trip a,
+.in-trip summary {
+  min-height: 44px;
+}
+.in-trip {
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 20px max(16px, env(safe-area-inset-right))
+    max(36px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  min-width: 0;
+}
+.today-heading h1 {
+  font-size: 1.55rem;
+  margin: 4px 0;
+}
+.today-heading > p:last-child {
+  margin: 4px 0 16px;
+  color: var(--muted);
+}
+.progress-status {
+  margin: 12px 0 18px;
+  color: #486180;
+  font-size: 0.95rem;
+}
+.progress-status small,
+.in-trip small {
+  font-size: max(12px, 0.87rem);
+}
+.next-step,
+.flight-info {
+  padding: 20px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.next-step > h2 {
+  margin-top: 8px;
+  font-size: 1.3rem;
+}
+.in-trip .times {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 5.5em), 1fr));
+}
+.in-trip .times span {
+  font-size: 0.85rem;
+}
+.in-trip .times strong {
+  font-size: 1.45rem;
+}
+.in-trip .times .time-zone,
+.in-trip .address,
+.in-trip .requirement,
+.read-context,
+.realtime-status {
+  font-size: 0.87rem;
+}
+.action-time {
+  padding: 12px;
+  background: #f3f7fe;
+  border-radius: 12px;
+  font-size: 1.05rem;
+}
+.in-trip .map-links a {
+  flex: 1 1 8em;
+  font-size: 0.95rem;
+  text-align: center;
+}
+.next-step > button,
+.in-trip > button {
+  width: 100%;
+}
+.next-leg {
+  margin: 12px 0;
+}
+.next-leg li {
+  border: 0;
+  padding: 0;
+}
+.transfer-details {
+  margin: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.in-trip summary {
+  padding: 10px 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.following article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.following article p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.following article button {
+  flex-shrink: 0;
+}
+.read-context {
+  color: var(--muted);
+  margin: 20px 0;
+}
+.step-note {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.flight-info {
+  margin: 16px 0;
+}
+.flight-movements {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10em), 1fr));
+  gap: 16px;
+}
+.flight-clock strong {
+  display: block;
+  font-size: 1.35rem;
+}
+@media (max-width: 360px) {
+  .in-trip {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .next-step,
+  .flight-info {
+    padding: 16px;
+  }
+  .following article {
+    flex-wrap: wrap;
+  }
+}

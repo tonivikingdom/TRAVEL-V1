@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { syntheticRouteDay } from './synthetic-route-day.mjs';
 
 /** Synthetic-only P5E2 cross-layer check inside verify-compose's isolated project. */
 export async function verifyGroundTransitChain({
@@ -26,16 +27,9 @@ export async function verifyGroundTransitChain({
         query,
       )
     ).trim();
-  const departure = new Date(Date.now() + 4 * 60_000);
-  const dateParts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tokyo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(departure);
-  const datePart = (type) =>
-    dateParts.find((part) => part.type === type)?.value;
-  const date = `${datePart('year')}-${datePart('month')}-${datePart('day')}`;
+  const now = new Date();
+  const departure = new Date(now.getTime() + 4 * 60_000);
+  const { timeZone: zone, localDate: date } = syntheticRouteDay(now);
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 ground execution',
     planningAnchorDate: date,
@@ -80,7 +74,7 @@ export async function verifyGroundTransitChain({
     hint: {
       type: 'DEPART_AT',
       instant: departure.toISOString(),
-      timeZone: 'Asia/Tokyo',
+      timeZone: zone,
     },
   });
   if (query.candidates.length !== 1 || query.candidates[0].legs.length !== 2)
@@ -328,7 +322,6 @@ export async function verifyGroundTransitChain({
         composeQuiet,
         sql,
         waitFor,
-        date,
       })
     : null;
   return {
@@ -351,7 +344,6 @@ async function verifyHandoffReplacement({
   composeQuiet,
   sql,
   waitFor,
-  date,
 }) {
   const email = 'synthetic-compose-handoff@synthetic.example.test';
   await adminApiJson('/admin/invitations', 'POST', { email });
@@ -418,6 +410,9 @@ async function verifyHandoffReplacement({
       );
     return payload;
   };
+  const now = new Date();
+  const departure = new Date(now.getTime() + 8 * 60_000);
+  const { timeZone: zone, localDate: date } = syntheticRouteDay(now);
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 handoff replacement',
     planningAnchorDate: date,
@@ -457,8 +452,8 @@ async function verifyHandoffReplacement({
       toNodeId: to.id,
       hint: {
         type: 'DEPART_AT',
-        instant: new Date(Date.now() + 8 * 60_000).toISOString(),
-        timeZone: 'Asia/Tokyo',
+        instant: departure.toISOString(),
+        timeZone: zone,
       },
     });
   } catch (error) {
@@ -519,7 +514,7 @@ async function verifyHandoffReplacement({
     handoff.query?.fromNodeId !== from.id ||
     handoff.query?.toNodeId !== to.id ||
     handoff.query?.hint?.type !== 'DEPART_AT' ||
-    handoff.query?.hint?.timeZone !== 'Asia/Tokyo'
+    handoff.query?.hint?.timeZone !== zone
   )
     throw new Error(
       `P5E2 handoff did not prepare the current route query: ${JSON.stringify(handoff)}`,

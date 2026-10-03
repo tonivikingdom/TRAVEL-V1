@@ -82,6 +82,8 @@ All 11 original screenshots use visibly SYNTHETIC fixtures, were actually opened
 
 [Open review contact sheet](assets/p6b-2/review-contact-sheet.png)
 
+[Open JPEG contact sheet for remote review](assets/p6b-2/review-contact-sheet.jpg). This additional artifact was assembled only from the committed SYNTHETIC screenshots at `4b53adbbb7df32a26f6234bca2dd1de07c0517f6`, without rerunning product pages. RGB JPEG, quality 88, 1600 × 9667 px, 1,551,551 bytes (1.48 MiB). It includes titled Travel Essentials, Current Backup, Stale Backup, Live unavailable + backup, No backup, 320px, Enlarged text and Desktop views, preserving screenshot proportions and complete UI without cropping. The JPG was actually opened and inspected. Original PNG artifacts remain unchanged; this follow-up changes artifacts/docs only.
+
 | View                             | Artifact                                                                          |
 | -------------------------------- | --------------------------------------------------------------------------------- |
 | Online essentials                | [mobile-essentials](assets/p6b-2/mobile-essentials.png)                           |

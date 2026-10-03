@@ -803,3 +803,46 @@ for (const width of [320, 375, 390, 430, 1440]) {
     noWrites();
   });
 }
+
+test('SYNTHETIC Today and transport sheet preserve touch layout after portrait to landscape rotation', async ({
+  page,
+}) => {
+  await enter(page);
+  await page.addStyleTag({ content: 'html { font-size: 24px !important; }' });
+  await expect(page.locator('.next-step')).toBeVisible();
+  if (process.env.WEB_TEST_SCREENSHOTS === 'true')
+    await page.screenshot({
+      path: 'docs/status/assets/mobile-hardening/mobile-today.png',
+      fullPage: true,
+    });
+  await page.setViewportSize({ width: 740, height: 390 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.locator('.in-trip > button').click();
+  await page.locator('.connection').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page
+    .locator('#detail')
+    .evaluate((element) => (element.scrollTop = element.scrollHeight));
+  expect(
+    await page
+      .locator('#detail')
+      .evaluate((e) => e.scrollWidth <= e.clientWidth),
+  ).toBe(true);
+  if (process.env.WEB_TEST_SCREENSHOTS === 'true')
+    await page.screenshot({
+      path: 'docs/status/assets/mobile-hardening/landscape-transport.png',
+    });
+  await page.locator('[data-close]').click();
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await page.locator('.connection').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  if (process.env.WEB_TEST_SCREENSHOTS === 'true')
+    await page.screenshot({
+      path: 'docs/status/assets/mobile-hardening/desktop.png',
+    });
+  noWrites();
+});

@@ -1,26 +1,37 @@
-# CURRENT TASK — P6C-2 Failure / Concurrency / Mobile Hardening (BLOCKED)
+# CURRENT TASK — P6C2-01 authorized narrow repair
 
-Recommendation: GPT-5.6 Sol / High; fallback available Sol / High. No runtime switch is claimed. Escalate for uncertain owner/version/concurrency evidence.
+Recommendation: GPT-5.6 Sol / High.
 
-- Starting main: `0e5a94c7bd4f64c4e94f208053074c4ddcdbb22f`, fetched and matched.
-- Branch: `feat/p6c-2-failure-hardening`.
-- Migration **26**, production API/schema/migration delta **0/0/0**.
-- Own synthetic acceptance helpers, PostgreSQL footprint/concurrency tests and browser/mobile regressions. Do not modify A/B/Provider/PR #41.
+Controller decision: repair P6C2-01 in PR #49 only.
 
-## P6C2-01 — text-only Place Search draft bypasses discard protection
+- Branch: feat/p6c-2-failure-hardening
+- Blocker HEAD: 92f90fd56a2b0633a598af70b3b5434121453997
+- Expected main basis: 0e5a94c7bd4f64c4e94f208053074c4ddcdbb22f
+- Migration remains 26.
 
-Reproduced on existing production Web, without product edits, in Chromium and WebKit. Open Trip → 添加安排 → 地点; wait for saved-place loading to finish; type `SYNTHETIC place-search protected draft` only in the search input; drag the normal handle down past 110px. **Observed:** the drawer closes without any confirmation, resetting authoring/search context. Switching to route detail also bypasses protection. **Required:** preserve the unsubmitted Place Search draft when navigation/closure is refused and honor discard protection.
+Problem: text-only Place Search state is omitted from the authoring dirty baseline, so drawer close or replacement can reset it without the existing draft confirmation.
 
-Cause: `TripAuthoringEditor.input()` compares `new FormData(form)` with its baseline. `[data-place-query]` and `[data-place-language]` have no `name`, so their edits are absent from comparison and `draftDirty` remains false. The drawer/route close guards allow transition, and the closed callback calls `authoring.reset()`. A selected candidate or note is a different dirty state and does not cover text-only search.
+Required behavior:
+- search text that would be lost on close counts as dirty;
+- search language also counts as dirty if lossy;
+- drag close, close button, and drawer replacement all reuse the existing authoring discard guard;
+- dismissing the prompt keeps exact search values;
+- accepted discard behaves as before;
+- selected candidate and note protection remain unchanged;
+- search edits remain zero-write.
 
-This is cross-modal authoring/Place Search draft-state behavior, beyond Task C's narrow mobile interaction ownership. Current user instruction: “如果发现当前正式代码已有 bug：不要擅自大修。写入 docs/codex/CURRENT-TASK.md 明确 blocker，停止等待总控决定。” **No product repair applied. Stop development pending controller decision.**
+Important async edge case: saved-place loading later establishes the initial baseline. User search text/language entered before that request resolves must not be absorbed into the baseline and become clean. Add regression for both before-load and after-load edits.
 
-- Active, unskipped failing regression: `apps/web/test/replanning-hardening.browser.ts`, `place-search draft refuses drag close and route open without clearing values`.
-- PostgreSQL new harness: **18/18 PASS** against isolated PostgreSQL 17, with actual rows for all nine mandated resources plus Backup/Authoring/Day/Ownership/Temporal/Intent.
-- Final targeted Chromium: **16 PASS / 1 FAIL**; WebKit: **16 PASS / 1 FAIL**. Independent normal-handle reproductions also fail in both engines (zero confirmation). The final regression asserts the drawer remains visible as well as draft value/confirmation.
-- SYNTHETIC before/after evidence: `docs/status/assets/p6c-2-hardening/mobile-place-search-draft-before-close.png`, `mobile-place-search-draft-lost-after-close.png`.
-- Full green final acceptance blocked; remaining work and actual checks: [status](../status/P6C-2-FAILURE-HARDENING.md).
-- Do not RESOLVED, skip/weaken the regression, Ready, merge, deploy, repair A/B, change PR #41 or begin another task.
+Review explicit cancel-search behavior: it may intentionally clear search-only draft state, but must not silently clear unrelated note/place draft. Test the intended behavior.
+
+Keep the existing failing browser regression unskipped. Add focused Chromium/WebKit cases for text-only, language-only, before-load, close/navigation replacement, accepted discard, cancel semantics, and zero-write footprint. Preserve the existing 18 PostgreSQL hardening regressions.
+
+Production edits must stay limited to authoring/place-search draft-state integration. Do not change Place Search API/provider semantics, Query/Preview/Adopt/Undo, A/B workflow contracts, schema/migration, or PR #41.
+
+Run full final-head validation: frozen install, Prisma generate/validate, format/lint/typecheck/build, Unit, PostgreSQL, Chromium/WebKit, Compose, P5B. Only mark RESOLVED after exact final-head CI is all green.
+
+Keep Draft. Do not merge or deploy. Stop for human review.
+
 
 ## Historical task — PR #46 integrated final acceptance (RESOLVED)
 

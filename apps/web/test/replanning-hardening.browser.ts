@@ -197,13 +197,13 @@ for (const kind of ['authoring', 'place-search'] as const) {
     if (kind === 'place-search') {
       await evidence(
         page,
-        'mobile-place-search-draft-before-close',
+        'mobile-place-search-draft-before-discard-prompt',
         info.project.name,
       );
       await dragHandle(page);
       await evidence(
         page,
-        'mobile-place-search-draft-lost-after-close',
+        'mobile-place-search-draft-after-refused-close',
         info.project.name,
       );
       // A normal handle gesture must respect the same draft protection.

@@ -81,6 +81,8 @@ export async function browserHarness(page: Page) {
     queryGate: null as ReturnType<typeof responseGate> | null,
     previewGate: null as ReturnType<typeof responseGate> | null,
     adoptGate: null as ReturnType<typeof responseGate> | null,
+    savedPlacesGate: null as ReturnType<typeof responseGate> | null,
+    placeSearchGate: null as ReturnType<typeof responseGate> | null,
     owner: tripId,
   };
   await page.addInitScript(() =>
@@ -125,7 +127,36 @@ export async function browserHarness(page: Page) {
         : send(data, status);
     };
     if (path === '/me') return send({ id: state.owner });
-    if (path === '/trips') return send({ trips: [trip, second] });
+    if (path === '/trips') {
+      const gate = state.savedPlacesGate;
+      if (gate) {
+        gate.arrived();
+        await gate.pending;
+      }
+      return send({ trips: [trip, second] });
+    }
+    if (path.endsWith('/place-search')) {
+      const gate = state.placeSearchGate;
+      if (gate) {
+        gate.arrived();
+        await gate.pending;
+      }
+      return send({
+        expiresAt: '2035-01-01T00:00:00Z',
+        candidates: [
+          {
+            provider: 'synthetic',
+            externalId: 'SYNTHETIC_P6C2',
+            name: 'SYNTHETIC searched place',
+            formattedAddress: 'SYNTHETIC test address',
+            coordinates: { latitude: 35.681, longitude: 139.767 },
+            attribution: 'SYNTHETIC fixture',
+            synthetic: true,
+            selectionToken: 'SYNTHETIC_P6C2_TOKEN',
+          },
+        ],
+      });
+    }
     if (path === `/trips/${tripId}`) return send(trip);
     if (path === `/trips/${secondId}`) return send(second);
     if (path.endsWith('/schedule/evaluate'))

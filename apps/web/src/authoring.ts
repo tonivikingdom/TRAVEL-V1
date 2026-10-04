@@ -119,6 +119,7 @@ export class TripAuthoringEditor {
     path: string;
     body: Record<string, unknown>;
     submitted: string;
+    searchSnapshot: string | null;
     command: TripAuthoringCommandInput | null;
     beforeNodeIds: readonly string[];
   } | null = null;
@@ -303,7 +304,9 @@ export class TripAuthoringEditor {
   input() {
     const f = this.form();
     if (!f) return;
-    const dirty = value(f) !== this.baseline;
+    // Search controls are intentionally absent from the formal command snapshot.
+    // Their own baseline is captured before any async saved-place read.
+    const dirty = value(f) !== this.baseline || this.placeSearch.dirty;
     this.h.dirty(dirty);
     this.h.message(dirty ? '还有未保存的修改。' : '当前表单与已提交内容一致。');
   }
@@ -367,7 +370,7 @@ export class TripAuthoringEditor {
             !current ||
             current.selectionToken === pending.body.selectionToken
           ) {
-            this.placeSearch.reset();
+            this.placeSearch.clearSelection();
             form?.querySelector('[data-searched-place]')?.remove();
             this.h.detail
               .querySelector('[data-selected-summary]')
@@ -473,6 +476,7 @@ export class TripAuthoringEditor {
           ?.dayOccurrenceId ?? this.context.dayKey;
     this.selectionOutcomeUnknown = false;
     this.baseline = pending.submitted;
+    this.placeSearch.acknowledge(pending.searchSnapshot);
     this.acceptedSnapshot = pending.submitted;
     this.pending = null;
     if (this.context?.mode === 'create') this.context.tripId = fresh.id;
@@ -485,7 +489,8 @@ export class TripAuthoringEditor {
       return;
     }
     const submitted = value(form),
-      data = new FormData(form);
+      data = new FormData(form),
+      searchSnapshot = this.placeSearch.snapshot;
     const searched =
       this.context.mode === 'add' ? this.placeSearch.selection(form) : null;
     if (this.acceptedSnapshot === submitted) {
@@ -563,6 +568,7 @@ export class TripAuthoringEditor {
         path,
         body,
         submitted,
+        searchSnapshot,
         command,
         beforeNodeIds: this.h.getTrip()
           ? orderedNodes(this.h.getTrip()!).map((n) => n.id)
@@ -584,7 +590,7 @@ export class TripAuthoringEditor {
       this.accept(fresh, pending);
       await this.h.accepted(fresh, pending.command);
       this.h.message(
-        `本次提交已保存。${value(form) !== this.baseline ? ' 新修改仍未保存。' : ''}`,
+        `本次提交已保存。${value(form) !== this.baseline || this.placeSearch.dirty ? ' 新修改仍未保存。' : ''}`,
       );
     });
   }

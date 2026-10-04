@@ -215,8 +215,25 @@ export class RouteQueryService {
     );
 
     const result = await this.queryCandidates({
-      origin: toProviderPlace(origin),
-      destination: toProviderPlace(destination),
+      travelMode: input.travelMode,
+      origin: toProviderPlace(
+        origin,
+        nodeTimeZone(
+          fromNode,
+          'DEPARTURE',
+          fromProjection.departure.effective?.value.timeZone ??
+            fromProjection.arrival.effective?.value.timeZone,
+        ),
+      ),
+      destination: toProviderPlace(
+        destination,
+        nodeTimeZone(
+          toNode,
+          'ARRIVAL',
+          toProjection.arrival.effective?.value.timeZone ??
+            toProjection.departure.effective?.value.timeZone,
+        ),
+      ),
       time,
       basisVersion: trip.version,
       arrival,
@@ -348,13 +365,23 @@ export class RouteQueryService {
         422,
       );
     const result = await this.queryCandidates({
+      travelMode: input.travelMode,
       origin: {
         placeId: origin.id,
         name: origin.name,
         latitude: origin.latitude,
         longitude: origin.longitude,
+        timeZone: origin.timeZone,
       },
-      destination: toProviderPlace(destination),
+      destination: toProviderPlace(
+        destination,
+        nodeTimeZone(
+          destinationNode,
+          'ARRIVAL',
+          destinationProjection.arrival.effective?.value.timeZone ??
+            destinationProjection.departure.effective?.value.timeZone,
+        ),
+      ),
       time,
       basisVersion,
       arrival: null,
@@ -399,6 +426,7 @@ export class RouteQueryService {
   }
 
   private async queryCandidates({
+    travelMode,
     origin,
     destination,
     time,
@@ -409,6 +437,7 @@ export class RouteQueryService {
     save,
     validateEndpoints,
   }: {
+    travelMode: RouteQueryRequest['travelMode'];
     validateEndpoints?: (candidate: NormalizedRouteCandidate) => boolean;
     origin: RouteProviderLocationInput;
     destination: RouteProviderLocationInput;
@@ -425,7 +454,13 @@ export class RouteQueryService {
       snapshots: readonly RouteCandidateSnapshotDraft[],
     ) => Promise<SaveRouteCandidateSnapshotsResult>;
   }) {
+    if (
+      travelMode !== undefined &&
+      !['WALKING', 'DRIVING', 'TRANSIT'].includes(travelMode)
+    )
+      throw new ApplicationError('VALIDATION_ERROR', '交通方式不受支持。', 400);
     const providerResult = await this.provider.queryRoutes({
+      ...(travelMode ? { travelMode } : {}),
       origin: origin,
       destination: destination,
       earliestDeparture: time.earliestDeparture,
@@ -695,13 +730,32 @@ function requirePlaceEndpoint(node: ItineraryNodeRecord): PlaceRecord {
   return node.place;
 }
 
-function toProviderPlace(place: PlaceRecord) {
+function toProviderPlace(place: PlaceRecord, timeZone?: string) {
   return {
     placeId: place.id,
     name: place.name,
     latitude: place.latitude,
     longitude: place.longitude,
+    ...(timeZone ? { timeZone } : {}),
   };
+}
+
+/** Owned persisted time evidence only; never infer a zone from location or query hint. */
+function nodeTimeZone(
+  node: ItineraryNodeRecord,
+  pointKind: 'ARRIVAL' | 'DEPARTURE',
+  effective?: string,
+): string | undefined {
+  if (effective) return effective;
+  const matching = node.timeIntents.filter(
+    (i) => i.pointKind === pointKind && i.timeZone,
+  );
+  const zones = new Set(
+    (matching.length ? matching : node.timeIntents).flatMap((i) =>
+      i.timeZone ? [i.timeZone] : [],
+    ),
+  );
+  return zones.size === 1 ? [...zones][0] : undefined;
 }
 
 function toTimeConditionView(

@@ -23,6 +23,7 @@ import {
   isApplicationError,
 } from '@travel/application';
 import type {
+  RegionalMapCapabilityView,
   GroundTransitRouteReevaluationHandoffView,
   AssistanceAction,
   AssistanceMutationRequest,
@@ -72,6 +73,10 @@ export interface ApiDependencies {
   readonly routeAdoptionService?: RouteAdoptionService;
   readonly routeUndoService?: RouteUndoService;
   readonly tripService?: TripService;
+  readonly regionalMapProjection?: (coordinates: {
+    latitude: number;
+    longitude: number;
+  }) => RegionalMapCapabilityView;
   readonly credentialTransport?: CredentialTransport;
 }
 
@@ -251,6 +256,35 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
     );
   });
 
+  app.get<{ Params: { tripId: string; nodeId: string } }>(
+    '/trips/:tripId/places/:nodeId/provider-capability',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const trip = await requireTripService(dependencies).getTrip(
+        authenticated.actor,
+        request.params.tripId,
+      );
+      const place = trip.days
+        .flatMap((day) => day.nodes)
+        .find((node) => node.id === request.params.nodeId)?.place;
+      if (!place) throw new ApplicationError('NOT_FOUND', '地点不存在。', 404);
+      if (!dependencies.regionalMapProjection)
+        throw new ApplicationError(
+          'PROVIDER_UNAVAILABLE',
+          '区域能力尚未配置。',
+          503,
+        );
+      return dependencies.regionalMapProjection({
+        latitude: place.latitude,
+        longitude: place.longitude,
+      });
+    },
+  );
+
   app.post<{ Params: { tripId: string } }>(
     '/trips/:tripId/place-search',
     async (request) => {
@@ -271,6 +305,9 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request.params.tripId,
         requiredString(body, 'query'),
         hasOwn(body, 'language') ? requiredString(body, 'language') : 'ja',
+        hasOwn(body, 'contextNodeId')
+          ? requiredString(body, 'contextNodeId')
+          : undefined,
       );
     },
   );
@@ -1012,7 +1049,12 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request,
       );
       const body = requiredRecord(request.body);
-      const allowed = new Set(['basisVersion', 'toNodeId', 'hint']);
+      const allowed = new Set([
+        'basisVersion',
+        'toNodeId',
+        'hint',
+        'travelMode',
+      ]);
       if (Object.keys(body).some((key) => !allowed.has(key)))
         throw new ApplicationError(
           'VALIDATION_ERROR',
@@ -1026,6 +1068,9 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         {
           basisVersion: requiredNumber(body, 'basisVersion'),
           toNodeId: requiredString(body, 'toNodeId'),
+          ...(hasOwn(body, 'travelMode')
+            ? { travelMode: parseRouteTravelMode(body.travelMode) }
+            : {}),
           ...(hasOwn(body, 'hint') ? { hint: parseRouteHint(body.hint) } : {}),
         },
       );
@@ -1091,6 +1136,9 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
           basisVersion: requiredNumber(body, 'basisVersion'),
           fromNodeId: requiredString(body, 'fromNodeId'),
           toNodeId: requiredString(body, 'toNodeId'),
+          ...(hasOwn(body, 'travelMode')
+            ? { travelMode: parseRouteTravelMode(body.travelMode) }
+            : {}),
           ...(hasOwn(body, 'hint') ? { hint: parseRouteHint(body.hint) } : {}),
         },
       );
@@ -1799,4 +1847,12 @@ function requireExternalOriginService(
       503,
     );
   return dependencies.externalExecutionOriginService;
+}
+
+function parseRouteTravelMode(
+  value: unknown,
+): 'WALKING' | 'DRIVING' | 'TRANSIT' {
+  if (value === 'WALKING' || value === 'DRIVING' || value === 'TRANSIT')
+    return value;
+  throw new ApplicationError('VALIDATION_ERROR', '交通方式必须明确选择。', 400);
 }

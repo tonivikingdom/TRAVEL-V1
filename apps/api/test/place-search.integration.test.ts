@@ -6,6 +6,7 @@ import {
   digestOpaqueToken,
 } from '@travel/application';
 import type { TripView } from '@travel/contracts';
+import type { PlaceSearchProvider } from '@travel/application';
 import {
   createPrismaClient,
   PrismaAuthRepository,
@@ -22,19 +23,25 @@ import {
   expect,
   it,
 } from 'vitest';
-import { SyntheticPlaceSearchProvider } from '@travel/providers';
+import {
+  SyntheticPlaceSearchProvider,
+  RegionalPlaceSearchProvider,
+  mapProviderProjection,
+} from '@travel/providers';
 import { buildApi } from '../src/app.js';
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required');
 const date = '2031-10-01';
 describe('Place Search explicit selection on real PostgreSQL', () => {
   let db: ManagedPrismaClient, app: FastifyInstance;
+  let currentProvider: PlaceSearchProvider;
   let owner: { id: string; credential: string },
     other: { id: string; credential: string };
   beforeAll(() => {
     db = createPrismaClient(databaseUrl);
   });
   beforeEach(async () => {
+    currentProvider = new SyntheticPlaceSearchProvider();
     async function identity() {
       const credential = `SYNTHETIC_${randomUUID().replaceAll('-', '')}`;
       const user = await db.client.user.create({
@@ -59,6 +66,7 @@ describe('Place Search explicit selection on real PostgreSQL', () => {
       data: { role: 'ADMIN' },
     });
     app = buildApi({
+      regionalMapProjection: mapProviderProjection,
       readinessProbe: {
         async check() {
           return { name: 'postgresql', status: 'READY' };
@@ -77,7 +85,10 @@ describe('Place Search explicit selection on real PostgreSQL', () => {
       }),
       tripService: new TripService(new PrismaTripRepository(db.client)),
       placeSearchService: new PlaceSearchService(
-        new SyntheticPlaceSearchProvider(),
+        {
+          search: (query, language, context) =>
+            currentProvider.search(query, language, context),
+        },
         new TripService(new PrismaTripRepository(db.client)),
       ),
     });
@@ -292,5 +303,146 @@ describe('Place Search explicit selection on real PostgreSQL', () => {
       idempotencyKey: randomUUID(),
     });
     expect(accepted.statusCode, accepted.body).toBe(200);
+  });
+  it.each([
+    ['MAINLAND_CHINA', 39.9042, 116.4074, 'baidu'],
+    ['JAPAN', 35.681236, 139.767125, 'google'],
+    ['GLOBAL_OTHER', 48.8566, 2.3522, 'google'],
+  ] as const)(
+    'regional %s search/map are owner-scoped zero-write reads',
+    async (region, latitude, longitude, expected) => {
+      let trip = await create();
+      const added = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/authoring`,
+        headers: headers(),
+        payload: {
+          baseTripVersion: trip.version,
+          idempotencyKey: randomUUID(),
+          command: {
+            type: 'ADD_PLACE_VISIT',
+            targetDay: { type: 'NEW', localDate: date, sequence: 0 },
+            position: 0,
+            place: {
+              type: 'CUSTOM',
+              name: 'SYNTHETIC regional context',
+              latitude,
+              longitude,
+            },
+          },
+        },
+      });
+      expect(added.statusCode, added.body).toBe(200);
+      trip = added.json();
+      const nodeId = trip.days[0]!.nodes[0]!.id;
+      const calls: string[] = [];
+      const provider = (name: string) => ({
+        async search() {
+          calls.push(name);
+          return [
+            {
+              provider: name,
+              externalId: 'SYNTHETIC:id',
+              name: 'SYNTHETIC result',
+              formattedAddress: null,
+              coordinates: { latitude, longitude },
+              attribution: 'SYNTHETIC only',
+              synthetic: true,
+            },
+          ];
+        },
+      });
+      currentProvider = new RegionalPlaceSearchProvider({
+        baiduPlace: provider('baidu'),
+        googlePlace: provider('google'),
+      });
+      const before = await db.client.trip.findUniqueOrThrow({
+          where: { id: trip.id },
+        }),
+        beforeCounts = await counts();
+      const r = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/place-search`,
+        headers: headers(),
+        payload: { query: 'SYNTHETIC', language: 'ja', contextNodeId: nodeId },
+      });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(calls).toEqual([expected]);
+      const map = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}/places/${nodeId}/provider-capability`,
+        headers: headers(),
+      });
+      expect(map.statusCode, map.body).toBe(200);
+      expect(map.json()).toEqual({
+        region,
+        provider: expected.toUpperCase(),
+        coordinates: { latitude, longitude },
+        coordinateSystem: 'WGS84',
+      });
+      expect(
+        await db.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+      ).toEqual(before);
+      expect(await counts()).toEqual(beforeCounts);
+      for (const path of [
+        `/trips/${trip.id}/places/${nodeId}/provider-capability`,
+        `/trips/${trip.id}/place-search`,
+      ]) {
+        const foreign = await app.inject({
+          method: path.includes('place-search') ? 'POST' : 'GET',
+          url: path,
+          headers: headers(other),
+          ...(path.includes('place-search')
+            ? { payload: { query: 'SYNTHETIC', contextNodeId: nodeId } }
+            : {}),
+        });
+        expect(foreign.statusCode, foreign.body).toBe(404);
+      }
+      expect(calls).toEqual([expected]);
+    },
+  );
+  it('regional missing context/provider leaves all rows intact and saved-place fallback usable', async () => {
+    const trip = await create();
+    currentProvider = new RegionalPlaceSearchProvider({});
+    const saved = await db.client.place.create({
+      data: {
+        ownerUserId: owner.id,
+        name: 'SYNTHETIC saved fallback',
+        latitude: 35.681236,
+        longitude: 139.767125,
+      },
+    });
+    const before = await counts();
+    const r = await search(trip, 'SYNTHETIC');
+    expect(r.statusCode, r.body).toBe(503);
+    expect(await counts()).toEqual(before);
+    const invalid = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/place-search`,
+      headers: headers(),
+      payload: { query: 'SYNTHETIC', contextNodeId: randomUUID() },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(await counts()).toEqual(before);
+    const fallback = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/authoring`,
+      headers: headers(),
+      payload: {
+        baseTripVersion: trip.version,
+        idempotencyKey: randomUUID(),
+        command: {
+          type: 'ADD_PLACE_VISIT',
+          targetDay: { type: 'NEW', localDate: date, sequence: 0 },
+          position: 0,
+          place: { type: 'EXISTING', placeId: saved.id },
+        },
+      },
+    });
+    expect(fallback.statusCode, fallback.body).toBe(200);
+    expect((fallback.json() as TripView).days[0]!.nodes[0]!.place!.id).toBe(
+      saved.id,
+    );
+    expect((await counts()).places).toBe(before.places);
   });
 });

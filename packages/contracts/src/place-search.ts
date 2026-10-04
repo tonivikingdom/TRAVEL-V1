@@ -1,5 +1,14 @@
 import type { DayOccurrenceTargetInput } from './trips.js';
+export interface PlaceSearchRequest {
+  readonly query: string;
+  readonly language?: 'ja' | 'en' | 'zh';
+  /** Existing owner/Trip-scoped location, never a client-supplied region. */
+  readonly contextNodeId?: string;
+}
 export interface PlaceSearchCandidate {
+  readonly providerPlaceRef?: string | null;
+  readonly timeZone?: string | null;
+  readonly coordinateSystem?: 'WGS84';
   readonly externalId: string;
   readonly provider: string;
   readonly name: string;

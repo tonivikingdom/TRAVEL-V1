@@ -1,3 +1,4 @@
+import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { expect, test, type Page } from '@playwright/test';
 import {
   fixtureCandidate,
@@ -87,6 +88,8 @@ test.beforeEach(async ({ page }) => {
         contentType: 'application/json',
         body: JSON.stringify(data),
       });
+    const capability = regionalCapabilityFixture(trip, path);
+    if (capability) return send(capability);
     if (path === '/me') return send({ id: tripId });
     if (path === '/trips') return send({ trips: [trip] });
     if (path === `/trips/${tripId}`) return send(trip);
@@ -378,14 +381,14 @@ test('provider failure is distinct from empty routes and preserves external exit
   failQuery = true;
   await page.getByRole('button', { name: '搜索路线' }).click();
   await expect(page.locator('#save-status')).toContainText('服务暂时不可用');
-  await expect(page.getByRole('link', { name: '在地图中查询' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '查看起终点' })).toBeVisible();
 });
 test('map URLs use trusted selected endpoints; click never emits execution facts', async ({
   page,
 }) => {
   await enter(page);
   await page.locator('[data-node]').first().click();
-  const map = page.getByRole('link', { name: '查看地图', exact: true });
+  const map = page.getByRole('link', { name: '在地图中查看', exact: true });
   expect(await map.getAttribute('href')).toContain('35.6812%2C139.7671');
   const before = calls.length;
   await page.route('https://www.google.com/**', (route) =>

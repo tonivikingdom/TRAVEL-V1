@@ -1,3 +1,4 @@
+import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { test, expect, type Page } from '@playwright/test';
 import type {
   FlightMovementView,
@@ -47,6 +48,8 @@ test.beforeEach(async ({ page }) => {
         contentType: 'application/json',
         body: JSON.stringify(value),
       });
+    const capability = regionalCapabilityFixture(fixture.trip, path);
+    if (capability) return send(capability);
     if (path === '/me') return send({ id: tripId });
     if (path === '/trips') return send({ trips: [fixture.trip] });
     if (path === `/trips/${tripId}`)

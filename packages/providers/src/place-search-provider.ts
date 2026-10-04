@@ -1,5 +1,6 @@
 import type { PlaceSearchProvider } from '@travel/application';
 import type { PlaceSearchCandidate } from '@travel/contracts';
+import { createRegionalProviders } from './regional-config.js';
 const attribution = 'Powered by Geoapify · © OpenStreetMap contributors';
 const record = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -92,7 +93,13 @@ export class SyntheticPlaceSearchProvider implements PlaceSearchProvider {
 export function createPlaceSearchProvider(
   env: NodeJS.ProcessEnv,
 ): PlaceSearchProvider {
-  const provider = env.PLACE_SEARCH_PROVIDER ?? 'unconfigured';
+  const provider = env.PLACE_SEARCH_PROVIDER ?? 'regional';
+  if (provider === 'regional') return createRegionalProviders(env).places;
+  if (
+    provider === 'geoapify' &&
+    ['staging', 'production'].includes(env.APP_ENV ?? '')
+  )
+    return new UnconfiguredPlaceSearchProvider();
   if (provider === 'synthetic') {
     if (
       !['development', 'test'].includes(env.APP_ENV ?? '') ||

@@ -1,20 +1,21 @@
-import type { RouteLocationView } from '@travel/contracts';
-export type MapLocation = Pick<
-  RouteLocationView,
-  'name' | 'latitude' | 'longitude'
->;
-export function coordinates(location: MapLocation): string | null {
-  const { latitude: lat, longitude: lng } = location;
-  return lat !== null &&
-    lng !== null &&
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    Math.abs(lat) <= 90 &&
-    Math.abs(lng) <= 180
-    ? `${lat},${lng}`
-    : null;
-}
+import { coordinates, type MapLocation } from './map-position.js';
+export { coordinates, type MapLocation } from './map-position.js';
+import {
+  regionMapAdapter,
+  unconfiguredMapAdapter,
+  reliablePoint,
+  externalMapUrl,
+  externalNavigationUrl,
+} from './map-adapter.js';
 export function placeMap(location: MapLocation, apple = false): string | null {
+  const adapter = regionMapAdapter();
+  if (adapter !== unconfiguredMapAdapter) {
+    const saved = reliablePoint(location);
+    return saved
+      ? externalMapUrl(adapter, { kind: 'place', points: [saved] })
+      : null;
+  }
+  // Inherited compatibility only; A's configured capability replaces this path.
   const point = coordinates(location);
   if (!point) return null;
   const url = new URL(
@@ -34,6 +35,17 @@ export function navigation(
   origin?: MapLocation,
   mode: string | null = 'walking',
 ): string | null {
+  const adapter = regionMapAdapter();
+  if (adapter !== unconfiguredMapAdapter) {
+    const saved = reliablePoint(destination);
+    const from = origin ? reliablePoint(origin) : null;
+    if (!saved || (origin && !from)) return null;
+    return externalNavigationUrl(adapter, saved, {
+      mode,
+      ...(from ? { origin: from } : {}),
+    });
+  }
+  // Retain existing callers until A wires its Region capability; no new policy.
   const point = coordinates(destination);
   if (!point) return null;
   const url = new URL('https://www.google.com/maps/dir/');

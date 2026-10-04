@@ -205,3 +205,42 @@ it('missing optional deletion evidence cannot claim no deletion', () => {
   expect(v.preserved.join(' ')).toContain('地点移除信息未提供');
   expect(v.preserved.join(' ')).not.toContain('不会删除地点');
 });
+
+it('legacy missing leg indexes uses original candidate order, never appends walking after the route', () => {
+  const f = previewFixture();
+  const leg = f.preview.candidate.legs[0]!;
+  const { legIndex, ...segment } = f.preview.changeSummary.proposedSegments[0]!;
+  void legIndex;
+  const preview = {
+    ...f.preview,
+    candidate: {
+      ...f.preview.candidate,
+      legs: [
+        { ...leg, serviceLabel: 'first service' },
+        { ...leg, mode: 'WALKING' as const, serviceLabel: null },
+        { ...leg, serviceLabel: 'second service' },
+      ],
+    },
+    changeSummary: {
+      ...f.preview.changeSummary,
+      proposedSegments: [segment, segment],
+      internalTransferDetails: [
+        {
+          legIndex: 1,
+          mode: 'WALKING' as const,
+          from: leg.from,
+          to: leg.to,
+          durationSeconds: 180,
+          evidence: 'SYSTEM_STRUCTURED' as const,
+        },
+      ],
+    },
+  };
+  const view = previewPresentation(preview);
+  expect(view.segments.map((s) => s.service)).toEqual([
+    'first service',
+    '步行',
+    'second service',
+  ]);
+  expect(view.important.join(' ')).toContain('候选原始顺序');
+});

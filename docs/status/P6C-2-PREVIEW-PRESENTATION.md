@@ -51,7 +51,8 @@ Viewing, folding and opening navigation do not change Trip.version, itinerary, e
 1. **Exact before/after time delta and full-day impact: BLOCKED by existing contract.** Preview supplies candidate plan and limited downstream assessment, not a full before/after schedule. Show these supplied values and explicitly state the missing comparison. Do not subtract unrelated values or run Web feasibility logic.
 2. **Finer explanation for a non-adoptable Preview without reason evidence: BLOCKED.** Map supplied status, protection reasons and downstream assessment. Otherwise say the specific reason is unavailable; do not guess expiry, personal execution or locked conflicts.
 3. `nodesToRemove` has no node label/source. Same-basis Trip enables correct classification; without it, highlight uncertain removals instead of guessing automatic/manual origin. No contract extension.
-4. Minimal change is shown according to supplied CREATE/REPLACE evidence; no invented global no-op equivalence test.
+4. Legacy proposed segments without explicit leg indexes cannot be interleaved with station walks by inference. When internal walks exist, show the authoritative original candidate leg order and explain the missing correspondence. Never append an unlinked walk as though it occurs after the whole route.
+5. Minimal change is shown according to supplied CREATE/REPLACE evidence; no invented global no-op equivalence test.
 
 These limits belong to contract/product decisions for the controller and A. This task does not extend APIs or Domain.
 

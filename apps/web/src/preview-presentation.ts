@@ -204,7 +204,19 @@ export function previewPresentation(
     (segment) => segment.legIndex !== undefined,
   )
     ? [...orderedSegments, ...internal].sort((a, b) => a.order - b.order)
-    : [...orderedSegments, ...internal];
+    : internal.length
+      ? p.candidate.legs.map((leg) => ({
+          service: leg.serviceLabel?.trim() || modeLabel[leg.mode] || '交通',
+          endpoints: `${leg.from.name?.trim() || '起点待定'} → ${leg.to.name?.trim() || '终点待定'}`,
+          time: `计划 ${time(leg.departure)} → ${time(leg.arrival)}`,
+        }))
+      : orderedSegments;
+  if (
+    internal.length &&
+    (!s.proposedSegments.length ||
+      s.proposedSegments.some((segment) => segment.legIndex === undefined))
+  )
+    important.push('分段对应信息未提供；换乘详情按候选原始顺序展示。');
 
   return {
     scope: external

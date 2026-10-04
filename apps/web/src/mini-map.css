@@ -41,7 +41,7 @@
   overscroll-behavior: contain;
   background: #e8f1fa;
 }
-.mini-map-viewport svg {
+.mini-map-viewport svg[data-synthetic-map] {
   display: block;
   width: 100%;
   height: 100%;

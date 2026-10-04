@@ -32,7 +32,11 @@ export class TravelApi {
     private readonly credential: () => string | null,
     private readonly fetcher: typeof fetch = fetch.bind(globalThis),
   ) {}
-  async request<T>(path: string, body?: unknown): Promise<T> {
+  async request<T>(
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const headers: Record<string, string> = { accept: 'application/json' };
     const token = this.credential();
     if (token) headers.authorization = `Bearer ${token}`;
@@ -42,6 +46,7 @@ export class TravelApi {
       response = await this.fetcher(`/api${path}`, {
         method: body === undefined ? 'GET' : 'POST',
         headers,
+        ...(signal ? { signal } : {}),
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch {

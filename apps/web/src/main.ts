@@ -75,6 +75,10 @@ import {
 } from './map-adapter.js';
 import { miniMapMarkup, mountMiniMap } from './mini-map.js';
 import { SyntheticMapAdapter } from './synthetic-map-adapter.js';
+import { RegionalMapComposition } from './regional-map-composition.js';
+import { browserMapConfig } from './map-browser-config.js';
+import { providerMapAdapters } from './provider-map-adapters.js';
+import { MapSdkLoader } from './map-sdk-loader.js';
 import './mini-map.css';
 import './styles.css';
 import './preview-presentation.css';
@@ -134,6 +138,78 @@ let backupPending: {
   baseTripVersion: number;
   idempotencyKey: string;
 } | null = null;
+const sdkHarness =
+  import.meta.env.DEV &&
+  new URLSearchParams(location.search).get('mapHarness') === 'SYNTHETIC_SDK';
+const mapSlots = providerMapAdapters(
+  browserMapConfig(
+    sdkHarness
+      ? {
+          VITE_GOOGLE_MAPS_BROWSER_KEY: 'SYNTHETIC_BROWSER_SDK_KEY',
+          VITE_GOOGLE_MAPS_EMBED_ENABLED: 'true',
+          VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED: 'true',
+          VITE_GOOGLE_MAPS_STORAGE_APPROVED: 'true',
+          VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED: 'true',
+        }
+      : import.meta.env,
+  ),
+  new MapSdkLoader(document, window as unknown as Record<string, unknown>),
+  window as unknown as Record<string, unknown>,
+);
+if (sdkHarness) {
+  const real = mapSlots.GOOGLE;
+  mapSlots.GOOGLE = {
+    provider: 'GOOGLE',
+    embedded: real.embedded,
+    synthetic: true,
+    mount: real.mount.bind(real),
+    externalMapUrl: real.externalMapUrl.bind(real),
+    externalNavigationUrl: real.externalNavigationUrl.bind(real),
+  };
+}
+// DEV evidence still consumes the real regional API/composition, but never loads a Provider.
+if (
+  import.meta.env.DEV &&
+  new URLSearchParams(location.search).get('mapHarness') ===
+    'SYNTHETIC_REGIONAL'
+) {
+  const state = new URLSearchParams(location.search).get('mapState');
+  for (const provider of ['GOOGLE', 'BAIDU'] as const) {
+    const real = mapSlots[provider];
+    const synthetic = new SyntheticMapAdapter(
+      state === 'failure' || state === 'slow' || state === 'hang'
+        ? state
+        : 'ready',
+    );
+    mapSlots[provider] = {
+      provider,
+      embedded: true,
+      synthetic: true,
+      mount: synthetic.mount.bind(synthetic),
+      externalMapUrl: real.externalMapUrl.bind(real),
+      externalNavigationUrl: real.externalNavigationUrl.bind(real),
+    };
+  }
+}
+const regionalMaps = new RegionalMapComposition(
+  () =>
+    trip &&
+    currentUserId &&
+    sessionStorage.getItem(tokenKey) &&
+    requestedTripId === trip.id &&
+    !viewingBackup
+      ? { owner: currentUserId, trip }
+      : null,
+  (id, nodeId, signal) =>
+    api.request(
+      `/trips/${id}/places/${nodeId}/provider-capability`,
+      undefined,
+      signal,
+    ),
+  mapSlots,
+);
+if (regionMapAdapter() === unconfiguredMapAdapter)
+  configureMapAdapter(regionalMaps);
 function backupFallback() {
   const saved = localBackups(currentUserId).filter(
     (b) => !requestedTripId || b.tripId === requestedTripId,
@@ -772,6 +848,25 @@ function renderToday() {
   root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${impactSummary(trip, tripImpact)}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo"><span class="control-content">撤销刚才的路线修改</span></button></div>' : ''}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
 }
 function render() {
+  if (
+    regionalMaps.sync() &&
+    regionMapAdapter() === regionalMaps &&
+    trip &&
+    !viewingBackup
+  ) {
+    const basis = trip,
+      owner = currentUserId;
+    void regionalMaps.preload().then(() => {
+      if (
+        !regionalMaps.sync() &&
+        trip?.id === basis.id &&
+        trip.version === basis.version &&
+        currentUserId === owner &&
+        !viewingBackup
+      )
+        render();
+    });
+  }
   if (materialsOpen && (viewingBackup || trip)) {
     renderMaterials();
     return;
@@ -831,7 +926,7 @@ function mapLinks(
 ) {
   const map = placeMap(location),
     nav = navigation(location, routeOrigin, transit ? 'transit' : 'walking');
-  return `<div class="map-links">${map ? `<a href="${esc(map)}" target="_blank" rel="noopener noreferrer">${icon('pin')}查看地图</a>` : '<span>暂无可靠位置，无法打开地图</span>'}${nav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${icon('arrow')}${transit ? '在地图中查询' : '导航到这里'}</a>` : ''}${/iPhone|iPad/u.test(navigator.userAgent) && placeMap(location, true) ? `<a href="${esc(placeMap(location, true))}" target="_blank" rel="noopener noreferrer">Apple 地图</a>` : ''}</div>${transit ? '<p class="muted">外部地图会重新查询；不保证保留本方案的日期、班次与票价。</p>' : ''}`;
+  return `<div class="map-links">${map ? `<a href="${esc(map)}" target="_blank" rel="noopener noreferrer">${icon('pin')}查看地图</a>` : '<span>暂无可靠位置，无法打开地图</span>'}${nav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${icon('arrow')}${transit ? '在地图中查询' : '导航到这里'}</a>` : ''}</div>${transit ? '<p class="muted">外部地图会重新查询；不保证保留本方案的日期、班次与票价。</p>' : ''}`;
 }
 function zoneField(zone: string | null, label: string) {
   const labels: Record<string, string> = {
@@ -888,7 +983,7 @@ function openPlace(n: ItineraryNodeView) {
   mountMiniMap(
     detail.querySelector<HTMLElement>('[data-mini-map]')!,
     'place',
-    [n.place],
+    [n.place ? { ...n.place, nodeId: n.id } : null],
     regionMapAdapter(),
   );
   baselineForms();
@@ -1133,7 +1228,12 @@ function openRoute(from: string, to: string) {
   mountMiniMap(
     detail.querySelector<HTMLElement>('[data-mini-map]')!,
     'transport',
-    [origin.place, destination.place],
+    [
+      origin.place ? { ...origin.place, nodeId: origin.id } : null,
+      destination.place
+        ? { ...destination.place, nodeId: destination.id }
+        : null,
+    ],
     regionMapAdapter(),
     boarding ? { location: boarding, label: '导航到上车地点' } : undefined,
   );

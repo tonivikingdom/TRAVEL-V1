@@ -1,3 +1,4 @@
+import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { test, expect, type Page } from '@playwright/test';
 import {
   fixtureTrip,
@@ -46,6 +47,8 @@ test.beforeEach(async ({ page }) => {
         contentType: 'application/json',
         body: JSON.stringify(body),
       });
+    const capability = regionalCapabilityFixture(trip, path);
+    if (capability) return send(capability);
     if (path === '/me') return send({ id: tripId });
     if (path === '/trips') return send({ trips: [trip] });
     if (path === `/trips/${tripId}`) return send(trip);
@@ -187,7 +190,9 @@ test('unconfigured production composition never substitutes a synthetic/real SDK
 }) => {
   await enter(page, 'ready', false);
   await place(page);
-  await expect(page.locator('.mini-map-status')).toHaveText('内嵌地图尚未接入');
+  await expect(page.locator('.mini-map-status')).toHaveText(
+    '地图尚未配置，仍可使用外部地图',
+  );
   await expect(page.locator('.mini-map-synthetic')).toHaveCount(0);
   await expect(page.locator('.mini-map-viewport')).toBeHidden();
   zeroWrites();

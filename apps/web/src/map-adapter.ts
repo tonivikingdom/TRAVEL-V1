@@ -21,6 +21,11 @@ export interface MapSession {
 export interface MapAdapter {
   readonly embedded: boolean;
   readonly synthetic: boolean;
+  readonly provider?: 'BAIDU' | 'GOOGLE';
+  readonly unavailableText?: string;
+  readonly invalidationSignal?: AbortSignal;
+  /** Resolve only an authoritative capability; never classify coordinates here. */
+  resolve?(request: MapRequest, signal: AbortSignal): Promise<MapAdapter>;
   mount(
     host: HTMLElement,
     request: MapRequest,

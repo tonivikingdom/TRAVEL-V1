@@ -1,76 +1,112 @@
-# V1 Mini Map & External Navigation
+# V1 Mini Map & External Navigation — Regional Integration
 
-Recommended model: GPT-5.6 Sol / High; fallback: available Sol / High. Adapter boundaries and touch/failure regressions justify High; escalate only for an unresolved policy or persistence dependency. Runtime model selection is unconfirmed.
+Recommended model GPT-5.6 Sol / High; fallback available Sol / High. Runtime selection is unconfirmed. Elevate only for unresolved authority, credential or coordinate correctness dependencies.
 
-Starting main: `13e5b1d7aa95bd461f33d4fb0b74e0efbb61fb3b`. Branch: `feat/v1-mini-map-navigation`. Migration total **26**. API / schema / migration delta **0 / 0 / 0**. No dependency, lockfile, deployment, Domain or Provider changes. Delivery is a **Draft PR**, not a production map launch.
+Original C starting main: `13e5b1d7aa95bd461f33d4fb0b74e0efbb61fb3b`. Original reviewed C HEAD: `3dbfa5c88fb795c2c57312a50fd352873f3d0efc`. **Integration base: `47c4af9a6dda9d4858e138463478b88dc8f35524`**. Branch `feat/v1-mini-map-navigation`; [PR #51](https://github.com/tonivikingdom/TRAVEL-V1/pull/51) stays Draft.
 
-## Reuse and ownership
+Main was fetched and matched the authorized SHA. Merge `bfb9a2c` preserves both parents, with **no conflicts**, no whole-file ours/theirs replacement. All A foundation changes are inherited unchanged. Additional C API/schema/migration delta **0/0/0**, migration total **26**. No paid/live Provider call, account provisioning, billing, deployment or PR #41 change.
 
-| Capability                                                       | Starting fact                       | This delivery                                                                    |
-| ---------------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------- |
-| Saved Place coordinates, name/address and itinerary endpoints    | Present                             | Reused without inference or rewriting                                            |
-| Saved selected transport legs and proven leg/edge correspondence | Present                             | Reused for boarding navigation; no guessed boarding point                        |
-| Coordinate validation and external Google/optional Apple links   | Present in `maps.ts`                | Validation extracted unchanged; existing callers delegate the configured adapter |
-| Interactive embedded map                                         | Absent                              | Read-only container, lifecycle, loading/error and gesture shell added            |
-| Region Map capability                                            | Absent on starting main             | Explicit `MapAdapter` composition point; no CN/overseas branch                   |
-| Reliable route geometry                                          | Absent from current Trip projection | Two endpoint Pins; no line drawn between them                                    |
-| Map persistence / new API                                        | Not needed                          | None                                                                             |
-| Real SDK, region policy and billing/keys                         | Owned by A / not supplied here      | **Integration required**, no live/paid calls                                     |
+## One authority and the composition boundary
 
-## Adapter boundary and production state
+```text
+A: classifyProviderRegion → mapProviderProjection
+     ↓ existing owned read-only API
+RegionalMapCapabilityView (region/provider/coordinates/WGS84)
+     ↓ RegionalMapComposition
+MapAdapter registry (GOOGLE / BAIDU)
+     ↓ SDK lifecycle + official external URLs
+Place / Transport Mini Map and existing map callers
+```
 
-`map-adapter.ts` defines `MapRequest`, saved `MapPoint`, `MapNavigationOptions`, `MapSession` and `MapAdapter`. `configureMapAdapter(...)` is the production composition point; `regionMapAdapter()` supplies the capability. A owns regional selection, SDK/key/authorization, coordinate-system conversion, attribution, provider policy and external URLs. The shell contains no China detector, default region rule, geocoder or SDK URL.
+**Region Policy inherited from A. No duplicate region logic.** Production Web does not import A's classifier/boundary geometry, classify China/Japan, or use language, IP, timezone or names to choose a provider. It indexes adapters directly by the API's provider. Runtime checks verify coordinates, ownership context and capability agreement, not geography. Node test helpers load A's actual policy outside the Web production graph to verify Mainland/Japan/global/HK/Macau/Taiwan and uncertain boundaries.
 
-A configured adapter receives only reliable saved coordinates/display names and explicitly supplied origin/mode for inherited navigation callers. No user location, token, session, notes, provider response or credentials are passed. URL output must be HTTPS without embedded username/password. Invalid output or synchronous policy failure suppresses only that action.
+GET `/trips/:tripId/places/:nodeId/provider-capability` is A's existing owner-scoped API; no new endpoint/DTO. Its projection identifies routing/map policy, **not SDK readiness or entitlement**. The server re-reads the owned Place. Web compares its returned WGS84 coordinates exactly with the saved node and suppresses actions on mismatch, unresolved region/provider, 401/403/404 or auxiliary outage. A foreign/admin-like owner cannot use the endpoint to access another owner's Place.
 
-**Production remains unconfigured**: the detail says “内嵌地图尚未接入”; no fake roads or interactive production SDK are claimed. Existing external Google/optional Apple compatibility remains until A installs its adapter. Once configured, existing `placeMap`/`navigation` callers, including Today, saved legs and materials, delegate it rather than choosing Google/Apple themselves. A configured Place/Transport Mini Map replaces duplicate top-level legacy links. This preserves old behavior without establishing a new regional policy.
+Each Place node is read separately, including same-coordinate transport endpoints. Reads are de-duplicated by node within the current owner/Trip/version. The initial preload queue uses four concurrent ordinary application requests; opening a detail awaits its required nodes independently. This is not a Provider query/billing policy. Place resolution awaits its required node, not an unrelated failed/slow capability. Transport requires both endpoints to agree on region/provider/coordinate system; unsupported pairs, including Japan/global pairs, degrade to text with no stitching. A saved boarding point must match a verified owned node's coordinates; an unmatched saved leg remains readable but its navigation is unavailable.
 
-`SyntheticMapAdapter` is DEV/TEST ONLY, explicitly enabled with `?mapHarness=SYNTHETIC`. It renders labeled illustrative blocks and saved-coordinate Pins; **blocks are not actual roads, stations or geography**. The SVG, external `.invalid` URLs and entry flag are eliminated from the production bundle. HTTPS `.invalid` actions are intercepted in browser tests; no real provider or tile call occurs. This proves interaction and layout, not real geographic detail or provider availability.
+Scope changes abort pending reads/mounts, dispose sessions and invalidate old links, including after an SDK failure. Late responses cannot repopulate a switched Trip/owner or a closed drawer. Backup view clears live map capability scope and starts no map/planning request. Map actions never Query/Preview/Adopt/Undo, author, generate execution facts or mutate Trip/version.
 
-## Place, transport and failure semantics
+## Production adapters and browser configuration
 
-Place retains name, reliable address, time requirements and editable notes outside the map. Transport retains textual endpoints and selected segments. Two reliable itinerary endpoints are displayed together; there is no guessed transit polyline. Saved boarding navigation uses `selectedLegForEdge`'s existing proven correspondence. Without a saved boarding point the action is accurately labeled “导航到起点”. A missing destination can retain a known-origin action; a missing origin never substitutes the destination.
+`GoogleMapAdapter` and `BaiduMapAdapter` own SDK mount/reset/zoom/disposal and provider-specific URLs. `MapSdkLoader` uses fixed HTTPS SDK destinations, de-duplicates concurrent loads, bounds loading to 12 seconds, sanitizes errors and permits a later explicit retry after failure. It is called only for an approved mounted map, never at page bootstrap. One cancelled consumer does not cancel another map's shared load.
 
-Invalid/missing coordinates show “地图位置暂不可用” without starting the SDK. Loading shows “正在加载地图…”. Rejection, synchronous mount failure or a **12-second** unresolved mount shows “地图暂时无法加载”, preserving details/forms and safe adapter external actions. There is no global service-unavailable state on a map failure.
+Production always installs `RegionalMapComposition`. Existing `placeMap`/`navigation` helpers delegate it; missing capability never reaches the inherited Google/Apple fallback. Apple helper remains legacy-only for isolated compatibility, and no Apple action is rendered as a formal Region Provider.
 
-Replacement and close abort the map and dispose pointer listeners/session. A late completion destroys its session instead of reviving a closed/replaced drawer. Zoom/reset/pan are local view state only; no storage, Trip command, planning request, authoring receipt or execution event.
+Browser configuration is an explicit `VITE_*_MAPS_*` allowlist, independent from A's server REST config. **Neither `GOOGLE_SERVER_API_KEY` nor `BAIDU_SERVER_API_KEY` is a browser SDK key**. A production Vite build test injects SYNTHETIC server REST secrets and browser keys into a temporary environment, verifies REST markers absent from HTML/JS, browser keys independent, and all DEV map harness code absent.
 
-## Interaction and accessibility
+| Browser setting                   | Google                                       | Baidu                                                                           |
+| --------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
+| Public, domain-restricted SDK key | `VITE_GOOGLE_MAPS_BROWSER_KEY`               | `VITE_BAIDU_MAPS_BROWSER_KEY`                                                   |
+| Explicit SDK load enable          | `VITE_GOOGLE_MAPS_EMBED_ENABLED=true`        | `VITE_BAIDU_MAPS_EMBED_ENABLED=true`                                            |
+| Account/SDK entitlement review    | `VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED=true` | `VITE_BAIDU_MAPS_ENTITLEMENT_APPROVED=true`                                     |
+| Storage/retention review          | `VITE_GOOGLE_MAPS_STORAGE_APPROVED=true`     | `VITE_BAIDU_MAPS_STORAGE_APPROVED=true`                                         |
+| Attribution review                | `VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED=true` | `VITE_BAIDU_MAPS_ATTRIBUTION_APPROVED=true`                                     |
+| Coordinate acceptance             | canonical WGS84                              | `VITE_BAIDU_MAPS_COORDINATES_APPROVED=true` plus approved conversion capability |
 
-The existing drawer implementation, 44px dedicated handle, 110px threshold, VisualViewport handling and discard guard are unchanged. Map viewport pointer-down does not bubble into the drawer gesture; viewport `touch-action: none` gives the adapter responsibility for pan/pinch. SDK content owns the map gesture, while handle-started drag keeps the original dismiss/draft protection. Body forms and scrolling remain separate; no full-screen map or Map Tab.
+Default: all keys/gates missing, fail closed. These settings implement review boundaries; booleans do not prove authorization or account entitlement. No browser key was supplied/approved here. SDK assets/attribution retain their own styling: shared icon rules and synthetic SVG sizing do not restyle provider SVGs. No geolocation permission or raw Provider response is consumed.
 
-Controls are at least 44px, labeled in text, and keyboard reachable. Synthetic keyboard arrows pan; plus/minus zoom; reset restores the view. The container has a region label; names/addresses/endpoints remain text, not solely Pins. Rounded containers use symmetric padding, wrapped labels and the existing safe-area-aware drawer. Widths 320/375/390/430, 24px root font, long unbroken addresses and desktop are covered. No geolocation permission is requested.
+## Coordinate and real SDK status
 
-## Validation
+| Capability               | Implementation/evidence                                                                                                        | Real status                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Google                   | WGS84 Pin(s), native map pan/zoom, zoom/reset controls, cleanup and loader tested with SYNTHETIC SDK contracts                 | **PARTIAL / UNCONFIGURED**; no authorized browser key or actual SDK acceptance |
+| Baidu                    | WebGL adapter accepts only explicit BD09LL output from an approved conversion capability; loader contract tested synthetically | **PARTIAL / UNCONFIGURED; reverse coordinate capability BLOCKED**              |
+| A coordinate conversion  | Existing BD09→GCJ02→WGS84 inherited unchanged                                                                                  | Does not provide WGS84→BD09LL for the embedded map                             |
+| Baidu reverse conversion | `BaiduCoordinateCapability` integration requirement; no production converter injected                                          | No copied/invented reverse mathematics and no accuracy PASS                    |
 
-Final local validation and exact final-HEAD CI results are recorded in the Draft PR. [CI runs for this branch](https://github.com/tonivikingdom/TRAVEL-V1/actions?query=branch%3Afeat%2Fv1-mini-map-navigation) provide the authoritative HEAD/job status. Required CI jobs are **verify** (including Chromium and WebKit), **Compose verification**, and **P5B acceptance**; final handoff must wait for all three to succeed.
+Baidu key/gates alone cannot bypass the missing converter; the SDK is not loaded in that state. The conversion stub used by tests is explicitly SYNTHETIC, not real coordinate acceptance. No real SDK/roads/stations, native-app handoff, account license or geographic accuracy is claimed PASS.
 
-- Frozen install, Prisma generate/validate, format, lint, typecheck and build are run on the final source.
-- Unit: **840 passed** (19 new adapter/coordinate cases).
-- PostgreSQL: **672 passed** (106 persistence + 566 API) on an isolated PostgreSQL 17 SYNTHETIC database; clean deploy found/applied **26** migrations. All 18 inherited failure/concurrency regressions remain unchanged.
-- Browser: **20 new cases per engine**, covering Place, Transport, external actions, missing endpoints, errors, bounded loading, stale mount cleanup, actual mouse/pointer pan, constructed two-pointer pinch/cancel, handle drag, dirty note close/replacement guard, zero writes, widths, enlarged text and desktop. The standard full suite contains **301 cases per engine**; final results are recorded in the Draft PR checks.
-- Local Compose and P5B passed again after the final navigation delegation. Final HEAD CI repeats the complete standard checks.
+## External map/navigation
 
-Initial runs are not passing evidence: one incorrect old DB password, missing local WebKit libraries and one existing ADMIN Preview case's 400/404 failure. The unchanged ADMIN case passed alone and the entire PostgreSQL suite subsequently passed. Two early browser runs were invalidated by our source editing during Vite HMR; all final checks use frozen source. The first Compose run exhausted Docker VFS disk; identified idle synthetic build images/caches were reclaimed and Compose passed. No assertion was weakened or test skipped for success.
+Official documentation was read in this integration task:
 
-Local WebKit uses installed/extracted libraries in its own browser bundle. Playwright's separate `ldconfig` probe does not see the locally installed GLES library, so only that local host-preflight probe is disabled; WebKit actually launches and executes all assertions. Final CI installs normal system dependencies and uses the unchanged standard host checks. No repository CI change or disabled browser test.
+- [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started) and [Maps JS loading](https://developers.google.com/maps/documentation/javascript/load-maps-js-api).
+- [Baidu Web URI](https://lbsyun.baidu.com/docs/webapi?title=mapadjustment/uri/web), [WebGL display](https://lbsyun.baidu.com/index.php?title=jspopularGL/guide/show) and [coordinate guidance](https://lbsyun.baidu.com/index.php?title=jspopularGL/guide/coorinfo).
 
-## Visual review
+Google uses documented search/directions URLs with `api=1`, exact WGS84 and no key. Navigation uses `dir_action=navigate`; endpoint viewing does not start navigation. No current-position permission is requested; selecting a starting point/native navigation belongs to the external product.
 
-All evidence is **SYNTHETIC**. The original PNGs and RGB JPEG contact sheet are opened and inspected before commit. JPEG is 1600 × 2480, quality 88, below 5 MiB; screenshot proportions and panel titles are retained.
+Baidu marker/direction URI explicitly declares `coord_type=wgs84`, `output=html` and required source `webapp.travelv1.travel`; the external product handles coordinates, so no reverse math is needed for these URLs. A single Place has “在地图中查看”. Official Web direction requires an explicit origin; when navigation origin is unknown the navigation action is locally unavailable, with explanatory text. It never guesses location or supplies a destination as origin. Transport viewing may supply its two reliable, compatible endpoints; external lookup is not saved route geometry or evidence of a current service/fare. URI generation is documented and synthetic-tested; actual Baidu/Google/native-app handoff remains **PARTIAL / unverified**.
 
-| Evidence                         | Artifact                                                                                                                                                           |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Place Pin / zoom / SDK failure   | [Place](assets/v1-mini-map/mobile-place-map.png), [Zoom](assets/v1-mini-map/mobile-place-map-zoom.png), [Failure](assets/v1-mini-map/mobile-place-map-failure.png) |
-| Selected transport / no geometry | [Transport](assets/v1-mini-map/mobile-transport-map.png), [No geometry](assets/v1-mini-map/mobile-transport-no-geometry.png)                                       |
-| Narrow mobile / enlarged text    | [320](assets/v1-mini-map/mobile-320.png), [390](assets/v1-mini-map/mobile-390.png), [Enlarged](assets/v1-mini-map/mobile-enlarged.png)                             |
-| Desktop                          | [Place](assets/v1-mini-map/desktop-place.png), [Transport](assets/v1-mini-map/desktop-transport.png)                                                               |
-| Contact sheet                    | [JPEG](assets/v1-mini-map/review-contact-sheet.jpg)                                                                                                                |
+## Detail, failure and interaction behavior
 
-## Remaining integration requirements and limitations
+Names/addresses/times/endpoints/notes remain readable outside the map. Missing coordinates show “地图位置暂不可用”; unresolved capability shows local regional unavailability; missing key shows “地图尚未配置，仍可使用外部地图”. Script rejection/timeout/failed mount shows “地图暂时无法加载”, retaining safe regional external actions. No auxiliary map failure marks the entire App/core Trip unavailable. Core outage still invalidates live maps/links and retains unrelated unsaved drafts under the existing guard.
 
-A must supply/install the approved Region Map adapter and verify Google/Baidu SDK authorization, regional coordinates, actual roads/stations/attribution, keys, quota/billing and safe external URL policy. No real account entitlement, region/provider behavior or tile geography is accepted here. Embedded production map is **PARTIAL / integration pending**. F-05/F-06 and Google Transit remain OPEN/PARTIAL under their existing gates.
+Maps show only reliable saved Pins. No guessed polyline, address geocoding, discovery, GPS tracking, turn-by-turn implementation, camera persistence or Map Tab. The existing 44px handle/dismiss threshold, dirty guards, authoring, Place Search drafts and VisualViewport fitting are retained. Map viewport pan/pinch belongs to the adapter; handle-started drag owns drawer dismiss. Container/controls use labels, text and at least 44px controls; 320/375/390/430, large text, desktop and reachable forms are covered. Desktop WebKit/constructed pointer events are not physical iPhone acceptance.
 
-Physical iPhone, actual iOS Safari, native multi-touch/pinch, soft keyboard and external native-app handoff are **not verified**. Constructed pointer events and desktop WebKit are not physical-device acceptance. No turn-by-turn navigation, location tracking, discovery, itinerary editing, offline map, persisted camera, inferred geometry, map selection, region routing, Place Search Provider or Japan Transit implementation.
+## Integrated validation
 
-Keep Draft. No merge, deploy, A/B/PR #41 modification or next phase.
+Final integrated-source local results and exact final HEAD CI are recorded in [Draft PR #51](https://github.com/tonivikingdom/TRAVEL-V1/pull/51). [Current branch CI](https://github.com/tonivikingdom/TRAVEL-V1/actions?query=branch%3Afeat%2Fv1-mini-map-navigation) is authoritative. **Old CI 37195668032 is not integrated evidence.** The final handoff requires verify (both engines), Compose verification and P5B acceptance completed/success.
+
+- Frozen install, Prisma generate/validate, format/lint/typecheck/build: PASS. Full Unit: **915 PASS**. Real PostgreSQL: **680 PASS** (106 persistence + 574 API).
+- Local Compose: **PASS** after the documented environment correction. P5B: **PASS**, five SYNTHETIC users, 200 requests, zero isolation failures, zero unexpected 5xx/network failures (p95 547.71ms).
+- Full local Chromium: **327 PASS**. Full WebKit is also required locally and in final-HEAD CI; its completed totals/results are recorded in the linked PR so this document does not substitute a previous-head run for final evidence.
+- New Unit: **35** regional composition, node scope, loader, SDK lifecycle/coordinates, config/key and actual production-bundle boundary cases.
+- New browser: **26 per engine**; six regional Place projections, uncertainty, independent auxiliary errors, async note protection, unconfigured/failed SDK, script fixture, same-coordinate endpoint failure, cross-region rejection, viewport/gesture/enlarged/desktop and core outage after SDK failure. Prior 20 Mini Map cases and A/B behavior regressions remain active.
+- PostgreSQL reuses A's real owner-private capability matrix (including admin isolation and zero-write assertions) and the unchanged 18 failure/concurrency cases. No persistence/HTTP business assertion is weakened.
+- Migration clean deploy/status and final CI must still show **26**, no schema/history edits.
+
+Nonpassing initial checks are not final evidence: Node test helper's direct backend TypeScript import crossed the composite project boundary; it now loads A's source in the Node test runner without adding it to production Web. Vitest's NODE_ENV=test caused the production-bundle test to build DEV code; the test explicitly uses production NODE_ENV. The original broad test API interceptor also caught `/maps/api/js`; the SDK fixture now intercepts only the App origin's API and fixed provider URLs. No live request/assertion bypass was used. All complete checks below use frozen final runtime source.
+
+Local verification environment: system Chromium and actual Playwright WebKit run here. WebKit uses previously extracted host libraries; `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1` bypasses only the host dependency probe, not browser launch or assertions. CI uses its normal browser/dependency installation without that setting. Initial local parallel Docker/vfs builds exhausted temporary disk space, causing PostgreSQL initialization to fail (`No space left on device`). Unused task images/build cache were reclaimed and local full Node 24 build targets serialized. The environment-only Docker override supplies the managed proxy CA; repository Dockerfile/Compose/workflow stay unchanged. The failed attempts are not counted as passing Compose evidence.
+
+## Refreshed visual evidence
+
+All final evidence is **SYNTHETIC**, through A's projection API fixture and the production regional composition. `SYNTHETIC_REGIONAL` only substitutes the SDK mount, retaining actual adapter URL behavior and API selection. `SYNTHETIC_SDK` intercepts the production loader's script with a contract stub. Both are DEV-only and absent from production output. Blocks are illustrative, not real roads/stations; there are no REAL PROVIDER screenshots. Regional fixtures deliberately retain Japanese-language labels while varying canonical coordinates, demonstrating that labels/language never select the region; fixture text is not geographic accuracy evidence.
+
+| Evidence                      | Artifact                                                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Japan Place / zoom            | [Place](assets/v1-mini-map/mobile-place-map.png), [Zoom](assets/v1-mini-map/mobile-place-map-zoom.png)                                 |
+| Mainland Place                | [Baidu selection](assets/v1-mini-map/mobile-mainland-place.png)                                                                        |
+| Map failure / loader failure  | [Map failure](assets/v1-mini-map/mobile-place-map-failure.png), [SDK failure](assets/v1-mini-map/mobile-sdk-load-failure.png)          |
+| Saved Transport / no geometry | [Transport](assets/v1-mini-map/mobile-transport-map.png), [No geometry](assets/v1-mini-map/mobile-transport-no-geometry.png)           |
+| Narrow widths / large text    | [320](assets/v1-mini-map/mobile-320.png), [390](assets/v1-mini-map/mobile-390.png), [Enlarged](assets/v1-mini-map/mobile-enlarged.png) |
+| Desktop                       | [Place](assets/v1-mini-map/desktop-place.png), [Transport](assets/v1-mini-map/desktop-transport.png)                                   |
+| Remote review                 | [RGB JPEG contact sheet](assets/v1-mini-map/review-contact-sheet.jpg)                                                                  |
+
+All **12 final PNGs** and the JPEG were refreshed and actually opened/visually checked. The contact sheet is **RGB JPEG, 1600×3380, quality 88, 545,773 bytes**, preserving screenshot proportions and per-cell titles. Narrow and enlarged layouts preserve text/controls, both endpoint Pins have no invented polyline, and SDK failure retains navigation/text/forms. No screenshot is described as actual Google/Baidu SDK acceptance.
+
+## Remaining limitations / stop point
+
+Google browser SDK is UNCONFIGURED/PARTIAL. Baidu browser SDK is UNCONFIGURED/PARTIAL and WGS84→BD09LL capability/accuracy remains BLOCKED pending A/approved integration. Real keys/account/domain restrictions, SDK authentication behavior, licenses/storage/attribution, actual map geography and native handoff need separate acceptance. F-05/F-06 and Google Transit remain OPEN/PARTIAL. No provider is purchased/enabled here.
+
+Physical iPhone/iOS Safari/native touch/pinch/actual keyboard remain unverified. Hotel-only shortcut stays BLOCKED; no complete offline shell/editing/background sync or backup history manager. Region Place Search UI and Japan Transit remain outside C. Keep #51 Draft, no Ready/merge/deploy/PR #41 change or next batch. Stop for human review after exact final-HEAD CI success.

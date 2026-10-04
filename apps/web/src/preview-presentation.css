@@ -1,0 +1,73 @@
+.preview-presentation {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.preview-presentation header {
+  display: block;
+  height: auto;
+  background: #edf5ff;
+  padding: 1rem;
+  border-radius: 14px;
+}
+.preview-eyebrow {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.preview-presentation h3 {
+  font-size: 1.1rem;
+  margin: 0.3rem 0;
+}
+.preview-scope {
+  display: block;
+  font-size: 1.1rem;
+}
+.preview-presentation h4 {
+  margin: 0.9rem 0 0.3rem;
+  font-size: 1rem;
+}
+.preview-presentation p {
+  margin: 0.5rem 0;
+}
+.preview-presentation ul,
+.preview-presentation ol {
+  margin: 0.4rem 0;
+  padding-left: 1.4rem;
+}
+.preview-presentation li {
+  margin: 0.35rem 0;
+}
+.preview-important {
+  border-left: 3px solid #b87516;
+  background: #fff6e7;
+  border-radius: 8px;
+  padding: 0.3rem 0.8rem 0.6rem;
+  margin-top: 0.7rem;
+}
+.preview-details {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+}
+.preview-details > summary {
+  min-height: 44px;
+  padding: 0.75rem 0.2rem;
+  cursor: pointer;
+}
+.preview-details ol > li {
+  padding: 0.5rem 0;
+}
+.preview-consent {
+  min-height: 44px;
+  padding: 0.8rem 0;
+  align-items: flex-start;
+}
+.preview-consent input {
+  flex-shrink: 0;
+}
+
+.preview-presentation .muted {
+  font-size: 0.9rem;
+}
+.preview-presentation small {
+  font-size: 0.85rem;
+}

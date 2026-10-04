@@ -68,8 +68,35 @@ import {
 import { impactSummary, impactDetails } from './impact.js';
 import { alternativeEntry } from './alternatives.js';
 import { previewPresentation, previewMarkup } from './preview-presentation.js';
+import {
+  configureMapAdapter,
+  regionMapAdapter,
+  unconfiguredMapAdapter,
+} from './map-adapter.js';
+import { miniMapMarkup, mountMiniMap } from './mini-map.js';
+import { SyntheticMapAdapter } from './synthetic-map-adapter.js';
+import { RegionalMapComposition } from './regional-map-composition.js';
+import { browserMapConfig } from './map-browser-config.js';
+import { providerMapAdapters } from './provider-map-adapters.js';
+import { MapSdkLoader } from './map-sdk-loader.js';
+import './mini-map.css';
 import './styles.css';
 import './preview-presentation.css';
+
+// Synthetic maps are only available in the development harness, never production.
+if (
+  import.meta.env.DEV &&
+  new URLSearchParams(location.search).get('mapHarness') === 'SYNTHETIC'
+) {
+  const state = new URLSearchParams(location.search).get('mapState');
+  configureMapAdapter(
+    new SyntheticMapAdapter(
+      state === 'failure' || state === 'slow' || state === 'hang'
+        ? state
+        : 'ready',
+    ),
+  );
+}
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const detail = document.querySelector<HTMLDialogElement>('#detail')!;
@@ -111,6 +138,78 @@ let backupPending: {
   baseTripVersion: number;
   idempotencyKey: string;
 } | null = null;
+const sdkHarness =
+  import.meta.env.DEV &&
+  new URLSearchParams(location.search).get('mapHarness') === 'SYNTHETIC_SDK';
+const mapSlots = providerMapAdapters(
+  browserMapConfig(
+    sdkHarness
+      ? {
+          VITE_GOOGLE_MAPS_BROWSER_KEY: 'SYNTHETIC_BROWSER_SDK_KEY',
+          VITE_GOOGLE_MAPS_EMBED_ENABLED: 'true',
+          VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED: 'true',
+          VITE_GOOGLE_MAPS_STORAGE_APPROVED: 'true',
+          VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED: 'true',
+        }
+      : import.meta.env,
+  ),
+  new MapSdkLoader(document, window as unknown as Record<string, unknown>),
+  window as unknown as Record<string, unknown>,
+);
+if (sdkHarness) {
+  const real = mapSlots.GOOGLE;
+  mapSlots.GOOGLE = {
+    provider: 'GOOGLE',
+    embedded: real.embedded,
+    synthetic: true,
+    mount: real.mount.bind(real),
+    externalMapUrl: real.externalMapUrl.bind(real),
+    externalNavigationUrl: real.externalNavigationUrl.bind(real),
+  };
+}
+// DEV evidence still consumes the real regional API/composition, but never loads a Provider.
+if (
+  import.meta.env.DEV &&
+  new URLSearchParams(location.search).get('mapHarness') ===
+    'SYNTHETIC_REGIONAL'
+) {
+  const state = new URLSearchParams(location.search).get('mapState');
+  for (const provider of ['GOOGLE', 'BAIDU'] as const) {
+    const real = mapSlots[provider];
+    const synthetic = new SyntheticMapAdapter(
+      state === 'failure' || state === 'slow' || state === 'hang'
+        ? state
+        : 'ready',
+    );
+    mapSlots[provider] = {
+      provider,
+      embedded: true,
+      synthetic: true,
+      mount: synthetic.mount.bind(synthetic),
+      externalMapUrl: real.externalMapUrl.bind(real),
+      externalNavigationUrl: real.externalNavigationUrl.bind(real),
+    };
+  }
+}
+const regionalMaps = new RegionalMapComposition(
+  () =>
+    trip &&
+    currentUserId &&
+    sessionStorage.getItem(tokenKey) &&
+    requestedTripId === trip.id &&
+    !viewingBackup
+      ? { owner: currentUserId, trip }
+      : null,
+  (id, nodeId, signal) =>
+    api.request(
+      `/trips/${id}/places/${nodeId}/provider-capability`,
+      undefined,
+      signal,
+    ),
+  mapSlots,
+);
+if (regionMapAdapter() === unconfiguredMapAdapter)
+  configureMapAdapter(regionalMaps);
 function backupFallback() {
   const saved = localBackups(currentUserId).filter(
     (b) => !requestedTripId || b.tripId === requestedTripId,
@@ -749,6 +848,25 @@ function renderToday() {
   root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${impactSummary(trip, tripImpact)}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo"><span class="control-content">撤销刚才的路线修改</span></button></div>' : ''}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
 }
 function render() {
+  if (
+    regionalMaps.sync() &&
+    regionMapAdapter() === regionalMaps &&
+    trip &&
+    !viewingBackup
+  ) {
+    const basis = trip,
+      owner = currentUserId;
+    void regionalMaps.preload().then(() => {
+      if (
+        !regionalMaps.sync() &&
+        trip?.id === basis.id &&
+        trip.version === basis.version &&
+        currentUserId === owner &&
+        !viewingBackup
+      )
+        render();
+    });
+  }
   if (materialsOpen && (viewingBackup || trip)) {
     renderMaterials();
     return;
@@ -808,7 +926,7 @@ function mapLinks(
 ) {
   const map = placeMap(location),
     nav = navigation(location, routeOrigin, transit ? 'transit' : 'walking');
-  return `<div class="map-links">${map ? `<a href="${esc(map)}" target="_blank" rel="noopener noreferrer">${icon('pin')}查看地图</a>` : '<span>暂无可靠位置，无法打开地图</span>'}${nav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${icon('arrow')}${transit ? '在地图中查询' : '导航到这里'}</a>` : ''}${/iPhone|iPad/u.test(navigator.userAgent) && placeMap(location, true) ? `<a href="${esc(placeMap(location, true))}" target="_blank" rel="noopener noreferrer">Apple 地图</a>` : ''}</div>${transit ? '<p class="muted">外部地图会重新查询；不保证保留本方案的日期、班次与票价。</p>' : ''}`;
+  return `<div class="map-links">${map ? `<a href="${esc(map)}" target="_blank" rel="noopener noreferrer">${icon('pin')}查看地图</a>` : '<span>暂无可靠位置，无法打开地图</span>'}${nav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer">${icon('arrow')}${transit ? '在地图中查询' : '导航到这里'}</a>` : ''}</div>${transit ? '<p class="muted">外部地图会重新查询；不保证保留本方案的日期、班次与票价。</p>' : ''}`;
 }
 function zoneField(zone: string | null, label: string) {
   const labels: Record<string, string> = {
@@ -843,7 +961,7 @@ function openPlace(n: ItineraryNodeView) {
   drawer.open(
     frame(
       nodeTitle(n),
-      `<p class="address">${esc(n.place?.address ?? '地址未提供')}</p>${n.place ? mapLinks(n.place) : ''}<p class="map-status">内嵌地图尚未配置；可在地图应用中查看已保存的位置。</p>${timeGrid(n)}<div data-requirements>${requirements(n)}</div><details class="edit"><summary>编辑重要时间要求</summary><p class="muted">要求独立于计划/预计/实际时间，不会改写已发生事实。</p><form id="time-edit"><label>要求<select name="requirement"><option value="ARRIVAL:NOT_AFTER">最晚到达</option><option value="ARRIVAL:NOT_BEFORE">最早到达</option><option value="ARRIVAL:EXACT">指定到达</option><option value="DEPARTURE:NOT_BEFORE">最早出发</option><option value="DEPARTURE:NOT_AFTER">最晚出发</option><option value="DEPARTURE:EXACT">指定出发</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" required></label>${zoneField(zone, '时间要求所在地')}<label class="check"><input name="locked" type="checkbox" checked>保护这项要求</label><button class="primary">保存时间要求</button></form><form id="dwell-edit"><label>至少停留（分钟）<input name="minutes" type="number" min="1" step="1" value="${n.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ? String(n.timeIntents.find((i) => i.kind === 'MIN_DWELL')!.durationSeconds! / 60) : ''}" required></label><button>保存停留要求</button></form><div data-remove-intents>${removalControls(n)}</div></details><form id="note-edit"><label>备注<textarea name="note" maxlength="2000" rows="3" placeholder="这处安排需要记住什么？">${esc(n.note ?? '')}</textarea></label><button class="primary">保存备注</button></form><p id="save-status" role="status">已读取服务器数据</p>`,
+      `<p class="address">${esc(n.place?.address ?? '地址未提供')}</p>${n.place && regionMapAdapter() === unconfiguredMapAdapter ? mapLinks(n.place) : ''}${miniMapMarkup('place')}${timeGrid(n)}<div data-requirements>${requirements(n)}</div><details class="edit"><summary>编辑重要时间要求</summary><p class="muted">要求独立于计划/预计/实际时间，不会改写已发生事实。</p><form id="time-edit"><label>要求<select name="requirement"><option value="ARRIVAL:NOT_AFTER">最晚到达</option><option value="ARRIVAL:NOT_BEFORE">最早到达</option><option value="ARRIVAL:EXACT">指定到达</option><option value="DEPARTURE:NOT_BEFORE">最早出发</option><option value="DEPARTURE:NOT_AFTER">最晚出发</option><option value="DEPARTURE:EXACT">指定出发</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" required></label>${zoneField(zone, '时间要求所在地')}<label class="check"><input name="locked" type="checkbox" checked>保护这项要求</label><button class="primary">保存时间要求</button></form><form id="dwell-edit"><label>至少停留（分钟）<input name="minutes" type="number" min="1" step="1" value="${n.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ? String(n.timeIntents.find((i) => i.kind === 'MIN_DWELL')!.durationSeconds! / 60) : ''}" required></label><button>保存停留要求</button></form><div data-remove-intents>${removalControls(n)}</div></details><form id="note-edit"><label>备注<textarea name="note" maxlength="2000" rows="3" placeholder="这处安排需要记住什么？">${esc(n.note ?? '')}</textarea></label><button class="primary">保存备注</button></form><p id="save-status" role="status">已读取服务器数据</p>`,
     ),
   );
   const existing = n.timeIntents.find((i) => i.kind === 'POINT_TIME');
@@ -862,6 +980,12 @@ function openPlace(n: ItineraryNodeView) {
       '#time-edit input[name=locked]',
     )!.checked = existing.locked;
   }
+  mountMiniMap(
+    detail.querySelector<HTMLElement>('[data-mini-map]')!,
+    'place',
+    [n.place ? { ...n.place, nodeId: n.id } : null],
+    regionMapAdapter(),
+  );
   baselineForms();
 }
 function refreshPlaceSummary(id: string) {
@@ -1085,15 +1209,33 @@ function openRoute(from: string, to: string) {
     frame(
       '交通与路线',
       `<p class="route-endpoints"><strong>${esc(nodeTitle(origin))}</strong><span aria-hidden="true">→</span><strong>${esc(nodeTitle(destination))}</strong></p><section class="selected-transport"><h3>当前交通</h3>${connection?.transport ? savedTransport(chain) : '<p class="muted">尚未选择交通</p>'}</section><aside class="route-map-note">${
-        origin.place && destination.place
-          ? wholeRouteMap(
-              origin.place,
-              destination.place,
-              chain.map((c) => c.transport?.mode ?? 'OTHER'),
-            )
-          : '<p>这段交通尚无完整起终点信息，不能查询原路线。</p>'
-      }<p class="map-status">内嵌地图未配置；可用外部地图查询。</p></aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
+        regionMapAdapter() !== unconfiguredMapAdapter
+          ? ''
+          : origin.place && destination.place
+            ? wholeRouteMap(
+                origin.place,
+                destination.place,
+                chain.map((c) => c.transport?.mode ?? 'OTHER'),
+              )
+            : '<p>这段交通尚无完整起终点信息，不能查询原路线。</p>'
+      }${miniMapMarkup('transport')}</aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
     ),
+  );
+  const boarding = chain.flatMap((c) => {
+    const leg = c.transport ? selectedLegForEdge(c.transport.id) : null;
+    return leg && ['BUS', 'RAIL', 'FERRY'].includes(leg.mode) ? [leg.from] : [];
+  })[0];
+  mountMiniMap(
+    detail.querySelector<HTMLElement>('[data-mini-map]')!,
+    'transport',
+    [
+      origin.place ? { ...origin.place, nodeId: origin.id } : null,
+      destination.place
+        ? { ...destination.place, nodeId: destination.id }
+        : null,
+    ],
+    regionMapAdapter(),
+    boarding ? { location: boarding, label: '导航到上车地点' } : undefined,
   );
 }
 function openAlternatives(handoff: GroundTransitRouteReevaluationHandoffView) {

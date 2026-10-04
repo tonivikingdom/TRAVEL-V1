@@ -71,7 +71,7 @@ button:disabled {
   outline: 3px solid #80a8ff;
   outline-offset: 3px;
 }
-svg {
+svg:not(.mini-map-viewport svg) {
   width: 20px;
   height: 20px;
   flex: none;

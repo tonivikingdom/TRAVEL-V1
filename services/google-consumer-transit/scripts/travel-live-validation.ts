@@ -25,7 +25,7 @@ import type {
   AdoptRoutePreviewResponse,
   UndoRouteAdoptionResponse,
 } from '@travel/contracts';
-import { GoogleConsumerExperimentalRouteProvider } from '@travel/providers';
+import { createRuntimeRouteProvider } from '@travel/providers';
 import { readConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import type { SearchResult } from '../src/contract.js';
@@ -72,23 +72,31 @@ const sidecarAddress = await sidecar.listen({ host: '127.0.0.1', port: 0 });
 let providerHttpCalls = 0;
 let lastSidecarError: string | undefined;
 let lastSidecarResponse: SearchResult | undefined;
-const provider = new GoogleConsumerExperimentalRouteProvider({
-  baseUrl: sidecarAddress,
-  token,
-  timeoutMs: 60000,
-  fetchImplementation: async (url, init) => {
-    providerHttpCalls++;
-    const response = await fetch(url, init);
-    const body = (await response.clone().json()) as SearchResult & {
-      error?: { code: string; stage?: string };
-    };
-    lastSidecarError = body.error
-      ? `${body.error.code}:${body.error.stage ?? 'unknown-stage'}`
-      : undefined;
-    lastSidecarResponse = body.status === 'OK' ? body : undefined;
-    return response;
+const provider = createRuntimeRouteProvider(
+  {
+    APP_ENV: 'test',
+    ROUTE_PROVIDER: 'regional',
+    GOOGLE_CONSUMER_TRANSIT_ENABLED: 'true',
+    GOOGLE_CONSUMER_TRANSIT_BASE_URL: sidecarAddress,
+    GOOGLE_CONSUMER_TRANSIT_TOKEN: token,
+    GOOGLE_CONSUMER_TRANSIT_TIMEOUT_MS: '60000',
   },
-});
+  {
+    fetcher: async (url, init) => {
+      assert.equal(String(url), `${sidecarAddress}/v1/transit/search`);
+      providerHttpCalls++;
+      const response = await fetch(url, init);
+      const body = (await response.clone().json()) as SearchResult & {
+        error?: { code: string; stage?: string };
+      };
+      lastSidecarError = body.error
+        ? `${body.error.code}:${body.error.stage ?? 'unknown-stage'}`
+        : undefined;
+      lastSidecarResponse = body.status === 'OK' ? body : undefined;
+      return response;
+    },
+  },
+);
 const trips = new PrismaTripRepository(managed.client);
 const planning = new PrismaRoutePlanningRepository(managed.client);
 const tripService = new TripService(trips);
@@ -228,6 +236,7 @@ try {
         basisVersion: trip.version,
         fromNodeId: from!.id,
         toNodeId: to!.id,
+        travelMode: 'TRANSIT',
         hint: {
           type: timeMode,
           instant: `${date}T15:00:00+09:00`,
@@ -452,6 +461,8 @@ try {
     JSON.stringify(
       {
         implementation: 'REBUILT_COMPATIBLE_IMPLEMENTATION',
+        dispatch:
+          'RegionalRouteProvider → JAPAN/TRANSIT → japanTransit → sidecar',
         recordedAt: new Date().toISOString(),
         runStartedAt,
         providerHttpCalls,

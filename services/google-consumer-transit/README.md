@@ -29,11 +29,14 @@ API 和服务应在同一主机／网络命名空间运行。服务在宿主机�
 
 ```dotenv
 APP_ENV=development
-ROUTE_PROVIDER=google_consumer_experimental
+ROUTE_PROVIDER=regional
+GOOGLE_CONSUMER_TRANSIT_ENABLED=true
 GOOGLE_CONSUMER_TRANSIT_BASE_URL=http://127.0.0.1:8787
 GOOGLE_CONSUMER_TRANSIT_TOKEN=与服务专用token相同的私有值
 GOOGLE_CONSUMER_TRANSIT_TIMEOUT_MS=60000
 ```
+
+正式 dispatch 由 `RegionalRouteProvider` 负责：日本 TRANSIT 只进入 `japanTransit` slot；日本/其他地区 WALKING/DRIVING 仍由 A 的 ordinary Google slot 处理，大陆普通路线仍由 Baidu 处理。普通 slot 的既有供应商批准门槛不变。日本 transit 未启用或 token 缺失时，仅该能力 `ROUTE_PROVIDER_UNCONFIGURED`；sidecar 故障为 `PROVIDER_UNAVAILABLE`，不回退 ordinary Google、synthetic 或空路线。旧 `ROUTE_PROVIDER=google_consumer_experimental` 仅保留 dev/test 显式启用别名，也经过 Region Router，不再有独立 runtime dispatch。
 
 适配器原有 30000ms 默认值及 1000–120000ms 配置范围未改。60 秒是这个启动示例的选择，覆盖服务默认 45 秒截止时间。还需按仓库原说明配置隔离 PostgreSQL、认证和私有对象存储，再运行 `pnpm dev:api`；不需要前端。
 
@@ -76,7 +79,7 @@ GOOGLE_TRANSIT_LIVE_DATE=2026-10-05 \
 pnpm --filter @travel/google-consumer-transit test:travel-live
 ```
 
-该脚本使用真实 HTTP 连接 Travel API 与 sidecar，生成隔离测试账户和行程，分别运行两种模式、Snapshot、Preview、显式 Adopt、Undo；不发送邮件、不 reset 数据库。账户／行程标为 SYNTHETIC，候选来自实时 Google 查询。它保留测试记录供复核，测试数据库由操作者在验收后单独关闭。
+该脚本使用真实 HTTP 连接 Travel API 与 sidecar，生成隔离测试账户和行程，通过正式 Region Router 的 Japan TRANSIT slot 分别运行两种模式、Snapshot、Preview、显式 Adopt、Undo；不发送邮件、不 reset 数据库。账户／行程标为 SYNTHETIC，候选来自实时 Google 查询。它保留测试记录供复核，测试数据库由操作者在验收后单独关闭。
 
 ## 限制与关闭
 
@@ -84,6 +87,6 @@ pnpm --filter @travel/google-consumer-transit test:travel-live
 
 不包含 import、NOW／立即出发、LAST_TRANSIT／末班车、生产可用性保证。Google 页面或私有结构变化会失败关闭。验证码、封禁、真实无路线和真实结构变化本批未实际遇到，相应负例只有自动测试证据。
 
-设置 `ENABLE_GOOGLE_CONSUMER_TRANSIT=false` 即停止后续查询；停止新服务进程会关闭其浏览器。API 改回 `ROUTE_PROVIDER=unconfigured` 并按正常方式重启即可回退，不改行程或 schema；生产限制始终保留。原电脑服务不受影响。
+设置 API 的 `GOOGLE_CONSUMER_TRANSIT_ENABLED=false`（并停用 legacy 别名），或 sidecar 的 `ENABLE_GOOGLE_CONSUMER_TRANSIT=false`，即停止后续 Japan Transit 查询；停止新服务进程会关闭其浏览器。API 改回 `ROUTE_PROVIDER=unconfigured` 并按正常方式重启即可回退，不改行程或 schema；生产限制始终保留。原电脑服务不受影响。
 
 当前 Japan V1 状态仍 PARTIAL，见 [最新验收](../../docs/status/V1-JAPAN-TRANSIT.md)。CAPTURED_LIVE_REPLAY 保留原 fetchedAt，Google 调用0，不能冒充 fresh live 全链。

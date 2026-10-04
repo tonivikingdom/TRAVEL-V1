@@ -62,3 +62,5 @@ export {
   GoogleOrdinaryRouteProvider,
 } from './regional-route-adapters.js';
 export { baiduToWgs84 } from './baidu-coordinates.js';
+
+export { createRuntimeRouteProvider } from './runtime-route-provider.js';

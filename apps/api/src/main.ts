@@ -40,19 +40,14 @@ import {
 } from '@travel/persistence';
 import {
   createPlaceSearchProvider,
-  createRegionalProviders,
+  createRuntimeRouteProvider,
   mapProviderProjection,
-  createDevelopmentSyntheticRouteProvider,
-  createDevelopmentSyntheticGroundTransitRouteProvider,
   AeroDataBoxFlightProvider,
-  GoogleConsumerExperimentalRouteProvider,
   readFlightProviderConfig,
-  readRouteProviderConfig,
   UnconfiguredFlightProvider,
   SyntheticFlightProvider,
   createGroundTransitProvider,
   createGroundTransitHubResolver,
-  UnconfiguredRouteProvider,
 } from '@travel/providers';
 
 import { buildApi } from './app.js';
@@ -180,31 +175,7 @@ if (databaseUrl !== undefined && databaseUrl.trim() !== '') {
     managedPrisma.client,
   );
   const routePlanningConfig = readRoutePlanningConfig(process.env);
-  const routeProviderConfig = readRouteProviderConfig({
-    ...process.env,
-    ROUTE_PROVIDER: process.env.ROUTE_PROVIDER ?? 'regional',
-  });
-  const routeProvider =
-    routeProviderConfig.provider === 'regional'
-      ? createRegionalProviders(process.env).routes
-      : routeProviderConfig.provider === 'synthetic'
-        ? process.env.SYNTHETIC_GROUND_TRANSIT_ROUTE === 'true'
-          ? ['development', 'test'].includes(process.env.APP_ENV ?? '') &&
-            process.env.SYNTHETIC_CI_ONLY === 'true'
-            ? createDevelopmentSyntheticGroundTransitRouteProvider()
-            : (() => {
-                throw new Error(
-                  'Synthetic ground transit route requires Dev/Test and SYNTHETIC_CI_ONLY=true',
-                );
-              })()
-          : createDevelopmentSyntheticRouteProvider()
-        : routeProviderConfig.provider === 'google_consumer_experimental'
-          ? new GoogleConsumerExperimentalRouteProvider({
-              baseUrl: routeProviderConfig.baseUrl,
-              token: routeProviderConfig.token,
-              timeoutMs: routeProviderConfig.timeoutMs,
-            })
-          : new UnconfiguredRouteProvider();
+  const routeProvider = createRuntimeRouteProvider(process.env);
   routeQueryService = new RouteQueryService(
     tripRepository,
     routeProvider,

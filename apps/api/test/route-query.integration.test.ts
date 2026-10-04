@@ -12791,6 +12791,79 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       payload: { handoff },
     });
   }
+  it('SYNTHETIC Japan Region Impact reads stay quiet; explicit TRANSIT search completes Snapshot Preview Adopt Undo', async () => {
+    const f = await controlledCancelledFixture();
+    await app.close();
+    const dispatched: RouteProviderQueryInput[] = [];
+    const ordinary = vi.fn(async () => {
+      throw new Error('ordinary fallback forbidden');
+    });
+    app = buildTestApi(
+      new RegionalRouteProvider({
+        japanTransit: new SyntheticRouteProvider(async (input) => {
+          dispatched.push(input);
+          return providerResult;
+        }),
+        googleRoute: new SyntheticRouteProvider(ordinary),
+        baiduRoute: new SyntheticRouteProvider(ordinary),
+      }),
+      groundSequence(['CANCELLED', 'RECOVERY']),
+    );
+    const formal = await controlledFormalState(f.trip.id);
+    const impact = await app.inject({
+      method: 'GET',
+      url: `/trips/${f.trip.id}/impact`,
+      headers: bearer(userA),
+    });
+    expect(impact.statusCode, impact.body).toBe(200);
+    const handoff = await app.inject({
+      method: 'GET',
+      url: `${f.base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(handoff.json().readiness).toBe('READY');
+    expect(dispatched).toHaveLength(0);
+    expect(await controlledFormalState(f.trip.id)).toEqual(formal);
+    const searched = await controlledSearch(
+      f.trip.id,
+      handoff.json<GroundTransitRouteReevaluationHandoffView>(),
+    );
+    expect(searched.statusCode, searched.body).toBe(200);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]!.travelMode).toBe('TRANSIT');
+    const c =
+      searched.json<
+        import('@travel/contracts').ControlledAlternativeSearchResponse
+      >().result.candidates[0]!;
+    expect(c.candidateSnapshotId).toBeTruthy();
+    expect(await controlledFormalState(f.trip.id)).toEqual(formal);
+    const preview = await previewFromSnapshot(
+      userA,
+      f.owned,
+      c.candidateSnapshotId,
+    );
+    expect(preview.adoptable).toBe(true);
+    expect(await controlledFormalState(f.trip.id)).toEqual(formal);
+    const adopted = await adoptSuccessfully(
+      userA,
+      f.owned,
+      preview.previewId,
+      randomUUID(),
+    );
+    expect(adopted.trip.version).toBe(f.owned.version + 1);
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      randomUUID(),
+    );
+    expect(undone.trip.days.flatMap((d) => d.nodes).map((n) => n.id)).toEqual(
+      f.owned.days.flatMap((d) => d.nodes).map((n) => n.id),
+    );
+    expect(undone.trip.version).toBe(adopted.trip.version + 1);
+    expect(dispatched).toHaveLength(1);
+    expect(ordinary).not.toHaveBeenCalled();
+  });
   it('P6C-2 controlled FULL search writes only evidence, then explicit Preview Adopt replay and Undo', async () => {
     const f = await controlledCancelledFixture();
     const formal = await controlledFormalState(f.trip.id);

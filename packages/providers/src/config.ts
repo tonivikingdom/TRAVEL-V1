@@ -17,6 +17,7 @@ export type RouteProviderRuntimeConfig =
       readonly reason: 'ROUTE_PROVIDER_UNCONFIGURED';
     };
 
+/** Legacy config decoder only. Runtime dispatch must use createRuntimeRouteProvider. */
 export function readRouteProviderConfig(
   environment: NodeJS.ProcessEnv,
 ): RouteProviderRuntimeConfig {

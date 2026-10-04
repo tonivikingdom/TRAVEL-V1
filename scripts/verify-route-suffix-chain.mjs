@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { syntheticSameDayRouteTimeZone } from './synthetic-route-endpoint-dates.mjs';
+import { syntheticRouteDay } from './synthetic-route-day.mjs';
 
 /** Explicit synthetic HTTP actions; never invoked by a monitoring/handoff policy. */
 export async function verifyRouteSuffixChain({
@@ -84,8 +84,9 @@ export async function verifyRouteSuffixChain({
   const assert = (condition, message) => {
     if (!condition) throw new Error(`P5E2 Batch 4 ${message}`);
   };
-  const zone = syntheticSameDayRouteTimeZone(new Date());
-  const departure = new Date(Date.now() - 15 * 60_000);
+  const now = new Date();
+  const { timeZone: zone } = syntheticRouteDay(now);
+  const departure = new Date(now.getTime() - 15 * 60_000);
   const arrival = new Date(departure.getTime() + 30 * 60_000);
   const date = (instant) =>
     new Intl.DateTimeFormat('en-CA', {

@@ -5735,6 +5735,67 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     },
   );
 
+  it('P6C real Ground observation committed during a read fences impact without Trip.version change', async () => {
+    const { trip, leg } = await adoptedFixedGroundTrip();
+    const versionBefore = (
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } })
+    ).version;
+    const repo = new PrismaGroundTransitRepository(managed.client);
+    const evidence = new InTripReadService(
+      new PrismaInTripReadRepository(managed.client),
+    );
+    const original = tripRepository.findOwnedById.bind(tripRepository);
+    let reads = 0;
+    let afterCommit: Awaited<ReturnType<typeof repairDurableState>> | undefined;
+    const changingTrip = new Proxy(tripRepository, {
+      get(target, key) {
+        if (key === 'findOwnedById')
+          return async (input: Parameters<typeof original>[0]) => {
+            if (++reads === 2) {
+              await new GroundTransitService(
+                repo,
+                groundSequence(['RECOVERY']),
+                () => currentNow,
+              ).refresh(userA.actor, trip.id, leg.transportEdgeId);
+              afterCommit = await repairDurableState(trip.id);
+            }
+            return original(input);
+          };
+        return Reflect.get(target, key);
+      },
+    });
+    const read = new TripImpactService(
+      changingTrip,
+      repo,
+      new GroundTransitService(
+        repo,
+        groundSequence(['RECOVERY']),
+        () => currentNow,
+      ),
+      new GroundTransitRouteReevaluationService(
+        changingTrip,
+        repo,
+        new PrismaGroundTransitRouteProgressRepository(managed.client),
+        () => currentNow,
+      ),
+      evidence,
+      () => currentNow,
+    );
+    await expect(read.read(userA.actor, trip.id)).rejects.toMatchObject({
+      code: 'VERSION_CONFLICT',
+    });
+    expect(afterCommit).toBeDefined();
+    expect(await repairDurableState(trip.id)).toEqual(afterCommit);
+    expect(
+      (await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }))
+        .version,
+    ).toBe(versionBefore);
+    expect(
+      await managed.client.groundTransitObservation.count({
+        where: { legExecutionId: leg.id },
+      }),
+    ).toBe(1);
+  });
   it('P6C impact retains the exact confirmed suffix origin without altering prefix', async () => {
     const f = await suffixFixture(false, false, false);
     await app.close();

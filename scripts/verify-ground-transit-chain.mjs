@@ -1,8 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  syntheticRouteEndpointDates,
-  syntheticSameDayRouteTimeZone,
-} from './synthetic-route-endpoint-dates.mjs';
+import { syntheticRouteDay } from './synthetic-route-day.mjs';
 
 /** Synthetic-only P5E2 cross-layer check inside verify-compose's isolated project. */
 export async function verifyGroundTransitChain({
@@ -30,9 +27,9 @@ export async function verifyGroundTransitChain({
         query,
       )
     ).trim();
-  const departure = new Date(Date.now() + 4 * 60_000);
-  const { departureDate: date, arrivalDate } =
-    syntheticRouteEndpointDates(departure);
+  const now = new Date();
+  const departure = new Date(now.getTime() + 4 * 60_000);
+  const { timeZone: zone, localDate: date } = syntheticRouteDay(now);
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 ground execution',
     planningAnchorDate: date,
@@ -56,11 +53,11 @@ export async function verifyGroundTransitChain({
     baseTripVersion: trip.version,
     command: {
       type: 'ADD_PLACE_VISIT',
-      targetDay:
-        date === arrivalDate
-          ? { type: 'EXISTING', dayOccurrenceId: trip.days[0].dayOccurrenceId }
-          : { type: 'NEW', localDate: arrivalDate, sequence: 1 },
-      position: date === arrivalDate ? 1 : 0,
+      targetDay: {
+        type: 'EXISTING',
+        dayOccurrenceId: trip.days[0].dayOccurrenceId,
+      },
+      position: 1,
       place: {
         type: 'CUSTOM',
         name: 'SYNTHETIC_P5E2_GROUND_DESTINATION',
@@ -69,7 +66,7 @@ export async function verifyGroundTransitChain({
       },
     },
   });
-  const [from, to] = trip.days.flatMap((day) => day.nodes);
+  const [from, to] = trip.days[0].nodes;
   const query = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
     basisVersion: trip.version,
     fromNodeId: from.id,
@@ -77,7 +74,7 @@ export async function verifyGroundTransitChain({
     hint: {
       type: 'DEPART_AT',
       instant: departure.toISOString(),
-      timeZone: 'Asia/Tokyo',
+      timeZone: zone,
     },
   });
   if (query.candidates.length !== 1 || query.candidates[0].legs.length !== 2)
@@ -414,12 +411,8 @@ async function verifyHandoffReplacement({
     return payload;
   };
   const now = new Date();
-  const zone = syntheticSameDayRouteTimeZone(now);
   const departure = new Date(now.getTime() + 8 * 60_000);
-  const { departureDate: date, arrivalDate } = syntheticRouteEndpointDates(
-    departure,
-    zone,
-  );
+  const { timeZone: zone, localDate: date } = syntheticRouteDay(now);
   let trip = await apiJson('/trips', 'POST', {
     name: 'SYNTHETIC P5E2 handoff replacement',
     planningAnchorDate: date,
@@ -434,17 +427,13 @@ async function verifyHandoffReplacement({
       command: {
         type: 'ADD_PLACE_VISIT',
         targetDay:
-          index === 0 || date !== arrivalDate
-            ? {
-                type: 'NEW',
-                localDate: index === 0 ? date : arrivalDate,
-                sequence: index,
-              }
+          index === 0
+            ? { type: 'NEW', localDate: date, sequence: 0 }
             : {
                 type: 'EXISTING',
                 dayOccurrenceId: trip.days[0].dayOccurrenceId,
               },
-        position: index === 0 || date !== arrivalDate ? 0 : 1,
+        position: index,
         place: {
           type: 'CUSTOM',
           name,
@@ -454,7 +443,7 @@ async function verifyHandoffReplacement({
       },
     });
   }
-  const [from, to] = trip.days.flatMap((day) => day.nodes);
+  const [from, to] = trip.days[0].nodes;
   let initialQuery;
   try {
     initialQuery = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {

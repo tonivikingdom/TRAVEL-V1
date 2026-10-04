@@ -283,3 +283,103 @@ test('enlarged text keeps impact and drawer controls reachable', async ({
   await expect(page.locator('.trip-impact')).toBeVisible();
   readOnly();
 });
+
+test.describe('Impact inherits mobile drawer protection', () => {
+  test.use({ hasTouch: true, isMobile: true });
+  for (const width of [320, 375, 390, 430])
+    test(`${width}px impact drawer retains capture reset, keyboard fitting and subsequent Place draft`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 740 });
+      impact.items = [
+        {
+          nodeId: fixture.trip.days[0]!.nodes[0]!.id,
+          transportEdgeId: null,
+          status: 'VIOLATED',
+          changed: true,
+          title: 'SYNTHETIC 后续安排需要调整',
+          explanation:
+            '当前预计到达晚于下一交通出发；原来的重要时间要求保持。'.repeat(6),
+        },
+      ];
+      await enter(page);
+      await page.addStyleTag({ content: 'html {font-size:24px !important}' });
+      await page.getByRole('button', { name: '查看影响', exact: true }).tap();
+      expect(
+        (await page.locator('[data-drag]').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        (await page.locator('[data-close]').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      const handle = (await page.locator('.handle').boundingBox())!;
+      await page.mouse.move(handle.x + 15, handle.y + 2);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + 15, handle.y + 60, { steps: 4 });
+      await page.locator('#detail').evaluate((element) => {
+        if (!element.hasPointerCapture(1))
+          throw new Error('SYNTHETIC handle must capture pointer');
+        element.releasePointerCapture(1);
+      });
+      await page.mouse.move(handle.x + 15, handle.y + 60);
+      await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+      await page.mouse.up();
+      await expect(page.locator('.impact-detail')).toBeVisible();
+      await page.evaluate(() => {
+        Object.defineProperty(window.visualViewport!, 'height', {
+          configurable: true,
+          value: 360,
+        });
+        Object.defineProperty(window.visualViewport!, 'offsetTop', {
+          configurable: true,
+          value: 40,
+        });
+        window.visualViewport!.dispatchEvent(new Event('resize'));
+      });
+      await expect
+        .poll(async () => {
+          const box = (await page.locator('#detail').boundingBox())!;
+          return box.y + box.height;
+        })
+        .toBeLessThanOrEqual(401);
+      expect(
+        await page
+          .locator('#detail')
+          .evaluate((e) => e.scrollWidth <= e.clientWidth),
+      ).toBe(true);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.evaluate(() => {
+        delete (window.visualViewport as unknown as { height?: number }).height;
+        delete (window.visualViewport as unknown as { offsetTop?: number })
+          .offsetTop;
+        window.visualViewport!.dispatchEvent(new Event('resize'));
+      });
+      await page.getByRole('button', { name: '关闭详情', exact: true }).tap();
+      await page
+        .getByRole('button', { name: '查看全部日程', exact: true })
+        .tap();
+      await page.locator('[data-node]').first().tap();
+      const note = page.locator('textarea[name=note]');
+      await note.fill('SYNTHETIC Impact 后保留的地点草稿');
+      await page.locator('#detail').evaluate((e) => (e.scrollTop = 0));
+      const dirtyHandle = (await page.locator('.handle').boundingBox())!;
+      let prompts = 0;
+      page.once('dialog', async (d) => {
+        prompts++;
+        await d.dismiss();
+      });
+      await page.mouse.move(dirtyHandle.x + 15, dirtyHandle.y + 2);
+      await page.mouse.down();
+      await page.mouse.move(dirtyHandle.x + 15, dirtyHandle.y + 140, {
+        steps: 8,
+      });
+      await page.mouse.up();
+      await expect.poll(() => prompts).toBe(1);
+      await expect(note).toHaveValue('SYNTHETIC Impact 后保留的地点草稿');
+      await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+      readOnly();
+    });
+});

@@ -358,8 +358,12 @@ dialog {
   inset: 0;
   width: min(480px, 100vw);
   max-width: 100%;
-  height: 100dvh;
-  max-height: 100dvh;
+  height: 100vh;
+  height: var(--sheet-viewport-height, 100dvh);
+  max-height: 100vh;
+  max-height: var(--sheet-viewport-height, 100dvh);
+  top: auto;
+  bottom: var(--sheet-viewport-bottom, 0px);
   border: none;
   border-left: 1px solid var(--line);
   padding: 0;
@@ -375,7 +379,9 @@ dialog::backdrop {
   top: 0;
   background: #fff;
   z-index: 1;
-  padding: 20px 24px 12px;
+  padding: max(20px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right)) 12px
+    max(24px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--line);
 }
 .sheet-title {
@@ -396,7 +402,8 @@ dialog::backdrop {
   display: none;
 }
 .sheet-body {
-  padding: 4px 24px max(30px, env(safe-area-inset-bottom));
+  padding: 4px max(24px, env(safe-area-inset-right))
+    max(30px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   overflow-wrap: anywhere;
   min-width: 0;
 }
@@ -625,14 +632,27 @@ form button {
     margin: 0;
     width: 100%;
     height: auto;
-    max-height: calc(100dvh - env(safe-area-inset-top) - 30px);
+    bottom: var(--sheet-viewport-bottom, 0px);
+    max-height: calc(100vh - env(safe-area-inset-top) - 30px);
+    max-height: calc(
+      var(--sheet-viewport-height, 100dvh) - env(safe-area-inset-top) - 30px
+    );
     border-radius: 23px 23px 0 0;
     border: 0;
     overscroll-behavior: contain;
   }
   .sheet-head {
     padding: 10px 20px 12px;
+  }
+  .drag-zone {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 8px 0 13px;
     touch-action: none;
+    /* A handle gesture must not start native text selection/dragging in Safari. */
+    -webkit-user-select: none;
+    user-select: none;
   }
   .handle {
     display: block;
@@ -640,7 +660,11 @@ form button {
     height: 4px;
     border-radius: 4px;
     background: #aabbcf;
-    margin: 0 auto 13px;
+    margin: 0 auto;
+  }
+  .sheet-title button {
+    min-width: 44px;
+    min-height: 44px;
   }
   .sheet-title h2 {
     font-size: 18px;
@@ -1098,6 +1122,13 @@ form button {
   min-width: 0;
   max-width: 100%;
 }
+/* WebKit native option text can escape the select's own overflow boundary. */
+[data-authoring] label:has(> select[name='place']) {
+  overflow: clip;
+}
+[data-authoring] select[name='place']:focus-visible {
+  outline-offset: -3px;
+}
 [data-authoring] button {
   width: 100%;
 }
@@ -1285,5 +1316,77 @@ form button {
   }
   .trip-impact button {
     width: 100%;
+  }
+}
+
+.place-search {
+  border-bottom: 1px solid #dce7f1;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+}
+.place-search input,
+.place-search select {
+  width: 100%;
+  min-width: 0;
+}
+.place-search button {
+  min-height: 44px;
+  margin-top: 0.5rem;
+}
+.place-candidate {
+  padding: 0.9rem;
+  background: #f3f8fc;
+  border: 1px solid #dce7f1;
+  border-radius: 12px;
+  margin-top: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.place-candidate strong,
+.place-candidate small {
+  display: block;
+}
+.place-candidate button {
+  width: 100%;
+}
+.place-candidate [aria-pressed='true'] {
+  background: #d8ebfb;
+}
+.place-attribution {
+  max-width: 60rem;
+  margin: 1rem auto;
+  padding: 0 1rem max(1rem, env(safe-area-inset-bottom));
+  font-size: 0.8rem;
+  color: #52667a;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* Touch forms avoid Safari focus zoom; text remains scalable. */
+@media (max-width: 760px), (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+  .sheet-body {
+    scroll-margin-bottom: 1rem;
+  }
+}
+
+/* Scale sheet labels and titles with the requested text size. */
+.sheet-title h2 {
+  font-size: max(20px, 1.33rem);
+}
+.sheet-body label {
+  font-size: max(13px, 0.87rem);
+}
+dialog {
+  scroll-padding-top: var(--sheet-head-height, 5rem);
+  scroll-padding-bottom: 1rem;
+}
+@media (max-width: 760px) {
+  .sheet-title h2 {
+    font-size: max(18px, 1.2rem);
   }
 }

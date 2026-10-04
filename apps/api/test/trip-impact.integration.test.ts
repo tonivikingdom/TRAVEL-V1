@@ -268,6 +268,58 @@ describe('P6C authoritative HTTP/PostgreSQL read projection', () => {
     for (const who of [owner, stranger, admin])
       expect((await get(f.t.id, who.credential)).statusCode).toBe(404);
   });
+  it('in-trip evidence changes without version increments reject a mixed read', async () => {
+    const f = await fixture();
+    const original = inTrip.read.bind(inTrip);
+    let reads = 0;
+    const changingEvidence = new Proxy(inTrip, {
+      get(target, key) {
+        if (key === 'read')
+          return async (...args: Parameters<typeof original>) => {
+            if (++reads === 2)
+              await db.client.executionEvent.create({
+                data: {
+                  ownerUserId: f.who.actor.userId,
+                  tripId: f.t.id,
+                  nodeId: f.a.id,
+                  type: 'ARRIVAL',
+                  source: 'MANUAL',
+                  occurredAt: new Date(),
+                },
+              });
+            return original(...args);
+          };
+        return Reflect.get(target, key);
+      },
+    });
+    const read = new TripImpactService(
+      trips,
+      ground,
+      new GroundTransitService(ground, new UnconfiguredGroundTransitProvider()),
+      new GroundTransitRouteReevaluationService(
+        trips,
+        ground,
+        new PrismaGroundTransitRouteProgressRepository(db.client),
+      ),
+      changingEvidence,
+    );
+    await expect(read.read(f.who.actor, f.t.id)).rejects.toMatchObject({
+      code: 'VERSION_CONFLICT',
+    });
+    expect(
+      (await db.client.trip.findUniqueOrThrow({ where: { id: f.t.id } }))
+        .version,
+    ).toBe(f.t.version);
+    expect(
+      await db.client.executionEvent.count({ where: { tripId: f.t.id } }),
+    ).toBe(1);
+    expect(
+      await db.client.routePreview.count({ where: { tripId: f.t.id } }),
+    ).toBe(0);
+    expect(
+      await db.client.operationReceipt.count({ where: { tripId: f.t.id } }),
+    ).toBe(0);
+  });
   it('version changes during handoff projection return controlled conflict', async () => {
     const f = await fixture();
     const original = trips.findOwnedById.bind(trips);

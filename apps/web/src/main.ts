@@ -781,7 +781,7 @@ function connectionCard(c: ConnectionView) {
   return `<button class="connection ${conflict ? 'conflict' : ''}" data-route-from="${c.fromNodeId}" data-route-to="${c.toNodeId}">${icon('route')}<span><strong>${esc(edge ? `${modeLabel[edge.mode]} · ${edge.serviceLabel ?? '已选交通'}` : '选择交通')}</strong><small>${edge ? `${departure ? temporalLabel(departure) : '待定'} ${esc(formatTime(departure, from ? dayDate(from.dayOccurrenceId) : undefined))} 出发 · 前往 ${esc(to ? nodeTitle(to) : '下一安排')}` : '查看方案或在地图中查询'}</small>${conflict ? '<small class="warning">出发早于当前可出发时间，原路线仍保留</small>' : ''}</span><span>›</span></button>`;
 }
 function frame(title: string, body: string) {
-  return `<div class="sheet-head" data-drag><div class="handle" aria-hidden="true"></div><div class="sheet-title"><h2 id="detail-title">${esc(title)}</h2><button data-close aria-label="关闭详情">${icon('close')}</button></div></div><div class="sheet-body">${body}</div>`;
+  return `<div class="sheet-head"><div class="drag-zone" data-drag><div class="handle" aria-hidden="true"></div></div><div class="sheet-title"><h2 id="detail-title">${esc(title)}</h2><button data-close aria-label="关闭详情">${icon('close')}</button></div></div><div class="sheet-body">${body}</div>`;
 }
 function mapLinks(
   location: MapLocation,

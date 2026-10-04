@@ -1,5 +1,6 @@
 import {
   TripImpactService,
+  PlaceSearchService,
   StaticBackupService,
   InTripReadService,
   AssistanceCapabilityService,
@@ -50,6 +51,7 @@ import {
 
 export interface ApiDependencies {
   readonly tripImpactService?: TripImpactService;
+  readonly placeSearchService?: PlaceSearchService;
   readonly staticBackupService?: StaticBackupService;
   readonly inTripReadService?: InTripReadService;
   readonly readinessProbe: ReadinessProbe;
@@ -246,6 +248,61 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       request.body,
     );
   });
+
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/place-search',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.placeSearchService)
+        throw new ApplicationError(
+          'PLACE_SEARCH_UNAVAILABLE',
+          '地点搜索暂时不可用，仍可选择已保存地点。',
+          503,
+        );
+      const body = requiredRecord(request.body);
+      return dependencies.placeSearchService.search(
+        authenticated.actor,
+        request.params.tripId,
+        requiredString(body, 'query'),
+        hasOwn(body, 'language') ? requiredString(body, 'language') : 'ja',
+      );
+    },
+  );
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/place-selection',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.placeSearchService)
+        throw new ApplicationError(
+          'PLACE_SEARCH_UNAVAILABLE',
+          '地点搜索暂时不可用，仍可选择已保存地点。',
+          503,
+        );
+      const body = requiredRecord(request.body);
+      return dependencies.placeSearchService.select(
+        authenticated.actor,
+        request.params.tripId,
+        {
+          selectionToken: requiredString(body, 'selectionToken'),
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          targetDay: parseDayOccurrenceTarget(body.targetDay),
+          position: requiredNumber(body, 'position'),
+          ...(hasOwn(body, 'note')
+            ? { note: optionalNullableString(body, 'note') }
+            : {}),
+        },
+      );
+    },
+  );
 
   // P6B: stored evidence only; no execution trigger or Provider refresh.
   app.get<{ Params: { tripId: string } }>(

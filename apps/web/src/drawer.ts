@@ -17,9 +17,14 @@ export class DetailDrawer {
         !matchMedia('(max-width: 760px)').matches ||
         !(event.target instanceof HTMLElement) ||
         !event.target.closest('[data-drag]') ||
+        !event.isPrimary ||
+        event.button !== 0 ||
+        this.pointer !== null ||
         event.target.closest('button,a,input,textarea,select')
       )
         return;
+      // The handle owns this gesture; native text dragging can swallow pointer-up.
+      event.preventDefault();
       this.pointer = { id: event.pointerId, y: event.clientY };
       element.setPointerCapture(event.pointerId);
     });
@@ -35,12 +40,57 @@ export class DetailDrawer {
       if (distance >= 110) this.close();
     };
     element.addEventListener('pointerup', end);
-    element.addEventListener('pointercancel', () => {
-      this.pointer = null;
-      element.style.transform = '';
-    });
+    element.addEventListener('pointercancel', () => this.resetDrag());
+    element.addEventListener('lostpointercapture', () => this.resetDrag());
+    window.visualViewport?.addEventListener('resize', () => this.fitViewport());
+    window.visualViewport?.addEventListener('scroll', () =>
+      this.fitViewport(false),
+    );
+    window.addEventListener('resize', () => this.fitViewport());
+    element.addEventListener('focusin', () => this.fitViewport());
     element.addEventListener('click', (event) => {
       if ((event.target as HTMLElement).closest('[data-close]')) this.close();
+    });
+  }
+  private resetDrag() {
+    const pointer = this.pointer;
+    this.pointer = null;
+    this.element.style.transform = '';
+    if (pointer && this.element.hasPointerCapture(pointer.id))
+      this.element.releasePointerCapture(pointer.id);
+  }
+  private fitViewport(revealFocus = true) {
+    if (!this.element.open) return;
+    const viewport = window.visualViewport;
+    if (viewport && viewport.scale === 1) {
+      this.element.style.setProperty(
+        '--sheet-viewport-height',
+        `${viewport.height}px`,
+      );
+      this.element.style.setProperty(
+        '--sheet-viewport-bottom',
+        `${Math.max(0, innerHeight - viewport.height - viewport.offsetTop)}px`,
+      );
+    } else {
+      this.element.style.removeProperty('--sheet-viewport-height');
+      this.element.style.removeProperty('--sheet-viewport-bottom');
+    }
+    const head = this.element.querySelector<HTMLElement>('.sheet-head');
+    if (head)
+      this.element.style.setProperty(
+        '--sheet-head-height',
+        `${head.getBoundingClientRect().height}px`,
+      );
+    if (!revealFocus) return;
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (
+        this.element.open &&
+        active instanceof HTMLElement &&
+        this.element.contains(active) &&
+        active.matches('input,textarea,select')
+      )
+        active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
   }
   open(html: string) {
@@ -57,11 +107,18 @@ export class DetailDrawer {
       this.element.innerHTML = html;
       this.element.showModal();
     } else this.element.innerHTML = html;
-    this.element.querySelector<HTMLElement>('[data-close]')?.focus();
+    this.resetDrag();
+    this.fitViewport();
+    this.element
+      .querySelector<HTMLElement>('[data-close]')
+      ?.focus({ preventScroll: true });
   }
   close() {
     if (!this.mayClose()) return;
+    this.resetDrag();
     this.element.close();
+    this.element.style.removeProperty('--sheet-viewport-height');
+    this.element.style.removeProperty('--sheet-viewport-bottom');
     document.body.style.overflow = this.priorOverflow;
     this.closed();
     const target = this.opener?.isConnected

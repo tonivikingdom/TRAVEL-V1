@@ -230,3 +230,7 @@ export type {
 } from './trip-ports.js';
 export * from './static-backup-service.js';
 export { TripImpactService } from './trip-impact-service.js';
+export {
+  PlaceSearchService,
+  type PlaceSearchProvider,
+} from './place-search-service.js';

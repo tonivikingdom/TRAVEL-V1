@@ -1,4 +1,28 @@
-# CURRENT TASK — PR #46 integrated final acceptance (RESOLVED)
+# CURRENT TASK — P6C-2 Failure / Concurrency / Mobile Hardening (BLOCKED)
+
+Recommendation: GPT-5.6 Sol / High; fallback available Sol / High. No runtime switch is claimed. Escalate for uncertain owner/version/concurrency evidence.
+
+- Starting main: `0e5a94c7bd4f64c4e94f208053074c4ddcdbb22f`, fetched and matched.
+- Branch: `feat/p6c-2-failure-hardening`.
+- Migration **26**, production API/schema/migration delta **0/0/0**.
+- Own synthetic acceptance helpers, PostgreSQL footprint/concurrency tests and browser/mobile regressions. Do not modify A/B/Provider/PR #41.
+
+## P6C2-01 — text-only Place Search draft bypasses discard protection
+
+Reproduced on existing production Web, without product edits, in Chromium and WebKit. Open Trip → 添加安排 → 地点; wait for saved-place loading to finish; type `SYNTHETIC place-search protected draft` only in the search input; drag the normal handle down past 110px. **Observed:** the drawer closes without any confirmation, resetting authoring/search context. Switching to route detail also bypasses protection. **Required:** preserve the unsubmitted Place Search draft when navigation/closure is refused and honor discard protection.
+
+Cause: `TripAuthoringEditor.input()` compares `new FormData(form)` with its baseline. `[data-place-query]` and `[data-place-language]` have no `name`, so their edits are absent from comparison and `draftDirty` remains false. The drawer/route close guards allow transition, and the closed callback calls `authoring.reset()`. A selected candidate or note is a different dirty state and does not cover text-only search.
+
+This is cross-modal authoring/Place Search draft-state behavior, beyond Task C's narrow mobile interaction ownership. Current user instruction: “如果发现当前正式代码已有 bug：不要擅自大修。写入 docs/codex/CURRENT-TASK.md 明确 blocker，停止等待总控决定。” **No product repair applied. Stop development pending controller decision.**
+
+- Active, unskipped failing regression: `apps/web/test/replanning-hardening.browser.ts`, `place-search draft refuses drag close and route open without clearing values`.
+- PostgreSQL new harness: **18/18 PASS** against isolated PostgreSQL 17, with actual rows for all nine mandated resources plus Backup/Authoring/Day/Ownership/Temporal/Intent.
+- Final targeted Chromium: **16 PASS / 1 FAIL**; WebKit: **16 PASS / 1 FAIL**. Independent normal-handle reproductions also fail in both engines (zero confirmation). The final regression asserts the drawer remains visible as well as draft value/confirmation.
+- SYNTHETIC before/after evidence: `docs/status/assets/p6c-2-hardening/mobile-place-search-draft-before-close.png`, `mobile-place-search-draft-lost-after-close.png`.
+- Full green final acceptance blocked; remaining work and actual checks: [status](../status/P6C-2-FAILURE-HARDENING.md).
+- Do not RESOLVED, skip/weaken the regression, Ready, merge, deploy, repair A/B, change PR #41 or begin another task.
+
+## Historical task — PR #46 integrated final acceptance (RESOLVED)
 
 Recommendation: GPT-5.6 Sol / High; fallback available Sol / High. No runtime switch is claimed. Raise effort for time/concurrency regressions.
 

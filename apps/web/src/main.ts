@@ -68,8 +68,31 @@ import {
 import { impactSummary, impactDetails } from './impact.js';
 import { alternativeEntry } from './alternatives.js';
 import { previewPresentation, previewMarkup } from './preview-presentation.js';
+import {
+  configureMapAdapter,
+  regionMapAdapter,
+  unconfiguredMapAdapter,
+} from './map-adapter.js';
+import { miniMapMarkup, mountMiniMap } from './mini-map.js';
+import { SyntheticMapAdapter } from './synthetic-map-adapter.js';
+import './mini-map.css';
 import './styles.css';
 import './preview-presentation.css';
+
+// Synthetic maps are only available in the development harness, never production.
+if (
+  import.meta.env.DEV &&
+  new URLSearchParams(location.search).get('mapHarness') === 'SYNTHETIC'
+) {
+  const state = new URLSearchParams(location.search).get('mapState');
+  configureMapAdapter(
+    new SyntheticMapAdapter(
+      state === 'failure' || state === 'slow' || state === 'hang'
+        ? state
+        : 'ready',
+    ),
+  );
+}
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const detail = document.querySelector<HTMLDialogElement>('#detail')!;
@@ -843,7 +866,7 @@ function openPlace(n: ItineraryNodeView) {
   drawer.open(
     frame(
       nodeTitle(n),
-      `<p class="address">${esc(n.place?.address ?? '地址未提供')}</p>${n.place ? mapLinks(n.place) : ''}<p class="map-status">内嵌地图尚未配置；可在地图应用中查看已保存的位置。</p>${timeGrid(n)}<div data-requirements>${requirements(n)}</div><details class="edit"><summary>编辑重要时间要求</summary><p class="muted">要求独立于计划/预计/实际时间，不会改写已发生事实。</p><form id="time-edit"><label>要求<select name="requirement"><option value="ARRIVAL:NOT_AFTER">最晚到达</option><option value="ARRIVAL:NOT_BEFORE">最早到达</option><option value="ARRIVAL:EXACT">指定到达</option><option value="DEPARTURE:NOT_BEFORE">最早出发</option><option value="DEPARTURE:NOT_AFTER">最晚出发</option><option value="DEPARTURE:EXACT">指定出发</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" required></label>${zoneField(zone, '时间要求所在地')}<label class="check"><input name="locked" type="checkbox" checked>保护这项要求</label><button class="primary">保存时间要求</button></form><form id="dwell-edit"><label>至少停留（分钟）<input name="minutes" type="number" min="1" step="1" value="${n.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ? String(n.timeIntents.find((i) => i.kind === 'MIN_DWELL')!.durationSeconds! / 60) : ''}" required></label><button>保存停留要求</button></form><div data-remove-intents>${removalControls(n)}</div></details><form id="note-edit"><label>备注<textarea name="note" maxlength="2000" rows="3" placeholder="这处安排需要记住什么？">${esc(n.note ?? '')}</textarea></label><button class="primary">保存备注</button></form><p id="save-status" role="status">已读取服务器数据</p>`,
+      `<p class="address">${esc(n.place?.address ?? '地址未提供')}</p>${n.place && regionMapAdapter() === unconfiguredMapAdapter ? mapLinks(n.place) : ''}${miniMapMarkup('place')}${timeGrid(n)}<div data-requirements>${requirements(n)}</div><details class="edit"><summary>编辑重要时间要求</summary><p class="muted">要求独立于计划/预计/实际时间，不会改写已发生事实。</p><form id="time-edit"><label>要求<select name="requirement"><option value="ARRIVAL:NOT_AFTER">最晚到达</option><option value="ARRIVAL:NOT_BEFORE">最早到达</option><option value="ARRIVAL:EXACT">指定到达</option><option value="DEPARTURE:NOT_BEFORE">最早出发</option><option value="DEPARTURE:NOT_AFTER">最晚出发</option><option value="DEPARTURE:EXACT">指定出发</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" required></label>${zoneField(zone, '时间要求所在地')}<label class="check"><input name="locked" type="checkbox" checked>保护这项要求</label><button class="primary">保存时间要求</button></form><form id="dwell-edit"><label>至少停留（分钟）<input name="minutes" type="number" min="1" step="1" value="${n.timeIntents.find((i) => i.kind === 'MIN_DWELL')?.durationSeconds ? String(n.timeIntents.find((i) => i.kind === 'MIN_DWELL')!.durationSeconds! / 60) : ''}" required></label><button>保存停留要求</button></form><div data-remove-intents>${removalControls(n)}</div></details><form id="note-edit"><label>备注<textarea name="note" maxlength="2000" rows="3" placeholder="这处安排需要记住什么？">${esc(n.note ?? '')}</textarea></label><button class="primary">保存备注</button></form><p id="save-status" role="status">已读取服务器数据</p>`,
     ),
   );
   const existing = n.timeIntents.find((i) => i.kind === 'POINT_TIME');
@@ -862,6 +885,12 @@ function openPlace(n: ItineraryNodeView) {
       '#time-edit input[name=locked]',
     )!.checked = existing.locked;
   }
+  mountMiniMap(
+    detail.querySelector<HTMLElement>('[data-mini-map]')!,
+    'place',
+    [n.place],
+    regionMapAdapter(),
+  );
   baselineForms();
 }
 function refreshPlaceSummary(id: string) {
@@ -1085,15 +1114,28 @@ function openRoute(from: string, to: string) {
     frame(
       '交通与路线',
       `<p class="route-endpoints"><strong>${esc(nodeTitle(origin))}</strong><span aria-hidden="true">→</span><strong>${esc(nodeTitle(destination))}</strong></p><section class="selected-transport"><h3>当前交通</h3>${connection?.transport ? savedTransport(chain) : '<p class="muted">尚未选择交通</p>'}</section><aside class="route-map-note">${
-        origin.place && destination.place
-          ? wholeRouteMap(
-              origin.place,
-              destination.place,
-              chain.map((c) => c.transport?.mode ?? 'OTHER'),
-            )
-          : '<p>这段交通尚无完整起终点信息，不能查询原路线。</p>'
-      }<p class="map-status">内嵌地图未配置；可用外部地图查询。</p></aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
+        regionMapAdapter() !== unconfiguredMapAdapter
+          ? ''
+          : origin.place && destination.place
+            ? wholeRouteMap(
+                origin.place,
+                destination.place,
+                chain.map((c) => c.transport?.mode ?? 'OTHER'),
+              )
+            : '<p>这段交通尚无完整起终点信息，不能查询原路线。</p>'
+      }${miniMapMarkup('transport')}</aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
     ),
+  );
+  const boarding = chain.flatMap((c) => {
+    const leg = c.transport ? selectedLegForEdge(c.transport.id) : null;
+    return leg && ['BUS', 'RAIL', 'FERRY'].includes(leg.mode) ? [leg.from] : [];
+  })[0];
+  mountMiniMap(
+    detail.querySelector<HTMLElement>('[data-mini-map]')!,
+    'transport',
+    [origin.place, destination.place],
+    regionMapAdapter(),
+    boarding ? { location: boarding, label: '导航到上车地点' } : undefined,
   );
 }
 function openAlternatives(handoff: GroundTransitRouteReevaluationHandoffView) {

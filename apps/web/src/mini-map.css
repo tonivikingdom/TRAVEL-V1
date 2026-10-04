@@ -1,0 +1,87 @@
+.mini-map {
+  min-width: 0;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f8fbff;
+  overflow-wrap: anywhere;
+}
+.mini-map h3 {
+  margin: 0 0 0.6rem;
+}
+.mini-map-status,
+.mini-map-note,
+.mini-map-synthetic {
+  font-size: 0.9rem;
+  color: #52667a;
+}
+.mini-map-points {
+  margin: 0.7rem 0;
+}
+.mini-map-points div {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.3rem 0;
+}
+.mini-map-points dt {
+  flex: none;
+}
+.mini-map-points dd {
+  margin: 0;
+  min-width: 0;
+}
+.mini-map-viewport {
+  width: 100%;
+  height: 220px;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+  overscroll-behavior: contain;
+  background: #e8f1fa;
+}
+.mini-map-viewport svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.mini-map-viewport:focus-visible {
+  outline: 3px solid #1874cc;
+  outline-offset: -3px;
+}
+.mini-map-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+}
+.mini-map-controls button {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 1rem;
+  margin: 0;
+}
+.mini-map-controls[hidden],
+.mini-map-viewport[hidden] {
+  display: none;
+}
+.mini-map-actions {
+  justify-content: center;
+}
+.mini-map-actions a {
+  min-height: 44px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 360px) {
+  .mini-map {
+    padding: 0.7rem;
+  }
+}
+
+/* The shared icon stroke must not outline synthetic map text or blocks. */
+.mini-map-viewport svg[data-synthetic-map] {
+  stroke: none;
+}

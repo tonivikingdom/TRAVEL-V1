@@ -1,6 +1,6 @@
 # P6C-2 Alternative Preview Presentation
 
-推荐模型：GPT-5.6 Sol / Medium。备选 Sol / Medium；时间事实或调整范围存在歧义时升级推理强度。当前运行模型无法确认；本文不表示已切换模型。
+推荐模型：GPT-5.6 Sol / High。备选 Sol / High；owner/version/concurrency 证据存在歧义时提高推理强度。当前运行模型无法确认；本文不表示已切换模型。
 
 ## Scope and starting evidence
 
@@ -10,6 +10,16 @@
 - Ownership: immutable RoutePreviewView → Web view model → escaped markup; separate scoped CSS; standalone SYNTHETIC harness and presentation tests.
 - Formal Web integration: imports and one `showPreview` rendering expression. Existing Query / Preview / Adopt / Undo handlers, minimum-dwell consent ID, permission/version/expiry checks remain authoritative.
 - No A planning workflow, C touch/drawer implementation, Provider, application/domain/persistence, CI standards, migration or schema changes. No paid calls or deployment.
+
+## PR #48 integration / P6C2-01 inheritance
+
+- Integration base: **`057b6dfde9fbe867a6c0ae11569d24d9951fb2f9`**, fetched and matched before integration.
+- Reviewed B starting HEAD: `703b0009d38ab6111fb29811699a1ec1dc670a9f`; PR #48 Open / Draft.
+- Merge commit: `ef7b7e8621afcc716830f6d0ca7fe90bbf796069`, preserving both B and merged C ancestry. **No textual conflicts**; no ours/theirs replacement. Shared `styles.css`, drawer and C authoring/search implementation remain byte-identical to integration main. `main.ts` retains only B's imports and `showPreview` rendering change relative to that main.
+- P6C2-01 inherited unchanged: independent exact query/language baseline established before saved-place loading; late responses do not acknowledge edits; close/drag/Escape/replacement confirmation; cancel clears search-local state only; unrelated note/saved selection remain protected; accepted-write snapshot leaves newer search edits dirty. Formal owner/version/idempotency fields and duplicate-write protection are unchanged.
+- C's 18 PostgreSQL failure/concurrency regressions, browser failure harness and 21 search-draft regressions remain intact. B adds two joint browser chains: text-only search draft refuses route/Preview replacement with exact form/query retention and zero planning/formal requests; pristine authoring → Preview open/expand/close → authoring retains exact values and clean baseline, with no Adopt/Undo/authoring write. The current single drawer does not claim simultaneous preservation of a dirty draft after **accepted** discard.
+- B presentation remains pure and same-basis enrichment still requires matching **Trip ID AND version**. FULL/SUFFIX/external, blockers, removals, missing evidence, downstream impact/dwell consent, planned clocks and authoritative internal leg order remain covered.
+- The final exact HEAD and CI are recorded in the [existing Draft PR #48](https://github.com/tonivikingdom/TRAVEL-V1/pull/48); this document cannot embed its own commit hash. The PR binds the immutable final SHA, CI run and screenshot links. Old CI `37166950625` is historical only, never integration evidence.
 
 ## Presentation matrix
 

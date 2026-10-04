@@ -1,8 +1,96 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { previewCases } from './preview-fixture.js';
+import { browserHarness } from './helpers/replanning-acceptance.js';
 const assets = 'docs/status/assets/p6c-2-preview';
 test.use({ viewport: { width: 390, height: 844 } });
+test('SYNTHETIC search-only draft refuses route/Preview replacement and retains exact draft', async ({
+  page,
+}, info) => {
+  const h = await browserHarness(page);
+  await h.enter();
+  await page.locator('[data-action=add-arrangement]').click();
+  await page.getByRole('button', { name: '地点', exact: true }).click();
+  await expect(page.locator('select[name=place] option')).toHaveCount(3);
+  await page
+    .locator('[data-place-query]')
+    .fill('  SYNTHETIC 東京駅 preview draft  ');
+  const before = await page
+    .locator('#authoring-add')
+    .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]);
+  let prompts = 0;
+  page.on('dialog', async (dialog) => {
+    prompts++;
+    await dialog.dismiss();
+  });
+  await page.locator('.connection').evaluate((e: HTMLElement) => e.click());
+  await expect(page.locator('[data-place-query]')).toHaveValue(
+    '  SYNTHETIC 東京駅 preview draft  ',
+  );
+  await expect(page.locator('#save-status')).toContainText('还有未保存的修改');
+  expect(
+    await page
+      .locator('#authoring-add')
+      .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]),
+  ).toEqual(before);
+  await expect(page.locator('.preview-presentation')).toHaveCount(0);
+  expect(prompts).toBe(1);
+  expect(h.planning()).toEqual([]);
+  expect(h.formalWrites()).toEqual([]);
+  expect(h.trip.version).toBe(1);
+  if (info.project.name === 'chromium') {
+    await mkdir(assets, { recursive: true });
+    await page.screenshot({
+      path: `${assets}/mobile-search-preview-guard.png`,
+      fullPage: true,
+    });
+  }
+});
+
+test('SYNTHETIC Preview open/expand/close leaves pristine authoring values and write state unchanged', async ({
+  page,
+}) => {
+  const h = await browserHarness(page);
+  await h.enter();
+  const add = async () => {
+    await page.locator('[data-action=add-arrangement]').click();
+    await page.getByRole('button', { name: '地点', exact: true }).click();
+    await expect(page.locator('select[name=place] option')).toHaveCount(3);
+  };
+  await add();
+  const snapshot = async () =>
+    page
+      .locator('#authoring-add')
+      .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]);
+  const before = await snapshot();
+  let prompts = 0;
+  page.on('dialog', async (dialog) => {
+    prompts++;
+    await dialog.dismiss();
+  });
+  await page.locator('.connection').evaluate((e: HTMLElement) => e.click());
+  await h.prepare();
+  await expect(page.locator('.preview-presentation')).toBeVisible();
+  await page
+    .locator('.preview-presentation .preview-details > summary')
+    .click();
+  await page.locator('[data-close]').click();
+  await expect(page.locator('#detail')).not.toBeVisible();
+  await add();
+  expect(await snapshot()).toEqual(before);
+  await expect(page.locator('[data-place-query]')).toHaveValue('');
+  await expect(page.locator('[data-place-language]')).toHaveValue('ja');
+  await expect(page.locator('#save-status')).toContainText(
+    '当前表单与已提交内容一致',
+  );
+  expect(prompts).toBe(0);
+  expect(h.planning().map((c) => c.path.split('/').at(-1))).toEqual([
+    'query',
+    'previews',
+  ]);
+  expect(h.formalWrites()).toEqual([]);
+  expect(h.trip.version).toBe(1);
+});
 for (const kind of previewCases) {
   test(`SYNTHETIC ${kind} preview: standalone, readonly, expandable`, async ({
     page,

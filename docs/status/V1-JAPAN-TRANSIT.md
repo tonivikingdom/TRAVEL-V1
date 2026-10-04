@@ -1,8 +1,74 @@
-# V1 Japan Transit — PR #41 continuation
+# V1 Japan Transit — PR #41 Regional Router integration
 
-Recommendation: GPT-5.6 Sol / High; fallback available coding model / High. Actual runtime selection is unknown; no model switch is claimed. Raise effort for time/provenance/concurrency issues.
+Recommendation: GPT-5.6 Sol / High; fallback available coding model / High. Actual runtime selection is unknown; no model switch is claimed.
 
-**PARTIAL overall; scoped Japan live acceptance PASS. Production release is not approved.** Existing [Draft PR #41](https://github.com/tonivikingdom/TRAVEL-V1/pull/41), branch `feat/google-consumer-transit-cloud-dev`. Starting remote HEAD `1f297d924d5869c6f7730e30aa0fd809d2f9132f`; integration base `13e5b1d7aa95bd461f33d4fb0b74e0efbb61fb3b`. Published normal merge `8ea3ea19965d9720cc1f1c8871290c347759e545`, no conflicts or unmerged A/C commits. Local merge `2582092` and repair `5b82175` remain archived. CLI push 401/503 required the authenticated GitHub object/ref tools; identical Git trees were verified before fast-forward publication, no force push. Execution HEAD `09996070d08bfe5bf0035fbf0ae22d6605d4ef45`. Migration **26**, schema/migration delta **0/0**. Final HEAD/CI are recorded in PR and delivery reply, avoiding self-referential commits.
+**Functional acceptance: PASS within the recorded Japan scenarios. Region integration: PASS for automated dispatch and fresh live chains. Production Provider approval: PARTIAL.** PR #41 remains Open/Draft; no production enablement, deployment or merge.
+
+## Current integration
+
+Integration base: **`08621d06980b251ff0941e047819e6aa28ec582f`**. Starting B HEAD: `184c7712e5979d04dc2527bc77e6ca196c244332`. Normal merge `db82c620cb9bfc80dbd7c25991eca48d83001afb` preserves both parents; **no conflicts**. Execution source `dd5be09327644c24c470fb42e7d776fd8eb260da`. Final evidence HEAD and exact final CI are recorded in PR #41/delivery; no self-referential SHA commit.
+
+Main's Region Foundation, Regional Place Search and Mini Map are inherited intact. No Region Policy, ordinary adapter, Place Search, Map composition, Web, Domain or sidecar browser/parser/verification change in this integration. API bootstrap replaces the competing direct Consumer dispatch branch with `createRuntimeRouteProvider`, which composes A's existing `createRegionalProviders` and injects only `japanTransit`.
+
+```text
+API → RegionalRouteProvider({ baiduRoute, googleRoute, japanTransit })
+  MAINLAND_CHINA WALKING/DRIVING → Baidu ordinary
+  JAPAN WALKING/DRIVING        → Google ordinary
+  JAPAN TRANSIT               → Consumer adapter → loopback sidecar
+  GLOBAL_OTHER WALKING/DRIVING → Google ordinary
+```
+
+Japan TRANSIT never falls back to ordinary Google, synthetic or empty routes. Disabled/missing-token slots return `PROVIDER_UNAVAILABLE / ROUTE_PROVIDER_UNCONFIGURED`; transport/upstream failures remain `PROVIDER_UNAVAILABLE`. Missing credentials disable only the slot. Existing ordinary-provider approval gates are unchanged.
+
+Formal configuration is `ROUTE_PROVIDER=regional` (the direct API default), `GOOGLE_CONSUMER_TRANSIT_ENABLED=true`, existing loopback `GOOGLE_CONSUMER_TRANSIT_BASE_URL`, private bearer token and bounded timeout. Disabled by default; development/test only. Staging/production enablement still throws. Legacy `ROUTE_PROVIDER=google_consumer_experimental` remains an explicit dev/test enablement alias **through Region Router**, with no second runtime path. To disable it, switch to regional and set the enabled flag false. The legacy decoder remains compatible for existing tests; runtime selection belongs solely to the composition factory. Explicit synthetic mode remains isolated dev/test acceptance configuration, never a fallback. Explicit `ROUTE_PROVIDER=unconfigured` retains the existing zero-I/O disabled sentinel, preserving unavailable classification even for legacy requests without mode; it is not an alternative dispatch path. Follow-up `2217a02d4d0ca44e74a58fdcbb330c26cebbc269` changes only this disabled case; configured Region/live paths and sidecar verification remain identical to live execution source dd5be09.
+
+## Automated Region and P6C evidence
+
+All fixtures below are **SYNTHETIC**, with no paid/live requests. A's existing policy matrix is retained, not reimplemented:
+
+| Input                      | Only dispatch/result             |
+| -------------------------- | -------------------------------- |
+| Mainland WALKING           | Baidu                            |
+| Mainland DRIVING           | Baidu                            |
+| Japan WALKING              | Google ordinary                  |
+| Japan DRIVING              | Google ordinary                  |
+| Japan TRANSIT              | Japan Transit slot               |
+| Global WALKING             | Google ordinary                  |
+| Global DRIVING             | Google ordinary                  |
+| Japan TRANSIT, slot absent | fail closed / unconfigured       |
+| Cross-region               | UNSUPPORTED_QUERY, zero dispatch |
+| Uncertain/invalid region   | UNSUPPORTED_QUERY, zero dispatch |
+
+`packages/providers/test/runtime-route-provider.test.ts` adds17 runtime wiring/config tests, including ordinary Google configured while Japan is disabled/missing-token/unavailable: no Transit fallback, ordinary walking remains independently callable. Loopback/token/timeout guards, staging/production prohibition and legacy alias dispatch are covered.
+
+The new real-PostgreSQL regression in `apps/api/test/route-query.integration.test.ts` starts from a cancelled adopted Japan rail route. Impact read and READY handoff read produce **0 Query** and no formal mutation. Explicit Controlled Alternative Search carries **TRANSIT** into RegionalRouteProvider's Japan slot and persists candidate evidence only. Fresh Snapshot → Preview → explicit Adopt → Undo passes; only explicit Adopt/Undo change version, original node identities restore, Provider call count stays1, ordinary/Baidu slots stay0. Existing Query travelMode forwarding and P6C service code are unchanged.
+
+## Minimal fresh live Region dispatch
+
+Exactly **2 new operations**, no automatic retry or matrix rerun. Query date **2026-10-06**, timezone **Asia/Tokyo**, time **15:00**. Fresh anonymous contexts, exact request/UI/page/timezone provenance, unchanged service deadline and candidate UTC guards. Both hops use actual loopback HTTP. [Sanitized Region evidence](japan-transit-region-evidence.json) includes every selected leg, requested echo, page evidence, adapter clocks, snapshots, versions and context cleanup.
+
+| Scenario                                         | Mode      | Result                                                                      |
+| ------------------------------------------------ | --------- | --------------------------------------------------------------------------- |
+| Noboribetsu Onsen Hotel Mahoroba → Toya Nonokaze | DEPART_AT | PASS;6 candidates; selected15:12:06→17:26:10                                |
+| Same, independent fresh request                  | ARRIVE_BY | PASS;4 candidates; selected12:30:06→14:48:27, all candidate arrivals ≤15:00 |
+
+Each traverses **RegionalRouteProvider → JAPAN/TRANSIT → japanTransit → sidecar → adapter → RouteQuery → CandidateSnapshot → Preview → explicit Adopt → Undo**. Selected order is WALKING/BUS/WALKING/RAIL/WALKING/BUS/WALKING; preserved bus/rail labels include 登別苫小牧線, Hokuto service and 洞爺湖線. Provider HTTP exactly1 per operation. Query/Preview retain version3 and original plan; Adopt/Undo produce4/5 and restore original2 nodes. Walking clocks stay null, known vehicle schedule times remain PLANNED. Read-only audit:10 snapshots,2 previews,4 explicit operation receipts,0 authoring receipts,0 ExecutionEvents,26 migrations. Both contexts close; browser disconnects.
+
+Original six provenance-verified city PASS, prior mixed/time-shift/fresh ARRIVE_BY evidence and historical directions503 remain unchanged in [historical evidence](japan-transit-v1-evidence.json). New known completed-operation ledger28, conservative upper29 including the historical possibly interrupted operation; this is not28 live PASS. No new503 was observed in these2 operations; this does not erase historical503 or establish long-running reliability. Live requests stopped.
+
+## Current validation and boundaries
+
+Migration total **26**. B Travel API/contract/schema/migration delta **0/0/0/0**. No migration27 or production guard relaxation. The sidecar contract and Travel adapter are unchanged. Canonical midnight, failure hardening, Place Search, P6C-2 and Mini Map are included in full inherited regression suites.
+
+Local frozen install, Prisma generate/validate, format/lint/typecheck/build and Unit **1007** (including sidecar **75**) PASS. PostgreSQL **681** (106 persistence +575 API) PASS, including clean26/populated migration compatibility and the new Region/P6C chain. Local full Chromium initially326/327: one390px entry load timed out with trace `ERR_NETWORK_CHANGED` for static modules during Docker network activity; unchanged focused recheck1/1 PASS. The complete327 Chromium +327 WebKit suite must pass in exact final CI; no skips, timeout change or assertion relaxation. Synthetic browser lifecycle harness and both-mode captured replay PASS (zero live). Compose full acceptance PASS on configured execution source. P5B complete rerun after the disabled-sentinel fix **PASS**:5 users,200 observed requests,0 isolation failures/unexpected5xx/network failures. Initial failure and its fix remain recorded above; no acceptance assertion was changed. Exact final HEAD standard-image CI must complete verify/Compose/P5B successfully, with its SHA/run/results recorded in PR #41 and delivery. Older CI is not final integration evidence.
+
+Local Docker uses a temporary thin Node24.19/bookworm/OpenSSL3 runtime and read-only mounted frozen-installed/built workspace; only pnpm automatic re-install in that read-only mount is disabled. Repository Dockerfile, Compose assertions and final standard-image CI remain intact. Initial setup attempts failed on read-only auto-install and a temporary six-digit fractional UTC fixture; only environment setup was corrected, with the existing UTC fixture guard retained. Only identified own obsolete build cache records were reclaimed; unrelated containers/resources and historical evidence remain.
+
+**F-05/F-06 remain OPEN/PARTIAL:** entitlement, retention/storage/TTL/deletion, attribution, quota/pricing/coverage and production approval. Region wiring does not approve Consumer scraping or ordinary-provider credentials. Production enablement remains prohibited. Visible-calendar-month limit, upstream503/long-running stability, real cross-midnight routes, verified real no-routes/schema-drift/restriction observations, broad rural coverage and operator fare/timetable truth remain OPEN/PARTIAL. No paid provider, billing, account/profile/Cookie, access bypass or production deployment.
+
+## Preserved pre-integration record (through HEAD184c771)
+
+The sections below are historical evidence. Their old Region-injection limitation is superseded only by the current integration evidence above; historical failures and invalid runs remain retained.
 
 ## Audit and existing repair
 

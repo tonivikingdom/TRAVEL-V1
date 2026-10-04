@@ -195,9 +195,14 @@ export type {
   TripAuthoringRequest,
 } from './trips.js';
 export * from './static-backup.js';
+export type {
+  ProviderRegion,
+  RegionalMapCapabilityView,
+} from './regional-providers.js';
 export type { TripImpactView, TripImpactItemView } from './trip-impact.js';
 export type {
   PlaceSearchCandidate,
+  PlaceSearchRequest,
   PlaceSearchResult,
   PlaceSearchResponse,
   PlaceSelectionRequest,

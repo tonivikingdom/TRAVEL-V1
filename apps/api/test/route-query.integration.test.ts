@@ -57,6 +57,10 @@ import {
   type ManagedPrismaClient,
 } from '@travel/persistence';
 import {
+  GoogleOrdinaryRouteProvider,
+  baiduToWgs84,
+  BaiduOrdinaryRouteProvider,
+  RegionalRouteProvider,
   GoogleConsumerExperimentalRouteProvider,
   SyntheticRouteProvider,
   SyntheticGroundTransitProvider,
@@ -10335,6 +10339,223 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     ).toBe(0);
   });
 
+  it('regional route intent reaches Japan Transit slot without ordinary fallback; only snapshots are written', async () => {
+    const trip = await tripWithVisits(userA, [
+      'SYNTHETIC origin',
+      'SYNTHETIC destination',
+    ]);
+    const nodes = trip.days.flatMap((d) => d.nodes),
+      calls: RouteProviderQueryInput[] = [];
+    await app.close();
+    app = buildTestApi(
+      new RegionalRouteProvider({
+        japanTransit: {
+          async queryRoutes(input) {
+            calls.push(input);
+            return providerResult;
+          },
+        },
+        googleRoute: {
+          async queryRoutes() {
+            throw new Error('ordinary fallback forbidden');
+          },
+        },
+      }),
+    );
+    const before = await footprint(managed, trip.id);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/routes/query`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: trip.version,
+        fromNodeId: nodes[0]!.id,
+        toNodeId: nodes[1]!.id,
+        travelMode: 'TRANSIT',
+        hint: {
+          type: 'DEPART_AT',
+          instant: '2030-10-01T10:00:00Z',
+          timeZone: 'Asia/Tokyo',
+        },
+      },
+    });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.travelMode).toBe('TRANSIT');
+    onlyWrites(before, await footprint(managed, trip.id), ['snapshots']);
+    const bad = await app.inject({
+      method: 'POST',
+      url: `/trips/${trip.id}/routes/query`,
+      headers: bearer(userB),
+      payload: {
+        basisVersion: trip.version,
+        fromNodeId: nodes[0]!.id,
+        toNodeId: nodes[1]!.id,
+        travelMode: 'TRANSIT',
+      },
+    });
+    expect(bad.statusCode).toBe(404);
+    expect(calls).toHaveLength(1);
+  });
+  it('regional unconfigured slot and unsupported intent fail with zero planning writes', async () => {
+    const trip = await tripWithVisits(userA, [
+        'SYNTHETIC origin',
+        'SYNTHETIC destination',
+      ]),
+      nodes = trip.days.flatMap((d) => d.nodes);
+    await app.close();
+    app = buildTestApi(new RegionalRouteProvider({}));
+    const before = await footprint(managed, trip.id);
+    for (const [travelMode, status, code] of [
+      ['TRANSIT', 503, 'ROUTE_PROVIDER_UNCONFIGURED'],
+      ['FLIGHT', 400, 'VALIDATION_ERROR'],
+    ] as const) {
+      const r = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/routes/query`,
+        headers: bearer(userA),
+        payload: {
+          basisVersion: trip.version,
+          fromNodeId: nodes[0]!.id,
+          toNodeId: nodes[1]!.id,
+          travelMode,
+          hint: {
+            type: 'DEPART_AT',
+            instant: '2030-10-01T10:00:00Z',
+            timeZone: 'Asia/Tokyo',
+          },
+        },
+      });
+      expect(r.statusCode, r.body).toBe(status);
+      expect(r.json().error.code).toBe(code);
+    }
+    onlyWrites(before, await footprint(managed, trip.id), []);
+  });
+
+  it.each(['google', 'baidu'] as const)(
+    'regional %s HTTP normalization persists through authoritative Query with snapshots-only footprint',
+    async (name) => {
+      let trip = await tripWithVisits(userA, [
+        'SYNTHETIC origin',
+        'SYNTHETIC destination',
+      ]);
+      const nodes = trip.days.flatMap((d) => d.nodes),
+        from =
+          name === 'google' ? nodes[0]!.place! : baiduToWgs84(39.915, 116.404),
+        to =
+          name === 'google' ? nodes[1]!.place! : baiduToWgs84(39.916, 116.405);
+      if (name === 'baidu')
+        for (const [node, point] of [
+          [nodes[0]!, from],
+          [nodes[1]!, to],
+        ] as const)
+          await managed.client.place.update({
+            where: { id: node.place!.id },
+            data: { latitude: point.latitude, longitude: point.longitude },
+          });
+      const zone = name === 'google' ? 'Asia/Tokyo' : 'Asia/Shanghai';
+      for (const [node, pointKind, instant] of [
+        [nodes[0]!, 'DEPARTURE', '2030-10-01T10:00:00Z'],
+        [nodes[1]!, 'ARRIVAL', '2030-10-01T10:30:00Z'],
+      ] as const)
+        trip = await command(userA, trip, {
+          type: 'SET_TIME_INTENT',
+          nodeId: node.id,
+          pointKind,
+          operator: 'EXACT',
+          instant,
+          timeZone: zone,
+          locked: true,
+        });
+      const fetcher = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify(
+              name === 'google'
+                ? {
+                    routes: [
+                      {
+                        duration: '600s',
+                        legs: [
+                          {
+                            startLocation: {
+                              latLng: {
+                                latitude: from.latitude,
+                                longitude: from.longitude,
+                              },
+                            },
+                            endLocation: {
+                              latLng: {
+                                latitude: to.latitude,
+                                longitude: to.longitude,
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  }
+                : {
+                    status: 0,
+                    result: {
+                      origin: { lat: 39.915, lng: 116.404 },
+                      destination: { lat: 39.916, lng: 116.405 },
+                      routes: [{ duration: 600 }],
+                    },
+                  },
+            ),
+          ),
+      );
+      await app.close();
+      app = buildTestApi(
+        new RegionalRouteProvider(
+          name === 'google'
+            ? {
+                googleRoute: new GoogleOrdinaryRouteProvider(
+                  'SYNTHETIC',
+                  fetcher,
+                  () => NOW,
+                ),
+              }
+            : {
+                baiduRoute: new BaiduOrdinaryRouteProvider(
+                  'SYNTHETIC',
+                  fetcher,
+                  () => NOW,
+                ),
+              },
+        ),
+      );
+      const before = await footprint(managed, trip.id);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/routes/query`,
+        headers: bearer(userA),
+        payload: {
+          basisVersion: trip.version,
+          fromNodeId: nodes[0]!.id,
+          toNodeId: nodes[1]!.id,
+          travelMode: 'WALKING',
+          hint: {
+            type: 'DEPART_AT',
+            instant: '2030-10-01T10:00:00Z',
+            timeZone: zone,
+          },
+        },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const result = response.json() as RouteQueryResponse;
+      expect(result.candidates[0]?.provider).toBe(name);
+      expect(result.candidates[0]?.overall.departure.timeZone).toBe(zone);
+      onlyWrites(before, await footprint(managed, trip.id), ['snapshots']);
+      const snapshot =
+        await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+          where: { id: result.candidates[0]!.candidateSnapshotId },
+        });
+      expect(snapshot.provider).toBe(name);
+    },
+  );
   async function tripWithVisits(
     identity: SyntheticIdentity,
     names: readonly string[],

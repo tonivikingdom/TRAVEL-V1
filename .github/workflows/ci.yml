@@ -49,6 +49,8 @@ jobs:
       - run: pnpm build
       - name: Install formal Web browsers
         run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Verify synthetic Google browser lifecycle without live requests
+        run: pnpm exec tsx scripts/google-transit-browser-validation.ts
       - name: Verify formal Web interactions on Chromium and WebKit
         run: pnpm test:web
         env:

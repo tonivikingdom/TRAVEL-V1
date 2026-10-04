@@ -1,0 +1,29 @@
+{
+  "name": "@travel/google-consumer-transit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --import tsx src/main.ts",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:live": "tsx scripts/live-validation.ts",
+    "token": "tsx scripts/generate-token.ts",
+    "test:travel-live": "tsx scripts/travel-live-validation.ts",
+    "test:captured-preview": "tsx scripts/captured-preview-validation.ts"
+  },
+  "dependencies": {
+    "fastify": "5.12.5",
+    "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.5",
+    "@travel/application": "workspace:*",
+    "@travel/contracts": "workspace:*",
+    "@travel/persistence": "workspace:*",
+    "@travel/providers": "workspace:*",
+    "@travel/domain": "workspace:*"
+  }
+}

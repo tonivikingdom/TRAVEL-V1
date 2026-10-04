@@ -1,0 +1,40 @@
+{
+  "contents": "Task instructions and historical references, NOT recovered source code",
+  "files": [
+    {
+      "path": "CODEX_TASK.md",
+      "bytes": 8866,
+      "sha256": "d2eae8bc85331a688752db886a27e933a43b459a6d60f4f2e83edadcf4461cff"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1037,
+      "sha256": "07b065716c8763d68fc8fbd4f114388e08dffa8653a4aa7bc5f84ab3a57cbd4c"
+    },
+    {
+      "path": "REFERENCE_TIMELINE.md",
+      "bytes": 3158,
+      "sha256": "4c82bcf3700b7e225dc405823a056d53765c4110ca3108f1cfa27447b252165c"
+    },
+    {
+      "path": "reference/ARRIVE_BY_DISCOVERY_REPORT.md",
+      "bytes": 46601,
+      "sha256": "26143f244a9c02ebb79696539922686d6c5cd8baa364293204c3437ecede892e"
+    },
+    {
+      "path": "reference/ARRIVE_BY_DISCOVERY_SUMMARY.json",
+      "bytes": 3643,
+      "sha256": "f495ab3aae042976f53c3032f414facb995e14851b8c6663b1d4b3c92078b864"
+    },
+    {
+      "path": "reference/ARRIVE_BY_STRUCTURAL_EVIDENCE.md",
+      "bytes": 20466,
+      "sha256": "5bf399d663633a74a7a20715bf02e6564ba2bfce7198707c918c835f349631d5"
+    },
+    {
+      "path": "reference/HISTORICAL_SIDECAR_README.md",
+      "bytes": 5487,
+      "sha256": "5133fb6c7194dec634517f9c7ba0ad8be15dab4451c72826676606b2c0124dba"
+    }
+  ]
+}

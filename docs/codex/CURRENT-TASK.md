@@ -1,4 +1,4 @@
-# CURRENT TASK — P6C2-01 authorized narrow repair
+# CURRENT TASK — P6C2-01 RESOLVED
 
 Recommendation: GPT-5.6 Sol / High.
 
@@ -32,6 +32,24 @@ Run full final-head validation: frozen install, Prisma generate/validate, format
 
 Keep Draft. Do not merge or deploy. Stop for human review.
 
+
+## P6C2-01 resolution evidence
+
+RESOLVED after the exact repaired execution HEAD passed all CI jobs. The original failing regression remains active and unskipped, with its assertions preserved.
+
+- Repair starting PR HEAD: `71d63fc506e697bf8f851c94eb6056d75c91e942`.
+- Validated repaired execution HEAD: `6c35ebf2682b7fb511bd1a7d09d2d5e2a822eb90`.
+- CI: [37168691198](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37168691198), **completed/success**.
+- verify, Compose verification, P5B acceptance: **all completed/success**.
+- Unit **781**, PostgreSQL **659** (106 persistence + 553 API), Chromium **226**, WebKit **226** in CI and locally. Existing **18** PostgreSQL hardening cases unchanged.
+- Frozen install, Prisma generate/validate, format/lint/typecheck/build, full Unit/PostgreSQL/Chromium/WebKit, Compose and P5B rerun on frozen repaired source and passed. CI clean deploy **26**; local status **26/no pending**. Schema/migration delta **0/0**.
+- Production changes confined to `authoring.ts` and `place-search.ts`: exact local search text/language baseline established before async saved-place loading; existing guard on close/drag/Escape/replacement; cancel clears only search state; expired candidate invalidation preserves the baseline; accepted-write search snapshot retains later edits without changing formal command/accepted snapshots.
+- **21** new browser cases plus strengthened expired-evidence recovery; original failing handle/replacement assertions intact. Refused discard keeps exact values; accepted discard works; note/saved-place/candidate and pending-write protection retained; search edits/cancel remain zero-write.
+- All **3** new SYNTHETIC repair PNGs actually opened. Original blocker images remain historical evidence.
+
+This following documentation-only commit records the successful repaired execution HEAD; it does not change runtime or tests. Its exact final HEAD and a second complete CI must be recorded in [PR #49](https://github.com/tonivikingdom/TRAVEL-V1/pull/49) and succeed before handoff; this file cannot embed its own commit hash. Keep Open / Draft and stop for human review after that verification.
+
+Physical iPhone / iOS Safari / actual soft keyboard remain unverified. No new A replanning UI/API is connected here; its future async Trip/account-switch integration must extend these helpers. Embedded map / Google Transit remain PARTIAL; real Provider/timetable/fare and F-05/F-06 remain open. No Ready, merge, deploy, PR #41 change, or next task.
 
 ## Historical task — PR #46 integrated final acceptance (RESOLVED)
 

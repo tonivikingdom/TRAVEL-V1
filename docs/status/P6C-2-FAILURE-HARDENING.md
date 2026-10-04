@@ -1,4 +1,4 @@
-# P6C-2 Failure / Concurrency / Mobile Hardening — repair verification
+# P6C-2 Failure / Concurrency / Mobile Hardening — P6C2-01 RESOLVED
 
 Recommendation: GPT-5.6 Sol / High; fallback available Sol / High. Runtime switch not claimed; escalate for disputed owner/version/concurrency evidence.
 
@@ -12,7 +12,9 @@ Production changes are confined to `apps/web/src/authoring.ts` and `apps/web/src
 
 Explicit cancel resets search conditions to their initial values, removes search candidate state and invalidates late search results. It preserves unrelated notes and saved-place selection, including their discard protection. Invalidating expired candidate evidence during recovery preserves the search draft baseline. On an accepted authoring write, only the submitted search snapshot is acknowledged; search edits made while the write is pending remain dirty. Search controls stay outside formal command/accepted snapshots, so search-only changes cannot bypass duplicate-submit protection. Owner, base version and idempotency request fields are unchanged.
 
-**Awaiting exact repaired-HEAD CI.** RESOLVED will be recorded only after verify (Chromium/WebKit), Compose verification and P5B acceptance all complete successfully. Keep PR #49 Draft.
+**P6C2-01 RESOLVED** after exact repaired execution HEAD `6c35ebf2682b7fb511bd1a7d09d2d5e2a822eb90` passed [CI 37168691198](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37168691198). verify, Compose verification and P5B acceptance are **completed/success**. CI reports Unit **781**, PostgreSQL **659**, Chromium **226**, WebKit **226**. Keep PR #49 Draft.
+
+This following documentation-only commit records those results. Its exact final HEAD must receive a second complete successful CI before handoff; final documentation HEAD/CI will be recorded in [PR #49](https://github.com/tonivikingdom/TRAVEL-V1/pull/49). Runtime and tests are unchanged from the validated execution HEAD.
 
 ## Harness / invariants matrix
 
@@ -77,10 +79,10 @@ The existing **18** real-PostgreSQL hardening regressions and their full-row foo
 | Chromium                                 | **226 PASS**, including 55 targeted Place Search/hardening cases                     |
 | WebKit                                   | **226 PASS**, including all original and new discard-protection assertions           |
 | Compose                                  | PASS; unchanged full-chain verification script                                       |
-| P5B                                      | Running; exact repaired-HEAD CI also required                                        |
+| P5B                                      | PASS; 5 users / 200 requests, 0 isolation failures                                   |
 | Migration                                | **26**, no pending migration, delta **0**                                            |
 
-Local Compose initially encountered Docker storage exhaustion. Confirmed task-owned disposable test images/cache were removed; the unchanged suite then passed. Cloud-only build adaptation supplies the platform proxy CA with TLS verification enabled and default bridge networking; repository Docker/Compose files and all assertions are unchanged. Exact CI evidence will be recorded only after completion.
+Local Compose initially encountered Docker storage exhaustion. Confirmed task-owned disposable test images/cache were removed; the unchanged suite then passed. Cloud-only build adaptation supplies the platform proxy CA with TLS verification enabled and default bridge networking; repository Docker/Compose files and all assertions are unchanged. The exact repaired execution CI above independently passed the repository scripts without cloud build adaptations.
 
 Physical iPhone / iOS Safari / actual soft keyboard **not verified**. VisualViewport and browser touch/viewport tests are simulations, not hardware acceptance.
 
@@ -104,4 +106,4 @@ Existing product UI only; no visual redesign. The original **10** SYNTHETIC imag
 
 Production **2 Web draft-state files only**; API/application/Domain/Provider/schema/migration **0/0/0/0/0/0**, migration total **26**. No new Query/Preview/Adopt rule, replanning UI, offline capability or backup architecture. Backup remains immutable and separate from Live; Impact remains read-only and does not automatically Query. Existing A/B workflow contracts and PR #41 unchanged.
 
-P6C2-01 repair awaits final CI; no new A replanning UI is connected in this task. A future UI/API must reuse and extend these helpers, including Trip/account-switch cases for its own async requests. Embedded map and Google Transit PARTIAL; real Provider/timetable/fare, F-05/F-06 and physical-device acceptance remain open. Keep PR #49 Draft. No Ready/merge/deploy/next task; stop for human review after final evidence.
+P6C2-01 resolved; final documentation-head CI remains required before handoff; no new A replanning UI is connected in this task. A future UI/API must reuse and extend these helpers, including Trip/account-switch cases for its own async requests. Embedded map and Google Transit PARTIAL; real Provider/timetable/fare, F-05/F-06 and physical-device acceptance remain open. Keep PR #49 Draft. No Ready/merge/deploy/next task; stop for human review after final evidence.

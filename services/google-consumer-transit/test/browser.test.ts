@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { BrowserClient } from '../src/browser.js';
+import { BrowserClient, responseRequestMatches } from '../src/browser.js';
 import { readConfig } from '../src/config.js';
 import { TransitError } from '../src/contract.js';
 import { query } from './fixtures.js';
@@ -11,6 +11,7 @@ const config = readConfig({
 describe('SYNTHETIC browser lifecycle', () => {
   it('classifies a challenge appearing during a failed UI wait and closes the context', async () => {
     const page = {
+      exposeFunction: vi.fn(async () => {}),
       setDefaultTimeout: vi.fn(),
       on: vi.fn(),
       goto: vi.fn(async () => {
@@ -41,6 +42,7 @@ describe('SYNTHETIC browser lifecycle', () => {
     const newContext = vi.fn(async (options) => {
       expect(options).toEqual({ locale: 'en-US', timezoneId: 'Asia/Tokyo' });
       const page = {
+        exposeFunction: vi.fn(async () => {}),
         setDefaultTimeout: vi.fn(),
         on: vi.fn(),
         goto: vi.fn(async () => {
@@ -85,6 +87,7 @@ describe('SYNTHETIC browser lifecycle', () => {
       rejectNavigation = reject;
     });
     const page = {
+      exposeFunction: vi.fn(async () => {}),
       setDefaultTimeout: vi.fn(),
       on: vi.fn(),
       goto: vi.fn(() => {
@@ -127,6 +130,84 @@ describe('SYNTHETIC browser lifecycle', () => {
     await expect(
       client.search(query, new AbortController().signal),
     ).rejects.toThrow('BROWSER_UNAVAILABLE');
+    await client.close();
+  });
+});
+
+describe('SYNTHETIC page-emitted response provenance', () => {
+  const url = (mode: number, clock: number) =>
+    `https://www.google.com/maps/preview/directions?pb=${encodeURIComponent(`!19m3!1e${mode}!2e2!3j${clock}!20m1!1b1`)}`;
+  it('binds the response to exact mode and requested local date/time', () => {
+    const clock = Date.parse(`${query.date}T${query.time}:00Z`) / 1000;
+    expect(responseRequestMatches(url(0, clock), query)).toBe(true);
+    expect(
+      responseRequestMatches(url(1, clock), {
+        ...query,
+        timeMode: 'ARRIVE_BY',
+      }),
+    ).toBe(true);
+    expect(responseRequestMatches(url(1, clock), query)).toBe(false);
+    expect(responseRequestMatches(url(0, clock - 86400), query)).toBe(false);
+    expect(responseRequestMatches(url(0, clock + 3600), query)).toBe(false);
+    expect(responseRequestMatches(url(0, clock * 10), query)).toBe(false);
+  });
+  it('rejects now/missing/unknown structures and foreign endpoints', () => {
+    const clock = Date.parse(`${query.date}T${query.time}:00Z`) / 1000;
+    expect(
+      responseRequestMatches(
+        'https://www.google.com/maps/preview/directions',
+        query,
+      ),
+    ).toBe(false);
+    expect(
+      responseRequestMatches(
+        url(0, clock).replace('www.google.com', 'example.test'),
+        query,
+      ),
+    ).toBe(false);
+    expect(
+      responseRequestMatches(url(0, clock).replace('https:', 'http:'), query),
+    ).toBe(false);
+    expect(
+      responseRequestMatches(url(0, clock).replace('19m3', '19m4'), query),
+    ).toBe(false);
+  });
+});
+
+describe('SYNTHETIC upstream HTTP failure during UI wait', () => {
+  it('preserves a directions 503 as upstream failure, not NO_ROUTES or UI timeout', async () => {
+    let responseHandler: (response: unknown) => void = () => {};
+    const page = {
+      exposeFunction: vi.fn(async () => {}),
+      setDefaultTimeout: vi.fn(),
+      on: (_event: string, handler: typeof responseHandler) => {
+        responseHandler = handler;
+      },
+      goto: async () => {
+        responseHandler({
+          url: () => 'https://www.google.com/maps/preview/directions',
+          status: () => 503,
+        });
+        throw Object.assign(new Error('SYNTHETIC UI wait'), {
+          name: 'TimeoutError',
+        });
+      },
+      url: () => 'https://www.google.com/maps/dir/',
+      locator: () => ({ innerText: async () => 'SYNTHETIC loading' }),
+    } as unknown as Page;
+    const context = {
+      newPage: async () => page,
+      close: vi.fn(async () => {}),
+    } as unknown as BrowserContext;
+    const browser = {
+      newContext: async () => context,
+      close: vi.fn(async () => {}),
+    } as unknown as Browser;
+    const client = new BrowserClient(config, async () => browser);
+    await expect(
+      client.search(query, new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'UPSTREAM_ERROR', stage: 'navigation' });
+    expect(context.close).toHaveBeenCalledTimes(1);
     await client.close();
   });
 });

@@ -1,4 +1,5 @@
 import { chromium, type Page } from 'playwright-core';
+import { wallClock, queryInstant, type Query } from '../src/contract.js';
 import { blockedPage } from '../src/browser.js';
 
 // Read-only instrumentation for this isolated live harness. The service's own
@@ -23,6 +24,10 @@ export interface ContextObservation {
   http403Seen: boolean;
   http429Seen: boolean;
   navigationStatus: number | null;
+  directionsResponseCount: number;
+  directionsResponseStatuses: number[];
+  directionsBodyCount: number;
+  timeTokenEvidence: unknown[];
   contextClosed: boolean;
   observationComplete: boolean;
 }
@@ -45,6 +50,7 @@ async function inspect(page: Page, observation: ContextObservation) {
 
 export function observeLiveBrowser() {
   const observations: ContextObservation[] = [];
+  let expectedQuery: Query | undefined;
   const diagnostics = {
     launchCalls: 0,
     browserDisconnected: false,
@@ -69,6 +75,10 @@ export function observeLiveBrowser() {
         http403Seen: false,
         http429Seen: false,
         navigationStatus: null,
+        directionsResponseCount: 0,
+        directionsResponseStatuses: [],
+        directionsBodyCount: 0,
+        timeTokenEvidence: [],
         contextClosed: false,
         observationComplete: false,
       };
@@ -80,6 +90,47 @@ export function observeLiveBrowser() {
         page.on('response', (response) => {
           const url = new URL(response.url());
           if (!/(^|\.)google\.com$/.test(url.hostname)) return;
+          if (url.pathname === '/maps/preview/directions') {
+            observation.directionsResponseCount++;
+            if (expectedQuery) {
+              const pb = url.searchParams.get('pb') ?? '';
+              const tokens = [...pb.matchAll(/!(\d+)([a-z])([^!]+)/g)];
+              const expected = [
+                wallClock(expectedQuery),
+                queryInstant(expectedQuery) / 1000,
+              ];
+              observation.timeTokenEvidence.push(
+                tokens.flatMap((t, i) =>
+                  expected.includes(Number(t[3]))
+                    ? [
+                        {
+                          field: t[1],
+                          type: t[2],
+                          wallClockMatches: Number(t[3]) === expected[0],
+                          nearbyFields: tokens
+                            .slice(Math.max(0, i - 3), i + 2)
+                            .map((x) => ({
+                              field: x[1],
+                              type: x[2],
+                              enumValue:
+                                x[2] === 'e' && /^\d{1,2}$/.test(x[3]!)
+                                  ? Number(x[3])
+                                  : null,
+                            })),
+                        },
+                      ]
+                    : [],
+                ),
+              );
+            }
+            observation.directionsResponseStatuses.push(response.status());
+            void response
+              .text()
+              .then(() => {
+                observation.directionsBodyCount++;
+              })
+              .catch(() => {});
+          }
           if (response.status() === 403) observation.http403Seen = true;
           if (response.status() === 429) observation.http429Seen = true;
           if (
@@ -111,6 +162,9 @@ export function observeLiveBrowser() {
   };
   return {
     diagnostics,
+    setExpectedQuery: (query: Query) => {
+      expectedQuery = query;
+    },
     restore: () => {
       chromium.launch = originalLaunch;
     },

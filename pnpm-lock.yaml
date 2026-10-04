@@ -177,6 +177,9 @@ importers:
         specifier: 1.63.0
         version: 1.63.0
     devDependencies:
+      '@travel/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@travel/application':
         specifier: workspace:*
         version: link:../../packages/application

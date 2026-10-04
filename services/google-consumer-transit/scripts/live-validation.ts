@@ -1,3 +1,4 @@
+import { observeLiveBrowser } from './live-browser-observer.js';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { GoogleConsumerExperimentalRouteProvider } from '../../../packages/providers/src/google-consumer-transit-route-provider.js';
@@ -19,6 +20,7 @@ const config = readConfig({
   ENABLE_GOOGLE_CONSUMER_TRANSIT: 'true',
   LOCAL_TRANSIT_API_TOKEN: token,
 });
+const observer = observeLiveBrowser();
 const app = buildServer(config);
 const baseUrl = await app.listen({ host: '127.0.0.1', port: 0 });
 const scenarios = [
@@ -33,6 +35,34 @@ const scenarios = [
       label: 'Otaru Station',
       latitude: 43.197305,
       longitude: 140.993625,
+    },
+    time: '10:00',
+  },
+  {
+    id: 'tokyo',
+    origin: {
+      label: 'Tokyo Station query point',
+      latitude: 35.681236,
+      longitude: 139.767125,
+    },
+    destination: {
+      label: 'Shinjuku Station query point',
+      latitude: 35.690921,
+      longitude: 139.700258,
+    },
+    time: '10:00',
+  },
+  {
+    id: 'kansai',
+    origin: {
+      label: 'Osaka Station query point',
+      latitude: 34.702485,
+      longitude: 135.495951,
+    },
+    destination: {
+      label: 'Kyoto Station query point',
+      latitude: 34.985849,
+      longitude: 135.758767,
     },
     time: '10:00',
   },
@@ -56,15 +86,25 @@ let blocked = false;
 let stopped = false;
 let stopReason: string | null = null;
 try {
-  for (const scenario of scenarios) {
-    for (const timeMode of ['DEPART_AT', 'ARRIVE_BY'] as const) {
+  for (const scenario of scenarios.filter(
+    (s) =>
+      !process.env.GOOGLE_TRANSIT_LIVE_SCENARIO ||
+      s.id === process.env.GOOGLE_TRANSIT_LIVE_SCENARIO,
+  )) {
+    for (const timeMode of (['DEPART_AT', 'ARRIVE_BY'] as const).filter(
+      (m) =>
+        !process.env.GOOGLE_TRANSIT_LIVE_MODE ||
+        m === process.env.GOOGLE_TRANSIT_LIVE_MODE,
+    )) {
       if (stopped) break;
       const query = parseQuery({
         ...scenario,
         date,
         timezone: 'Asia/Tokyo',
         timeMode,
+        time: process.env.GOOGLE_TRANSIT_LIVE_TIME ?? scenario.time,
       });
+      observer.setExpectedQuery(query);
       let responseBody: Record<string, unknown> | undefined;
       let calls = 0;
       const provider = new GoogleConsumerExperimentalRouteProvider({
@@ -100,12 +140,14 @@ try {
         latestArrival: timeMode === 'ARRIVE_BY' ? instant : null,
         preference: { type: timeMode, instant, timeZone: query.timezone },
       });
-      const error = responseBody?.error as { code?: string } | undefined;
+      const error = responseBody?.error as
+        { code?: string; stage?: string } | undefined;
       const summary = {
         scenario: scenario.id,
         query: query as Query,
         status: result.status,
         errorCode: error?.code ?? null,
+        errorStage: error?.stage ?? null,
         httpCalls: calls,
         elapsedMs: Date.now() - started,
         fetchedAt: responseBody?.fetchedAt ?? null,
@@ -140,26 +182,21 @@ try {
           mode: timeMode,
           status: result.status,
           errorCode: error?.code ?? null,
+          errorStage: error?.stage ?? null,
         }) + '\n',
       );
-      if (
-        error?.code &&
-        [
-          'UPSTREAM_BLOCKED',
-          'UPSTREAM_TIMEOUT',
-          'BROWSER_UNAVAILABLE',
-        ].includes(error.code)
-      ) {
-        blocked = error.code === 'UPSTREAM_BLOCKED';
+      if (result.status !== 'SUCCESS') {
+        blocked = error?.code === 'UPSTREAM_BLOCKED';
         stopped = true;
-        stopReason = error.code;
+        stopReason = error?.code ?? result.status;
       }
-      // Low-frequency serial validation; no retries. Four target operations maximum.
+      // Low-frequency serial validation; no retries. Eight target operations maximum, two modes across four scenarios.
       if (!stopped) await new Promise((resolve) => setTimeout(resolve, 15000));
     }
   }
 } finally {
   await app.close();
+  observer.restore();
   const directory = new URL(
     '../../../artifacts/google-consumer-transit/',
     import.meta.url,
@@ -171,6 +208,7 @@ try {
       {
         implementation: 'REBUILT_COMPATIBLE_IMPLEMENTATION',
         recordedAt: new Date().toISOString(),
+        diagnostics: observer.diagnostics,
         blocked,
         stopReason,
         summaries,

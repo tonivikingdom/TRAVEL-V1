@@ -43,7 +43,7 @@ GOOGLE_CONSUMER_TRANSIT_TIMEOUT_MS=60000
 
 DEPART_AT 和 ARRIVE_BY 均通过可见 UI 选择，不生成私有 `pb` 请求或手工注入模式 URL。每次新建非持久 BrowserContext，指定 IANA 时区，复用服务自有浏览器进程；操作结束、断开或超时后关闭上下文。第二个请求立即返回 BUSY，不排队。没有缓存、自动重试或后台查询。
 
-捕获页面自行产生的 directions 响应，多份响应分别解析核对。成功必须同时匹配 UI、页面时间状态、响应端点、时区、绝对候选时刻及可见路线标记。`fetchedAt` 来自选中响应的实际捕获时刻。原始 URL、响应、header、Cookie、凭证不记录或保存。
+捕获页面自行产生的 directions 响应，先被动核对精确 mode/date/time 请求来源，多份匹配响应分别解析核对；不构造私有请求。日期状态及响应/DOM 更新驱动有界验证，不使用固定 sleep 等待页面稳定。成功必须同时匹配 UI、页面时间状态、响应端点、时区、绝对候选时刻及可见路线标记。`fetchedAt` 来自选中响应的实际捕获时刻。原始 URL、响应、header、Cookie、凭证不记录或保存。
 
 未知步行时刻、步行坐标及可选线路名保持 null；总时长含等待时间，不把等待错误加到车程上。解析异常、请求不匹配、网络故障不能返回空路线。遇到 CAPTCHA、登录门槛或明确封禁，返回 UPSTREAM_BLOCKED 并结束操作；调用者必须停止追加 live 尝试。
 
@@ -65,9 +65,9 @@ GOOGLE_TRANSIT_LIVE_DATE=2026-10-05 \
 pnpm --filter @travel/google-consumer-transit test:live
 ```
 
-示例日期属于本次验收；后续需要重新选择实际可查询的日期。最多四个串行目标查询，间隔 15 秒；遇到受限即停止。摘要只写入 gitignored `artifacts/google-consumer-transit/`。
+示例日期属于本次验收；后续需要重新选择实际可查询的日期。最多八个串行目标查询，间隔 15 秒；遇到受限即停止。摘要只写入 gitignored `artifacts/google-consumer-transit/`。
 
-完整 Travel 验收必须先 `pnpm build`，使用已应用原有 24 个 migrations 的独立 PostgreSQL 数据库，名字以 `_google_live_test` 结尾且位于回环地址。传入私有 `TEST_DATABASE_URL`，再明确授权隔离测试 Adopt/Undo：
+完整 Travel 验收必须先 `pnpm build`，使用已应用当前 26 个 migrations 的独立 PostgreSQL 数据库，名字以 `_google_live_test` 结尾且位于回环地址。传入私有 `TEST_DATABASE_URL`，再明确授权隔离测试 Adopt/Undo：
 
 ```bash
 GOOGLE_TRANSIT_LIVE_ACK=personal-development \
@@ -85,3 +85,5 @@ pnpm --filter @travel/google-consumer-transit test:travel-live
 不包含 import、NOW／立即出发、LAST_TRANSIT／末班车、生产可用性保证。Google 页面或私有结构变化会失败关闭。验证码、封禁、真实无路线和真实结构变化本批未实际遇到，相应负例只有自动测试证据。
 
 设置 `ENABLE_GOOGLE_CONSUMER_TRANSIT=false` 即停止后续查询；停止新服务进程会关闭其浏览器。API 改回 `ROUTE_PROVIDER=unconfigured` 并按正常方式重启即可回退，不改行程或 schema；生产限制始终保留。原电脑服务不受影响。
+
+当前 Japan V1 状态仍 PARTIAL，见 [最新验收](../../docs/status/V1-JAPAN-TRANSIT.md)。CAPTURED_LIVE_REPLAY 保留原 fetchedAt，Google 调用0，不能冒充 fresh live 全链。

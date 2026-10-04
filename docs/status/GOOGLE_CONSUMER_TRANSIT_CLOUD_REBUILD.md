@@ -1,5 +1,7 @@
 # Google 路线工具云端兼容服务重建验收
 
+**当前续作（2026-10-04）：PARTIAL。** 最新 main 集成、精确请求来源修复及验收见 [V1 Japan Transit](V1-JAPAN-TRANSIT.md)。以下为历史批次，不能替代当前成功/失败证据。
+
 模型建议：Sol／High；备选 Astra；复杂解析或安全边界问题再提高推理强度。实际客户端模型配置无法核验，未声称自动切换。
 
 本批为 **REBUILT_COMPATIBLE_IMPLEMENTATION / PARTIAL**。原电脑源码未取得；这里是新写的兼容服务，不是原样迁移、原源码恢复或继承历史 live PASS。ARRIVE_BY 最终 Travel 全链复验仍未通过：2026-10-03 一次新查询走到 `response-verification`，未取得可验证响应后超时。没有修改生产实现或追加 live 请求。

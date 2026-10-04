@@ -15,6 +15,7 @@ import {
 } from './contract.js';
 import type { Config } from './config.js';
 import { selectResponse, type PageEvidence } from './parser.js';
+import { VerificationUpdates, waitForVerification } from './verification.js';
 
 export function blockedPage(url: string, text: string): boolean {
   const parsed = new URL(url);
@@ -34,6 +35,20 @@ export function pageStateMatches(url: string, query: Query): boolean {
     value.pathname.includes(
       `!6e${query.timeMode === 'DEPART_AT' ? 0 : 1}!7e2!8j${wallClock(query)}!3e3`,
     )
+  );
+}
+// Passive verification of a request emitted by Google's visible UI. This is
+// never a private request builder. Unknown encodings fail closed.
+export function responseRequestMatches(rawUrl: string, query: Query): boolean {
+  const url = new URL(rawUrl);
+  const pb = url.searchParams.get('pb') ?? '';
+  return (
+    url.protocol === 'https:' &&
+    url.hostname === 'www.google.com' &&
+    url.pathname === '/maps/preview/directions' &&
+    new RegExp(
+      `!19m3!1e${query.timeMode === 'DEPART_AT' ? 0 : 1}!2e2!3j${wallClock(query)}(?:!|$)`,
+    ).test(pb)
   );
 }
 async function checkBlocked(page: Page): Promise<void> {
@@ -92,6 +107,7 @@ export class BrowserClient implements TransitClient {
     let context: BrowserContext | undefined;
     let activePage: Page | undefined;
     let restricted = false;
+    let upstreamFailure = false;
     const abort = () => {
       void context?.close().catch(() => {});
     };
@@ -118,7 +134,10 @@ export class BrowserClient implements TransitClient {
       const raws: string[] = [];
       const capturedAt: string[] = [];
       const pending = new Set<Promise<void>>();
-      let generation = 0;
+      const updates = new VerificationUpdates();
+      await page.exposeFunction('transitEvidenceChanged', () =>
+        updates.notify(),
+      );
       let responseFailure = false;
       page.on('response', (response) => {
         const url = new URL(response.url());
@@ -130,18 +149,20 @@ export class BrowserClient implements TransitClient {
           return;
         if (response.status() === 403 || response.status() === 429) {
           restricted = true;
+          updates.notify();
           return;
         }
         if (response.status() !== 200) {
           responseFailure = true;
+          upstreamFailure = true;
           return;
         }
+        if (!responseRequestMatches(response.request().url(), query)) return;
         if (raws.length + pending.size >= 20) {
           responseFailure = true;
           return;
         }
         const task = (async () => {
-          const responseGeneration = generation;
           try {
             const declared = Number(response.headers()['content-length']);
             if (declared > 5_000_000) {
@@ -153,16 +174,17 @@ export class BrowserClient implements TransitClient {
               responseFailure = true;
               return;
             }
-            if (responseGeneration === generation) {
-              raws.push(body);
-              capturedAt.push(new Date().toISOString());
-            }
+            raws.push(body);
+            capturedAt.push(new Date().toISOString());
           } catch {
             responseFailure = true;
           }
         })();
         pending.add(task);
-        void task.finally(() => pending.delete(task));
+        void task.finally(() => {
+          pending.delete(task);
+          updates.notify();
+        });
       });
       const seed = new URL('https://www.google.com/maps/dir/');
       seed.search = new URLSearchParams({
@@ -185,6 +207,18 @@ export class BrowserClient implements TransitClient {
         exact: true,
       });
       if (await consent.isVisible()) await consent.click();
+      await page.evaluate(() => {
+        new MutationObserver(() => {
+          void (
+            window as unknown as { transitEvidenceChanged: () => Promise<void> }
+          ).transitEvidenceChanged();
+        }).observe(document.body, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+        });
+      });
       stage = 'time-mode';
       await page
         .getByRole('button', { name: 'Leave now', exact: true })
@@ -211,21 +245,29 @@ export class BrowserClient implements TransitClient {
       if ((await day.count()) !== 1)
         throw new TransitError('UNSUPPORTED_QUERY');
       await day.click();
-      // Let the date change settle before editing time; Google otherwise can emit a stale time response.
-      await page.waitForTimeout(1200);
+      // Wait for Google's own date state, not elapsed time. Keep every bounded
+      // response: submitting an unchanged time need not generate another one.
+      await page.waitForFunction(
+        ({ mode, date }) => {
+          const path = location.pathname;
+          const stamp = path.match(
+            new RegExp(`!6e${mode}!7e2!8j(\\d+)!3e3`),
+          )?.[1];
+          return (
+            stamp !== undefined &&
+            new Date(Number(stamp) * 1000).toISOString().slice(0, 10) === date
+          );
+        },
+        { mode: query.timeMode === 'DEPART_AT' ? 0 : 1, date: query.date },
+      );
       await checkBlocked(page);
       const [hours, minutes] = query.time.split(':').map(Number);
       const timeLabel = `${hours! % 12 || 12}:${String(minutes).padStart(2, '0')} ${hours! < 12 ? 'AM' : 'PM'}`;
       const input = main.getByRole('textbox');
       stage = 'time-input';
       await input.fill(timeLabel);
-      generation++;
-      raws.length = 0;
-      capturedAt.length = 0;
       await input.press('Enter');
-      await page.waitForTimeout(1800);
       stage = 'response-verification';
-      let lastError: TransitError | undefined;
       const dateLabel = date.toLocaleDateString('en-US', {
         timeZone: 'UTC',
         weekday: 'short',
@@ -233,65 +275,61 @@ export class BrowserClient implements TransitClient {
         day: 'numeric',
       });
       // Collect multiple page-generated responses; do not send or construct private API requests.
-      for (let attempt = 0; attempt < 12; attempt++) {
-        throwAborted();
-        await checkBlocked(page);
-        if (restricted) throw new TransitError('UPSTREAM_BLOCKED');
-        await Promise.all([...pending]);
-        const pageEvidence: PageEvidence = {
-          modeVisible: await main
-            .getByRole('button', { name: modeLabel, exact: true })
-            .isVisible(),
-          dateVisible: (await dateButton.innerText()) === dateLabel,
-          timeVisible:
-            (await input.inputValue()).replace(/\s/gu, '') ===
-            timeLabel.replace(/\s/gu, ''),
-          pageStateMatches: pageStateMatches(page.url(), query),
-          timezoneMatches:
-            (await page.evaluate(
-              () => Intl.DateTimeFormat().resolvedOptions().timeZone,
-            )) === query.timezone,
-          text: await main.innerText(),
-          noRoutesVisible: false,
-        };
-        pageEvidence.noRoutesVisible =
-          /could not calculate transit directions|no transit routes|no routes found|no transit directions/i.test(
-            pageEvidence.text,
-          );
-        if (raws.length) {
-          try {
-            const { parsed, index } = selectResponse(raws, query, pageEvidence);
-            return {
-              status: 'OK',
-              provider: PROVIDER,
-              queryVerified: true,
-              requestedQuery: query,
-              fetchedAt: capturedAt[index]!,
-              candidateCount: parsed.candidates.length,
-              candidates: parsed.candidates,
-              cacheHit: false,
-              evidence: {
-                modeVisible: true,
-                dateVisible: true,
-                timeVisible: true,
-                pageStateMatches: true,
-                timezoneMatches: true,
-                selectedResponseIndex: index,
-                responseCount: raws.length,
-              },
-            };
-          } catch (e) {
-            if (e instanceof TransitError) {
-              if (e.code === 'NO_ROUTES') throw e;
-              lastError = e;
-            } else throw e;
+      return await waitForVerification(
+        updates,
+        async () => {
+          throwAborted();
+          await checkBlocked(page);
+          if (restricted) throw new TransitError('UPSTREAM_BLOCKED');
+          await Promise.all([...pending]);
+          const pageEvidence: PageEvidence = {
+            modeVisible: await main
+              .getByRole('button', { name: modeLabel, exact: true })
+              .isVisible(),
+            dateVisible: (await dateButton.innerText()) === dateLabel,
+            timeVisible:
+              (await input.inputValue()).replace(/\s/gu, '') ===
+              timeLabel.replace(/\s/gu, ''),
+            pageStateMatches: pageStateMatches(page.url(), query),
+            timezoneMatches:
+              (await page.evaluate(
+                () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+              )) === query.timezone,
+            text: await main.innerText(),
+            noRoutesVisible: false,
+          };
+          pageEvidence.noRoutesVisible =
+            /could not calculate transit directions|no transit routes|no routes found|no transit directions/i.test(
+              pageEvidence.text,
+            );
+          if (!raws.length) {
+            if (responseFailure && !pending.size)
+              throw new TransitError('UPSTREAM_ERROR');
+            return undefined;
           }
-        }
-        await page.waitForTimeout(600);
-      }
-      if (lastError) throw lastError;
-      throw new TransitError(
-        responseFailure ? 'UPSTREAM_ERROR' : 'UPSTREAM_TIMEOUT',
+          const { parsed, index } = selectResponse(raws, query, pageEvidence);
+          return {
+            status: 'OK' as const,
+            provider: PROVIDER,
+            queryVerified: true as const,
+            requestedQuery: query,
+            fetchedAt: capturedAt[index]!,
+            candidateCount: parsed.candidates.length,
+            candidates: parsed.candidates,
+            cacheHit: false as const,
+            evidence: {
+              modeVisible: true as const,
+              dateVisible: true as const,
+              timeVisible: true as const,
+              pageStateMatches: true as const,
+              timezoneMatches: true as const,
+              selectedResponseIndex: index,
+              responseCount: raws.length,
+            },
+          };
+        },
+        signal,
+        12000,
       );
     } catch (e) {
       throwAborted();
@@ -311,6 +349,7 @@ export class BrowserClient implements TransitClient {
           if (inspection instanceof TransitError) throw inspection;
         }
       }
+      if (upstreamFailure) throw new TransitError('UPSTREAM_ERROR', stage);
       if (e instanceof TransitError)
         throw new TransitError(e.code, e.stage ?? stage);
       if (e instanceof Error && e.name === 'TimeoutError')

@@ -68,6 +68,29 @@ test.beforeEach(async ({ page }) => {
           )
         : send(trip);
     if (path.endsWith('/schedule/evaluate')) return send(fixtureSchedule(trip));
+    if (path.endsWith('/in-trip'))
+      return send({
+        tripId: trip.id,
+        tripVersion: trip.version,
+        execution: {
+          state: 'NOT_STARTED',
+          currentNodeId: null,
+          targetNodeId: null,
+          recordedAt: null,
+        },
+        flights: [],
+      });
+    if (path.endsWith('/execution/ground-transit'))
+      return send({ tripId: trip.id, tripVersion: trip.version, legs: [] });
+    if (path.endsWith('/impact'))
+      return send({
+        tripId: trip.id,
+        basisVersion: trip.version,
+        evaluatedAt: '2030-10-01T05:00:00Z',
+        items: [],
+        handoffs: [],
+      });
+
     if (path.endsWith('/place-search')) {
       searches++;
       if (coreSearchFails)
@@ -534,4 +557,32 @@ test.describe('SYNTHETIC Place Search with integrated mobile touch hardening', (
       expect(submitted.note).toBe('SYNTHETIC 東京駅の長い住所と保存前の草稿');
     });
   }
+});
+
+test('Today Impact returns to explicit Place Search authoring without consuming its draft', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.locator('[data-trip]').click();
+  await page.locator('[data-view=today]').click();
+  await page.getByRole('button', { name: '查看影响', exact: true }).click();
+  await expect(page.locator('.impact-detail')).toBeVisible();
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByRole('button', { name: '全部日程', exact: true }).click();
+  await page.locator('[data-action=add-arrangement]').click();
+  await page.getByRole('button', { name: '地点', exact: true }).click();
+  await search(page);
+  await page.locator('[data-candidate="1"]').click();
+  await page
+    .locator('textarea[name=note]')
+    .fill('SYNTHETIC Impact 后的搜索草稿');
+  expect(writes).toBe(0);
+  expect(searches).toBe(1);
+  await expect(page.locator('select[name=place]')).toHaveValue(
+    'search:SYNTHETIC-token-1',
+  );
+  await page.locator('#authoring-add button.primary').click();
+  await expect.poll(() => writes).toBe(1);
+  expect(submitted.selectionToken).toBe('SYNTHETIC-token-1');
+  expect(submitted.note).toBe('SYNTHETIC Impact 后的搜索草稿');
 });

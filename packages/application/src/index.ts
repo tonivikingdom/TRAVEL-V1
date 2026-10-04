@@ -229,6 +229,7 @@ export type {
   AuthoringMutationResult,
 } from './trip-ports.js';
 export * from './static-backup-service.js';
+export { TripImpactService } from './trip-impact-service.js';
 export {
   PlaceSearchService,
   type PlaceSearchProvider,

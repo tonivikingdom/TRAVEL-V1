@@ -1254,6 +1254,71 @@ form button {
   white-space: pre-wrap;
 }
 
+/* Impact remains an auxiliary card, never a dashboard or interrupting modal. */
+.trip-impact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #d9e5ef;
+  border-radius: 16px;
+  background: #f6faff;
+  margin: 1rem 0;
+}
+.trip-impact p {
+  margin: 0.4rem 0 0;
+  color: #5b6d7e;
+}
+.trip-impact button {
+  flex-shrink: 0;
+}
+.impact-quiet {
+  background: transparent;
+}
+.impact-attention {
+  border-color: #ead7a5;
+  background: #fffcf3;
+}
+.impact-replan {
+  border-color: #e5bfba;
+  background: #fff8f6;
+}
+.impact-detail {
+  overflow-wrap: anywhere;
+}
+.impact-detail ol {
+  list-style: none;
+  padding: 0;
+}
+.impact-item,
+.handoff {
+  border: 1px solid #dce5ed;
+  border-radius: 14px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.impact-item h4,
+.handoff h4 {
+  margin: 0.4rem 0;
+}
+.impact-location {
+  color: #58738c;
+  font-size: 0.9rem;
+}
+.handoff button {
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .trip-impact {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .trip-impact button {
+    width: 100%;
+  }
+}
+
 .place-search {
   border-bottom: 1px solid #dce7f1;
   padding-bottom: 1rem;

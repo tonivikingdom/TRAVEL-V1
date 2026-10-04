@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  TripImpactService,
+  GroundTransitService,
+  GroundTransitRouteReevaluationService,
   AuthService,
   digestOpaqueToken,
   InTripReadService,
@@ -8,12 +11,17 @@ import {
 } from '@travel/application';
 import {
   createPrismaClient,
+  PrismaGroundTransitRepository,
+  PrismaGroundTransitRouteProgressRepository,
   PrismaAuthRepository,
   PrismaFlightRepository,
   PrismaInTripReadRepository,
   PrismaTripRepository,
 } from '@travel/persistence';
-import { SyntheticFlightProvider } from '@travel/providers';
+import {
+  UnconfiguredGroundTransitProvider,
+  SyntheticFlightProvider,
+} from '@travel/providers';
 import type { InTripView } from '@travel/contracts';
 import { buildApi } from '../src/app.js';
 
@@ -48,6 +56,20 @@ const app = buildApi({
   }),
   tripService,
   inTripReadService: read,
+  tripImpactService: new TripImpactService(
+    new PrismaTripRepository(managed.client),
+    new PrismaGroundTransitRepository(managed.client),
+    new GroundTransitService(
+      new PrismaGroundTransitRepository(managed.client),
+      new UnconfiguredGroundTransitProvider(),
+    ),
+    new GroundTransitRouteReevaluationService(
+      new PrismaTripRepository(managed.client),
+      new PrismaGroundTransitRepository(managed.client),
+      new PrismaGroundTransitRouteProgressRepository(managed.client),
+    ),
+    read,
+  ),
 });
 
 async function identity(role: 'USER' | 'ADMIN' = 'USER') {
@@ -237,6 +259,32 @@ describe('P6B real PostgreSQL and authenticated read API', () => {
       gate: 'SYNTHETIC G8',
     });
     expect(view.flights[0]?.selectedSnapshot).toEqual(snapshot);
+    const impactBefore = await managed.client.trip.findUniqueOrThrow({
+      where: { id: trip.id },
+    });
+    const impactResponse = await app.inject({
+      method: 'GET',
+      url: `/trips/${trip.id}/impact`,
+      headers: { authorization: `Bearer ${owner.credential}` },
+    });
+    expect(impactResponse.statusCode, impactResponse.body).toBe(200);
+    expect(impactResponse.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          transportEdgeId: edge.id,
+          status: 'UNKNOWN',
+          explanation: expect.stringContaining('不表示你本人'),
+        }),
+      ]),
+    );
+    expect(
+      await managed.client.trip.findUniqueOrThrow({ where: { id: trip.id } }),
+    ).toEqual(impactBefore);
+    expect((await read.read(owner.actor, trip.id)).execution).toMatchObject({
+      state: 'NOT_STARTED',
+      recordedAt: null,
+    });
+
     expect(
       await managed.client.executionEvent.count({ where: { tripId: trip.id } }),
     ).toBe(0);

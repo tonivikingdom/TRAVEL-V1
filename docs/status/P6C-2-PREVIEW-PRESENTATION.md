@@ -68,7 +68,21 @@ These limits belong to contract/product decisions for the controller and A. This
 
 ## Verification
 
-Local evidence and the final commit CI are recorded in the Draft PR body. Full verification includes frozen install, Prisma generate/validate, format, lint, typecheck, build, Unit, isolated PostgreSQL migration/integration, Chromium, WebKit, Compose and P5B.
+Integrated frozen runtime validation on execution HEAD **`85f96129250402cd1e4c5bffcc2b2a2115159bdb`**:
+
+| Check                                      | Integrated local result                                                                         |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Frozen install; Prisma generate / validate | PASS                                                                                            |
+| Format / lint / typecheck / build          | PASS                                                                                            |
+| Unit                                       | **804 PASS** (71 files; includes 23 pure presentation cases)                                    |
+| PostgreSQL 17 clean deploy / integration   | **26 migrations; 659 PASS** (106 persistence + 553 API; inherited 18 failure/concurrency cases) |
+| Chromium                                   | **248 PASS**, including C search draft protection and 2 joint chains                            |
+| WebKit                                     | **248 PASS**, same assertions and joint chains                                                  |
+| Compose                                    | PASS; existing full-chain script / all guards retained                                          |
+| P5B                                        | PASS; 5 users / 200 requests; 0 isolation failures, unexpected 5xx or network failures          |
+| API / contract / schema / migration delta  | **0 / 0 / 0 / 0** relative to integration main; migration total **26**                          |
+
+Execution CI: [37172190076](https://github.com/tonivikingdom/TRAVEL-V1/actions/runs/37172190076), bound to the execution SHA above, **completed/success**. **verify / Compose verification / P5B acceptance all completed/success**; CI independently reports Unit **804**, PostgreSQL **659**, Chromium **248**, WebKit **248**, and clean deploy **26**, matching local results. The following documentation/artifact commit must receive a separate complete successful CI before handoff. Exact final documentation HEAD and final CI are recorded in [PR #48](https://github.com/tonivikingdom/TRAVEL-V1/pull/48), because this document cannot embed its own hash. Execution CI alone is not final documentation-head evidence; old B CI `37166950625` is not integrated evidence.
 
 Presentation acceptance covers FULL, SUFFIX, EXTERNAL_ORIGIN, non-adoptable, protected/locked requirements, automatic/manual removals, minimal change, unknown optional labels, expiry, explicit dwell consent, XSS escaping, stale/foreign label context, explicit internal-transfer ordering, long Japanese names, 320/375/390/430, 24px enlarged text and desktop. Formal Web checks preserve explicit Adopt and refusal without dwell consent; the existing full suite exercises route replacement/Undo, authoring/drafts, owner/version regressions and Safari/touch protection.
 
@@ -76,7 +90,9 @@ Local Compose uses an isolated SYNTHETIC project with the environment proxy CA m
 
 ## Visual evidence
 
-All fixtures and screenshots are **SYNTHETIC**. Assets are committed under [assets/p6c-2-preview](assets/p6c-2-preview/). Full originals keep the entire captured UI; contact sheet preserves proportions and includes scope variants, protected block, removals, unknown information, narrow/enlarged layout and desktop.
+All fixtures and screenshots are **SYNTHETIC**. Assets are committed under [assets/p6c-2-preview](assets/p6c-2-preview/). Full originals keep the entire captured UI; contact sheet preserves proportions and includes scope variants, protected block, removals, unknown information, narrow/enlarged layout, the retained search draft after refused Preview entry, and desktop. The 10-panel sheet and all 19 PNG originals were actually opened; the 18 existing projection images were regenerated with the integrated source (their pixels remain unchanged).
+
+[Joint search / Preview guard](assets/p6c-2-preview/mobile-search-preview-guard.png)
 
 [Review contact sheet](assets/p6c-2-preview/review-contact-sheet.jpg)
 

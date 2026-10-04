@@ -544,3 +544,12 @@ export interface UndoRouteAdoptionResponse {
   readonly operationReceipt: OperationReceiptView;
   readonly trip: TripView;
 }
+
+/** Explicit search only; the server revalidates the supplied READY handoff. */
+export interface ControlledAlternativeSearchRequest {
+  readonly handoff: import('./ground-transit.js').GroundTransitRouteReevaluationHandoffView;
+}
+export interface ControlledAlternativeSearchResponse {
+  readonly handoff: import('./ground-transit.js').GroundTransitRouteReevaluationHandoffView;
+  readonly result: RouteQueryResponse | ExternalOriginRouteQueryResponse;
+}

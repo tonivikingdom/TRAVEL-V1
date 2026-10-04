@@ -179,8 +179,8 @@ for (const [name, readiness, basis] of [
     );
     if (readiness === 'READY') {
       await page.getByRole('button', { name: '查看调整方案' }).click();
-      await expect(page.locator('.handoff-entry')).toContainText(
-        '尚未搜索替代班次',
+      await expect(page.locator('.alternative-search')).toContainText(
+        '搜索和查看方案不会改变当前行程',
       );
     } else await expect(page.locator('[data-impact-handoff]')).toHaveCount(0);
     await capture(page, name);

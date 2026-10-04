@@ -700,7 +700,7 @@ form button {
   .sheet-body
   > :not(form):not(.edit):not(#save-status):not(#draft-recovery):not(
     #authoring-recovery
-  ),
+  ):not(#alternative-recovery):not(#adoption-retry),
 [data-unavailable] .edit > :not(form):not(summary) {
   display: none;
 }
@@ -1389,4 +1389,20 @@ dialog {
   .sheet-title h2 {
     font-size: max(18px, 1.2rem);
   }
+}
+
+.alternative-search > button,
+.alternative-changes,
+#alternative-recovery,
+#adoption-retry {
+  margin-block: 0.75rem;
+}
+.alternative-search h3,
+.alternative-changes p {
+  overflow-wrap: anywhere;
+}
+.alternative-changes {
+  padding: 1rem;
+  border-radius: 1rem;
+  background: #f0f6fd;
 }

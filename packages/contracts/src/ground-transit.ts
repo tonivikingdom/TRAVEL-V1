@@ -94,6 +94,8 @@ export interface GroundTransitRefreshResponse {
 }
 
 export interface GroundTransitRouteReevaluationHandoffView {
+  /** Opaque read-basis fingerprint; controlled search refuses changed planning evidence. */
+  readonly planningFactsHash?: string;
   readonly externalOriginStatus?:
     'NOT_AVAILABLE' | 'CONFIRMATION_REQUIRED' | 'CONFIRMED' | 'UNRESOLVED';
   readonly originBasis?:

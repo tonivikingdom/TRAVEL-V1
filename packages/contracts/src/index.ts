@@ -188,3 +188,22 @@ export type {
   ExternalOriginRouteQueryResponse,
   ExternalRouteOriginSnapshot,
 } from './routes.js';
+export type { InTripView } from './in-trip.js';
+
+export type {
+  TripAuthoringCommandInput,
+  TripAuthoringRequest,
+} from './trips.js';
+export * from './static-backup.js';
+export type { TripImpactView, TripImpactItemView } from './trip-impact.js';
+export type {
+  PlaceSearchCandidate,
+  PlaceSearchResult,
+  PlaceSearchResponse,
+  PlaceSelectionRequest,
+} from './place-search.js';
+
+export type {
+  ControlledAlternativeSearchRequest,
+  ControlledAlternativeSearchResponse,
+} from './routes.js';

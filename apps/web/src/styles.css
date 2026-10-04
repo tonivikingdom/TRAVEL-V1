@@ -358,8 +358,12 @@ dialog {
   inset: 0;
   width: min(480px, 100vw);
   max-width: 100%;
-  height: 100dvh;
-  max-height: 100dvh;
+  height: 100vh;
+  height: var(--sheet-viewport-height, 100dvh);
+  max-height: 100vh;
+  max-height: var(--sheet-viewport-height, 100dvh);
+  top: auto;
+  bottom: var(--sheet-viewport-bottom, 0px);
   border: none;
   border-left: 1px solid var(--line);
   padding: 0;
@@ -375,7 +379,9 @@ dialog::backdrop {
   top: 0;
   background: #fff;
   z-index: 1;
-  padding: 20px 24px 12px;
+  padding: max(20px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right)) 12px
+    max(24px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--line);
 }
 .sheet-title {
@@ -396,7 +402,8 @@ dialog::backdrop {
   display: none;
 }
 .sheet-body {
-  padding: 4px 24px max(30px, env(safe-area-inset-bottom));
+  padding: 4px max(24px, env(safe-area-inset-right))
+    max(30px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   overflow-wrap: anywhere;
   min-width: 0;
 }
@@ -625,14 +632,27 @@ form button {
     margin: 0;
     width: 100%;
     height: auto;
-    max-height: calc(100dvh - env(safe-area-inset-top) - 30px);
+    bottom: var(--sheet-viewport-bottom, 0px);
+    max-height: calc(100vh - env(safe-area-inset-top) - 30px);
+    max-height: calc(
+      var(--sheet-viewport-height, 100dvh) - env(safe-area-inset-top) - 30px
+    );
     border-radius: 23px 23px 0 0;
     border: 0;
     overscroll-behavior: contain;
   }
   .sheet-head {
     padding: 10px 20px 12px;
+  }
+  .drag-zone {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 8px 0 13px;
     touch-action: none;
+    /* A handle gesture must not start native text selection/dragging in Safari. */
+    -webkit-user-select: none;
+    user-select: none;
   }
   .handle {
     display: block;
@@ -640,7 +660,11 @@ form button {
     height: 4px;
     border-radius: 4px;
     background: #aabbcf;
-    margin: 0 auto 13px;
+    margin: 0 auto;
+  }
+  .sheet-title button {
+    min-width: 44px;
+    min-height: 44px;
   }
   .sheet-title h2 {
     font-size: 18px;
@@ -674,7 +698,9 @@ form button {
 /* Keep unsaved forms, never present cached schedule/maps as current while offline. */
 [data-unavailable]
   .sheet-body
-  > :not(form):not(.edit):not(#save-status):not(#draft-recovery),
+  > :not(form):not(.edit):not(#save-status):not(#draft-recovery):not(
+    #authoring-recovery
+  ):not(#alternative-recovery):not(#adoption-retry),
 [data-unavailable] .edit > :not(form):not(summary) {
   display: none;
 }
@@ -685,7 +711,8 @@ form button {
   gap: 8px;
 }
 
-#draft-recovery {
+#draft-recovery,
+#authoring-recovery {
   padding: 12px;
   border: 1px solid #9bb6d4;
   border-radius: 12px;
@@ -878,4 +905,497 @@ form button {
   .segment-service {
     font-size: max(16px, 1.07rem);
   }
+}
+
+/* P6B: one task at a time, with the existing itinerary and detail drawer. */
+.view-switch {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px max(16px, env(safe-area-inset-left)) 0;
+}
+.view-switch button[aria-pressed='true'] {
+  background: #eaf1ff;
+  border-color: #b5cef7;
+  color: #1f55be;
+}
+.view-switch button,
+.in-trip button,
+.in-trip a,
+.in-trip summary {
+  min-height: 44px;
+}
+.in-trip {
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 20px max(16px, env(safe-area-inset-right))
+    max(36px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  min-width: 0;
+}
+.today-heading h1 {
+  font-size: 1.55rem;
+  margin: 4px 0;
+}
+.today-heading > p:last-child {
+  margin: 4px 0 16px;
+  color: var(--muted);
+}
+.progress-status {
+  margin: 12px 0 18px;
+  color: #486180;
+  font-size: 0.95rem;
+}
+.progress-status small,
+.in-trip small {
+  font-size: max(12px, 0.87rem);
+}
+.next-step,
+.flight-info {
+  padding: 20px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.next-step > h2 {
+  margin-top: 8px;
+  font-size: 1.3rem;
+}
+.in-trip .times {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 5.5em), 1fr));
+}
+.in-trip .times span {
+  font-size: 0.85rem;
+}
+.in-trip .times strong {
+  font-size: 1.45rem;
+}
+.in-trip .times .time-zone,
+.in-trip .address,
+.in-trip .requirement,
+.read-context,
+.realtime-status {
+  font-size: 0.87rem;
+}
+.action-time {
+  padding: 12px;
+  background: #f3f7fe;
+  border-radius: 12px;
+  font-size: 1.05rem;
+}
+.in-trip .map-links a {
+  flex: 1 1 8em;
+  font-size: 0.95rem;
+  text-align: center;
+}
+.next-step > button,
+.in-trip > button {
+  width: 100%;
+}
+.next-leg {
+  margin: 12px 0;
+}
+.next-leg li {
+  border: 0;
+  padding: 0;
+}
+.transfer-details {
+  margin: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.in-trip summary {
+  padding: 10px 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.following article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.following article p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.following article button {
+  flex-shrink: 0;
+}
+.read-context {
+  color: var(--muted);
+  margin: 20px 0;
+}
+.step-note {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.flight-info {
+  margin: 16px 0;
+}
+.flight-movements {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10em), 1fr));
+  gap: 16px;
+}
+.flight-clock strong {
+  display: block;
+  font-size: 1.35rem;
+}
+@media (max-width: 360px) {
+  .in-trip {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .next-step,
+  .flight-info {
+    padding: 16px;
+  }
+  .following article {
+    flex-wrap: wrap;
+  }
+}
+
+/* Authoring controls retain an independent, visually centered content group. */
+.control-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.authoring-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 18px;
+}
+.date-extension {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.date-extension button,
+.authoring-toolbar button,
+.arrangement-actions button,
+.authoring-types button,
+[data-authoring] button {
+  min-height: 44px;
+  padding: 10px 16px;
+}
+.arrangement-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+}
+.arrangement-actions button {
+  font-size: max(13px, 0.87rem);
+  color: var(--muted);
+}
+.authoring-types {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.authoring-date,
+.temporary-day-note {
+  color: var(--muted);
+  font-size: max(13px, 0.87rem);
+}
+[data-authoring] {
+  min-width: 0;
+}
+[data-authoring] label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+[data-authoring] input,
+[data-authoring] select,
+[data-authoring] textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+/* WebKit native option text can escape the select's own overflow boundary. */
+[data-authoring] label:has(> select[name='place']) {
+  overflow: clip;
+}
+[data-authoring] select[name='place']:focus-visible {
+  outline-offset: -3px;
+}
+[data-authoring] button {
+  width: 100%;
+}
+#authoring-recovery {
+  padding: 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f3f7fe;
+}
+#authoring-recovery button {
+  min-height: 44px;
+}
+@media (max-width: 760px) {
+  .date-extension {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 10px 0 0;
+  }
+  .date-extension button {
+    font-size: max(13px, 0.87rem);
+    padding: 10px 12px;
+  }
+  .authoring-toolbar {
+    justify-content: stretch;
+  }
+  .authoring-toolbar button {
+    width: 100%;
+  }
+  .arrangement-actions button {
+    max-width: 100%;
+  }
+  .trip-list .page-heading {
+    flex-wrap: wrap;
+  }
+}
+
+/* Static insurance entrance stays secondary to Today and authoring. */
+.essentials-entry {
+  max-width: 1280px;
+  margin: 0.4rem auto 0;
+  padding: 0 1rem;
+  text-align: right;
+}
+.essentials-entry button {
+  color: var(--muted);
+  font-size: 0.95rem;
+  background: transparent;
+}
+.essentials {
+  max-width: 780px;
+  margin: auto;
+  padding: 1.25rem max(1rem, env(safe-area-inset-right))
+    calc(2rem + env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  overflow-wrap: anywhere;
+}
+.essentials h1 {
+  font-size: 1.6rem;
+}
+.essentials p,
+.essentials strong,
+.essentials summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.essential-card {
+  background: white;
+  border: 1px solid #dce7f3;
+  border-radius: 16px;
+  padding: 1rem;
+  margin: 0.8rem 0;
+}
+.essential-card strong {
+  font-size: 1.1rem;
+}
+.essential-card p {
+  margin: 0.55rem 0;
+}
+.essential-leg {
+  border-top: 1px solid #e2ebf5;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.essentials details {
+  margin-top: 0.8rem;
+}
+.essentials summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+}
+.backup-label {
+  color: #245e98;
+  font-weight: 700;
+}
+.backup-stamp {
+  font-size: 1.1rem;
+  line-height: 1.8;
+}
+.backup-warning,
+.backup-fallback {
+  background: #edf4fe;
+  padding: 1rem;
+  border-radius: 14px;
+}
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: center;
+}
+.backup-actions button,
+.backup-fallback button {
+  max-width: 100%;
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.backup-fallback {
+  margin-top: 1rem;
+  overflow-wrap: anywhere;
+}
+.essential-note {
+  white-space: pre-wrap;
+}
+
+/* Impact remains an auxiliary card, never a dashboard or interrupting modal. */
+.trip-impact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #d9e5ef;
+  border-radius: 16px;
+  background: #f6faff;
+  margin: 1rem 0;
+}
+.trip-impact p {
+  margin: 0.4rem 0 0;
+  color: #5b6d7e;
+}
+.trip-impact button {
+  flex-shrink: 0;
+}
+.impact-quiet {
+  background: transparent;
+}
+.impact-attention {
+  border-color: #ead7a5;
+  background: #fffcf3;
+}
+.impact-replan {
+  border-color: #e5bfba;
+  background: #fff8f6;
+}
+.impact-detail {
+  overflow-wrap: anywhere;
+}
+.impact-detail ol {
+  list-style: none;
+  padding: 0;
+}
+.impact-item,
+.handoff {
+  border: 1px solid #dce5ed;
+  border-radius: 14px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.impact-item h4,
+.handoff h4 {
+  margin: 0.4rem 0;
+}
+.impact-location {
+  color: #58738c;
+  font-size: 0.9rem;
+}
+.handoff button {
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .trip-impact {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .trip-impact button {
+    width: 100%;
+  }
+}
+
+.place-search {
+  border-bottom: 1px solid #dce7f1;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+}
+.place-search input,
+.place-search select {
+  width: 100%;
+  min-width: 0;
+}
+.place-search button {
+  min-height: 44px;
+  margin-top: 0.5rem;
+}
+.place-candidate {
+  padding: 0.9rem;
+  background: #f3f8fc;
+  border: 1px solid #dce7f1;
+  border-radius: 12px;
+  margin-top: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.place-candidate strong,
+.place-candidate small {
+  display: block;
+}
+.place-candidate button {
+  width: 100%;
+}
+.place-candidate [aria-pressed='true'] {
+  background: #d8ebfb;
+}
+.place-attribution {
+  max-width: 60rem;
+  margin: 1rem auto;
+  padding: 0 1rem max(1rem, env(safe-area-inset-bottom));
+  font-size: 0.8rem;
+  color: #52667a;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* Touch forms avoid Safari focus zoom; text remains scalable. */
+@media (max-width: 760px), (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+  .sheet-body {
+    scroll-margin-bottom: 1rem;
+  }
+}
+
+/* Scale sheet labels and titles with the requested text size. */
+.sheet-title h2 {
+  font-size: max(20px, 1.33rem);
+}
+.sheet-body label {
+  font-size: max(13px, 0.87rem);
+}
+dialog {
+  scroll-padding-top: var(--sheet-head-height, 5rem);
+  scroll-padding-bottom: 1rem;
+}
+@media (max-width: 760px) {
+  .sheet-title h2 {
+    font-size: max(18px, 1.2rem);
+  }
+}
+
+.alternative-search > button,
+#alternative-recovery,
+#adoption-retry {
+  margin-block: 0.75rem;
+}
+.alternative-search h3 {
+  overflow-wrap: anywhere;
 }

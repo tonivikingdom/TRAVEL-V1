@@ -184,3 +184,5 @@ export {
 } from './external-origin-replacement-corridor.js';
 
 export * from './trusted-route-endpoints.js';
+
+export { resolveTripAuthoringImpact } from './trip-authoring-impact.js';

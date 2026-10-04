@@ -11,6 +11,9 @@ coverage
 **/coverage
 packages/persistence/src/generated
 *.tsbuildinfo
+**/*.tsbuildinfo
+test-results
+**/test-results
 infra/compose/data
 infra/compose/worker-heartbeat
 infra/compose/mail-capture

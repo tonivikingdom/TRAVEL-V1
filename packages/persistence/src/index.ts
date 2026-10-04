@@ -27,3 +27,5 @@ export {
 
 export { PrismaExternalExecutionOriginRepository } from './prisma-external-execution-origin-repository.js';
 export { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
+export { PrismaInTripReadRepository } from './prisma-in-trip-read-repository.js';
+export { PrismaStaticBackupRepository } from './prisma-static-backup-repository.js';

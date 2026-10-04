@@ -1,3 +1,4 @@
+import { hashRoutePlanningReadBasis } from './route-snapshot.js';
 import type { GroundTransitRouteReevaluationHandoffView } from '@travel/contracts';
 import {
   resolveExternalOriginRouteQueryAuthorization,
@@ -150,6 +151,21 @@ export class GroundTransitRouteReevaluationService {
             ),
       now: this.now(),
     });
+    const withPlanningBasis = (
+      view: GroundTransitRouteReevaluationHandoffView,
+      external: unknown = null,
+    ): GroundTransitRouteReevaluationHandoffView => ({
+      ...view,
+      planningFactsHash: hashRoutePlanningReadBasis({
+        tripVersion: trip.version,
+        route: route ?? null,
+        corridor: corridor?.replacementTransportEdgeIds ?? null,
+        leg,
+        executionOrigin,
+        executionEvents: trip.routeExecutionEvents ?? [],
+        external,
+      }),
+    });
     if (this.externalOrigins !== undefined && routeCurrent) {
       const external = await this.externalOrigins.get(
         actor,
@@ -194,26 +210,29 @@ export class GroundTransitRouteReevaluationService {
           toNodeId: externalSourceRoute.anchorToNodeId,
         }) === 'AUTHORIZED'
       ) {
-        return {
-          tripId,
-          sourceTransportEdgeId: transportEdgeId,
-          adoptedRouteId: leg.adoptedRouteId,
-          readiness: 'READY',
-          originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
-          query: null,
-          externalQuery: {
-            externalOriginId: externalOrigin.id,
-            basisVersion: trip.version,
-            toNodeId: externalSourceRoute.anchorToNodeId,
-            hint: {
-              type: 'DEPART_AT',
-              instant: this.now().toISOString(),
-              timeZone: externalOrigin.timeZone,
+        return withPlanningBasis(
+          {
+            tripId,
+            sourceTransportEdgeId: transportEdgeId,
+            adoptedRouteId: leg.adoptedRouteId,
+            readiness: 'READY',
+            originBasis: 'CONFIRMED_EXTERNAL_EXECUTION_ORIGIN',
+            query: null,
+            externalQuery: {
+              externalOriginId: externalOrigin.id,
+              basisVersion: trip.version,
+              toNodeId: externalSourceRoute.anchorToNodeId,
+              hint: {
+                type: 'DEPART_AT',
+                instant: this.now().toISOString(),
+                timeZone: externalOrigin.timeZone,
+              },
             },
+            reasonCodes: ['EXTERNAL_EXECUTION_ORIGIN_AVAILABLE'],
+            externalOriginStatus: external.availability,
           },
-          reasonCodes: ['EXTERNAL_EXECUTION_ORIGIN_AVAILABLE'],
-          externalOriginStatus: external.availability,
-        };
+          externalOrigin,
+        );
       }
       if (
         (externalOrigin?.currentness !== 'CURRENT' || matchesRequestedSource) &&
@@ -221,22 +240,25 @@ export class GroundTransitRouteReevaluationService {
           external.currentOrigin?.currentness === 'CURRENT' ||
           external.availability === 'UNRESOLVED')
       ) {
-        return {
-          tripId,
-          sourceTransportEdgeId: transportEdgeId,
-          adoptedRouteId: leg.adoptedRouteId,
-          readiness: 'ORIGIN_UNRESOLVED',
-          originBasis: null,
-          query: null,
-          reasonCodes: [
-            ...external.reasonCodes,
-            'EXTERNAL_ORIGIN_ROUTE_QUERY_UNAVAILABLE',
-          ],
-          externalOriginStatus: external.availability,
-        };
+        return withPlanningBasis(
+          {
+            tripId,
+            sourceTransportEdgeId: transportEdgeId,
+            adoptedRouteId: leg.adoptedRouteId,
+            readiness: 'ORIGIN_UNRESOLVED',
+            originBasis: null,
+            query: null,
+            reasonCodes: [
+              ...external.reasonCodes,
+              'EXTERNAL_ORIGIN_ROUTE_QUERY_UNAVAILABLE',
+            ],
+            externalOriginStatus: external.availability,
+          },
+          externalOrigin,
+        );
       }
     }
-    return {
+    return withPlanningBasis({
       tripId,
       sourceTransportEdgeId: transportEdgeId,
       adoptedRouteId: leg.adoptedRouteId,
@@ -255,7 +277,7 @@ export class GroundTransitRouteReevaluationService {
                 instant: decision.query.hint.instant.toISOString(),
               },
             },
-    };
+    });
   }
 }
 

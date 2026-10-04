@@ -77,8 +77,10 @@ export class ExecutionRiskService {
         ownerUserId: actor.userId,
         tripId,
       });
-      const desiredRisks = evaluateExecutionRisks(
-        toDomainInput(trip, groundTransitLegs?.legs ?? [], this.now()),
+      const desiredRisks = evaluateTripExecutionRisks(
+        trip,
+        groundTransitLegs?.legs ?? [],
+        this.now(),
       ).map(toDesiredRisk);
       const result = await this.riskRepository.reconcile({
         ownerUserId: actor.userId,
@@ -507,4 +509,13 @@ function requireUuid(value: string, field: string): void {
 
 function notFound(): ApplicationError {
   return new ApplicationError('NOT_FOUND', '执行风险不存在。', 404);
+}
+
+/** Same pure evaluation used by reconciliation, without writing risk/notification rows. */
+export function evaluateTripExecutionRisks(
+  trip: TripAggregateRecord,
+  legs: readonly GroundTransitLegRecord[],
+  now: Date,
+) {
+  return evaluateExecutionRisks(toDomainInput(trip, legs, now));
 }

@@ -281,6 +281,7 @@ model User {
   dateOwnerships          DateOwnership[]
   routeCandidateSnapshots RouteCandidateSnapshot[]
   routePreviews           RoutePreview[]
+  authoringReceipts       TripAuthoringReceipt[]
   operationReceipts       OperationReceipt[]
   executionRisks          ExecutionRisk[]
   flightBindings          FlightBinding[]
@@ -464,6 +465,8 @@ model Trip {
   routePreviews           RoutePreview[]
   adoptedRoutes           AdoptedRoute[]
   transportDayProjections TransportDayProjection[]
+  staticBackups          TripStaticBackup[]
+  authoringReceipts       TripAuthoringReceipt[]
   operationReceipts       OperationReceipt[]
   outboxEvents            OutboxEvent[]
   executionRisks          ExecutionRisk[]
@@ -1235,4 +1238,36 @@ model ExternalExecutionOriginReceipt {
 
   @@unique([ownerUserId, idempotencyKey])
   @@index([tripId, occurredAt])
+}
+
+/// Immutable successful authoring response; no route/history/itinerary-node FKs.
+model TripAuthoringReceipt {
+  id                   String   @id @default(uuid()) @db.Uuid
+  ownerUserId          String   @db.Uuid
+  tripId               String   @db.Uuid
+  idempotencyKey       String   @db.VarChar(200)
+  requestHash          String   @db.VarChar(64)
+  baseTripVersion      Int
+  resultingTripVersion Int
+  result               Json     @db.JsonB
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  owner                User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  trip                 Trip     @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([tripId, createdAt])
+}
+
+model TripStaticBackup {
+  id             String   @id @default(uuid()) @db.Uuid
+  ownerUserId    String   @db.Uuid
+  tripId         String   @db.Uuid
+  tripVersion    Int
+  generatedAt    DateTime @default(now()) @db.Timestamptz(3)
+  idempotencyKey String   @db.VarChar(80)
+  artifact       Json     @db.JsonB
+  trip           Trip     @relation(fields: [tripId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade)
+
+  @@unique([ownerUserId, tripId, idempotencyKey])
+  @@index([ownerUserId, tripId, generatedAt(sort: Desc), id(sort: Desc)])
 }

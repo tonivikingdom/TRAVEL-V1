@@ -252,3 +252,10 @@ export function hashExternalRouteCandidateSnapshot(
     )
     .digest('hex');
 }
+
+/** Opaque Handoff read evidence; existing candidate/preview hash formats are unchanged. */
+export function hashRoutePlanningReadBasis(facts: unknown): string {
+  return createHash('sha256')
+    .update(canonicalJson(JSON.parse(JSON.stringify(facts))))
+    .digest('hex');
+}

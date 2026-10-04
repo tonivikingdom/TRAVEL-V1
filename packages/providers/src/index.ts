@@ -35,3 +35,9 @@ export {
   UnconfiguredGroundTransitHubResolver,
   createGroundTransitHubResolver,
 } from './ground-transit-hub-resolver.js';
+export {
+  GeoapifyPlaceSearchProvider,
+  SyntheticPlaceSearchProvider,
+  UnconfiguredPlaceSearchProvider,
+  createPlaceSearchProvider,
+} from './place-search-provider.js';

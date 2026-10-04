@@ -1,4 +1,9 @@
 import {
+  ControlledAlternativeSearchService,
+  TripImpactService,
+  PlaceSearchService,
+  StaticBackupService,
+  InTripReadService,
   AssistanceCapabilityService,
   ApplicationError,
   AuthService,
@@ -18,6 +23,7 @@ import {
   isApplicationError,
 } from '@travel/application';
 import type {
+  GroundTransitRouteReevaluationHandoffView,
   AssistanceAction,
   AssistanceMutationRequest,
   ApiErrorResponse,
@@ -46,6 +52,10 @@ import {
 } from './credential-transport.js';
 
 export interface ApiDependencies {
+  readonly tripImpactService?: TripImpactService;
+  readonly placeSearchService?: PlaceSearchService;
+  readonly staticBackupService?: StaticBackupService;
+  readonly inTripReadService?: InTripReadService;
   readonly readinessProbe: ReadinessProbe;
   readonly authService?: AuthService;
   readonly assistanceCapabilityService?: AssistanceCapabilityService;
@@ -193,6 +203,149 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         request.params.tripId,
         request.params.flightBindingId,
         parseAssistanceMutation(request.body),
+      );
+    },
+  );
+
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/backup',
+    async (request, reply) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      reply.header('Cache-Control', 'private, no-store');
+      if (!dependencies.staticBackupService)
+        throw new ApplicationError(
+          'SERVICE_UNAVAILABLE',
+          '备份服务暂时不可用。',
+          503,
+        );
+      return dependencies.staticBackupService.latest(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+  app.post<{
+    Params: { tripId: string };
+    Body: import('@travel/contracts').GenerateStaticBackupRequest;
+  }>('/trips/:tripId/backup', async (request, reply) => {
+    const authenticated = await authenticate(
+      dependencies,
+      credentialTransport,
+      request,
+    );
+    reply.header('Cache-Control', 'private, no-store');
+    if (!dependencies.staticBackupService)
+      throw new ApplicationError(
+        'SERVICE_UNAVAILABLE',
+        '备份服务暂时不可用。',
+        503,
+      );
+    return dependencies.staticBackupService.generate(
+      authenticated.actor,
+      request.params.tripId,
+      request.body,
+    );
+  });
+
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/place-search',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.placeSearchService)
+        throw new ApplicationError(
+          'PLACE_SEARCH_UNAVAILABLE',
+          '地点搜索暂时不可用，仍可选择已保存地点。',
+          503,
+        );
+      const body = requiredRecord(request.body);
+      return dependencies.placeSearchService.search(
+        authenticated.actor,
+        request.params.tripId,
+        requiredString(body, 'query'),
+        hasOwn(body, 'language') ? requiredString(body, 'language') : 'ja',
+      );
+    },
+  );
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/place-selection',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.placeSearchService)
+        throw new ApplicationError(
+          'PLACE_SEARCH_UNAVAILABLE',
+          '地点搜索暂时不可用，仍可选择已保存地点。',
+          503,
+        );
+      const body = requiredRecord(request.body);
+      return dependencies.placeSearchService.select(
+        authenticated.actor,
+        request.params.tripId,
+        {
+          selectionToken: requiredString(body, 'selectionToken'),
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          targetDay: parseDayOccurrenceTarget(body.targetDay),
+          position: requiredNumber(body, 'position'),
+          ...(hasOwn(body, 'note')
+            ? { note: optionalNullableString(body, 'note') }
+            : {}),
+        },
+      );
+    },
+  );
+
+  // P6B: stored evidence only; no execution trigger or Provider refresh.
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/in-trip',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.inTripReadService)
+        throw new ApplicationError(
+          'SERVICE_UNAVAILABLE',
+          '旅中信息暂时不可用。',
+          503,
+        );
+      return dependencies.inTripReadService.read(
+        authenticated.actor,
+        request.params.tripId,
+      );
+    },
+  );
+
+  app.get<{ Params: { tripId: string } }>(
+    '/trips/:tripId/impact',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      if (!dependencies.tripImpactService)
+        throw new ApplicationError(
+          'SERVICE_UNAVAILABLE',
+          '后续影响暂时无法读取。',
+          503,
+        );
+      return dependencies.tripImpactService.read(
+        authenticated.actor,
+        request.params.tripId,
       );
     },
   );
@@ -421,6 +574,9 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
         name: requiredString(body, 'name'),
         planningAnchorDate: requiredString(body, 'planningAnchorDate'),
         defaultPeopleCount: requiredNumber(body, 'defaultPeopleCount'),
+        ...(hasOwn(body, 'idempotencyKey')
+          ? { idempotencyKey: requiredString(body, 'idempotencyKey') }
+          : {}),
       },
     );
     return reply.code(201).send(trip);
@@ -477,6 +633,47 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
       },
     );
   });
+
+  app.post<{ Params: { id: string } }>(
+    '/trips/:id/authoring',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      const command = requiredRecord(body.command);
+      const parsed =
+        command.type === 'MOVE_NODE'
+          ? {
+              type: 'MOVE_NODE' as const,
+              nodeId: requiredString(command, 'nodeId'),
+              targetDay: parseDayOccurrenceTarget(command.targetDay),
+              position: requiredNumber(command, 'position'),
+            }
+          : parseTripCommand(command);
+      if (
+        parsed.type !== 'ADD_PLACE_VISIT' &&
+        parsed.type !== 'ADD_FREE_ACTION' &&
+        !('targetDay' in parsed && parsed.type === 'MOVE_NODE')
+      )
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '不支持的行程编辑。',
+          400,
+        );
+      return requireTripService(dependencies).executeAuthoring(
+        authenticated.actor,
+        request.params.id,
+        {
+          baseTripVersion: requiredNumber(body, 'baseTripVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          command: parsed,
+        },
+      );
+    },
+  );
 
   app.post<{ Params: { id: string } }>(
     '/trips/:id/commands',
@@ -832,6 +1029,50 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
           ...(hasOwn(body, 'hint') ? { hint: parseRouteHint(body.hint) } : {}),
         },
       );
+    },
+  );
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/alternatives/query',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      if (Object.keys(body).some((key) => key !== 'handoff'))
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '只接受重新规划入口。',
+          400,
+        );
+      const h = requiredRecord(body.handoff);
+      requiredString(h, 'tripId');
+      requiredString(h, 'sourceTransportEdgeId');
+      requiredString(h, 'adoptedRouteId');
+      if (
+        !Array.isArray(h.reasonCodes) ||
+        !h.reasonCodes.every((v) => typeof v === 'string')
+      )
+        throw new ApplicationError('VALIDATION_ERROR', '入口原因无效。', 400);
+      // Parse the existing contracts; no client location metadata or alternate bounds.
+      const query = h.query == null ? null : requiredRecord(h.query);
+      const external =
+        h.externalQuery == null ? null : requiredRecord(h.externalQuery);
+      for (const q of [query, external]) {
+        if (!q) continue;
+        requiredNumber(q, 'basisVersion');
+        requiredString(q, 'toNodeId');
+        if (hasOwn(q, 'hint')) parseRouteHint(q.hint);
+      }
+      if (query) requiredString(query, 'fromNodeId');
+      if (external) requiredString(external, 'externalOriginId');
+      return new ControlledAlternativeSearchService(
+        requireGroundTransitRouteReevaluationService(dependencies),
+        requireRouteQueryService(dependencies),
+      ).search(authenticated.actor, request.params.tripId, {
+        handoff: h as unknown as GroundTransitRouteReevaluationHandoffView,
+      });
     },
   );
   app.post<{ Params: { id: string } }>(

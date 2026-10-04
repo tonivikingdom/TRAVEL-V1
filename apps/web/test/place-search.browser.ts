@@ -419,6 +419,25 @@ test('unknown selection write then expired evidence reads authority and retains 
   await expect(page.locator('#save-status')).not.toContainText(
     '本次提交已保存',
   );
+  // Invalidating only the expired candidate must retain the search draft baseline.
+  await page.locator('[data-authoring-ack]').click();
+  await page.locator('textarea[name=note]').fill('');
+  const query = await page.locator('[data-place-query]').inputValue();
+  expect(query).not.toBe('');
+  let prompts = 0;
+  page.on('dialog', async (dialog) => {
+    prompts++;
+    await dialog.dismiss();
+  });
+  await page.locator('[data-close]').click();
+  expect(prompts).toBe(1);
+  await expect(page.locator('[data-place-query]')).toHaveValue(query);
+  await page.locator('[data-place-cancel]').click();
+  await expect(page.locator('[data-place-query]')).toHaveValue('');
+  await page.locator('[data-close]').click();
+  await expect(page.locator('#detail')).not.toBeVisible();
+  expect(prompts).toBe(1);
+  expect(writes).toBe(2);
 });
 
 test('core failure during search uses existing recovery and preserves draft rather than claiming only Provider failure', async ({

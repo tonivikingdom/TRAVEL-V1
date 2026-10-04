@@ -1,4 +1,5 @@
 import {
+  ControlledAlternativeSearchService,
   TripImpactService,
   PlaceSearchService,
   StaticBackupService,
@@ -22,6 +23,7 @@ import {
   isApplicationError,
 } from '@travel/application';
 import type {
+  GroundTransitRouteReevaluationHandoffView,
   AssistanceAction,
   AssistanceMutationRequest,
   ApiErrorResponse,
@@ -1027,6 +1029,50 @@ export function buildApi(dependencies: ApiDependencies): FastifyInstance {
           ...(hasOwn(body, 'hint') ? { hint: parseRouteHint(body.hint) } : {}),
         },
       );
+    },
+  );
+  app.post<{ Params: { tripId: string } }>(
+    '/trips/:tripId/alternatives/query',
+    async (request) => {
+      const authenticated = await authenticate(
+        dependencies,
+        credentialTransport,
+        request,
+      );
+      const body = requiredRecord(request.body);
+      if (Object.keys(body).some((key) => key !== 'handoff'))
+        throw new ApplicationError(
+          'VALIDATION_ERROR',
+          '只接受重新规划入口。',
+          400,
+        );
+      const h = requiredRecord(body.handoff);
+      requiredString(h, 'tripId');
+      requiredString(h, 'sourceTransportEdgeId');
+      requiredString(h, 'adoptedRouteId');
+      if (
+        !Array.isArray(h.reasonCodes) ||
+        !h.reasonCodes.every((v) => typeof v === 'string')
+      )
+        throw new ApplicationError('VALIDATION_ERROR', '入口原因无效。', 400);
+      // Parse the existing contracts; no client location metadata or alternate bounds.
+      const query = h.query == null ? null : requiredRecord(h.query);
+      const external =
+        h.externalQuery == null ? null : requiredRecord(h.externalQuery);
+      for (const q of [query, external]) {
+        if (!q) continue;
+        requiredNumber(q, 'basisVersion');
+        requiredString(q, 'toNodeId');
+        if (hasOwn(q, 'hint')) parseRouteHint(q.hint);
+      }
+      if (query) requiredString(query, 'fromNodeId');
+      if (external) requiredString(external, 'externalOriginId');
+      return new ControlledAlternativeSearchService(
+        requireGroundTransitRouteReevaluationService(dependencies),
+        requireRouteQueryService(dependencies),
+      ).search(authenticated.actor, request.params.tripId, {
+        handoff: h as unknown as GroundTransitRouteReevaluationHandoffView,
+      });
     },
   );
   app.post<{ Params: { id: string } }>(

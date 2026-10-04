@@ -1,4 +1,7 @@
 import type {
+  AdoptRoutePreviewRequest,
+  ControlledAlternativeSearchResponse,
+  GroundTransitRouteReevaluationHandoffView,
   TripImpactView,
   InTripView,
   GroundTransitExecutionResponse,
@@ -63,6 +66,7 @@ import {
   saveLocalBackup,
 } from './essentials.js';
 import { impactSummary, impactDetails } from './impact.js';
+import { alternativeEntry } from './alternatives.js';
 import { previewPresentation, previewMarkup } from './preview-presentation.js';
 import './styles.css';
 import './preview-presentation.css';
@@ -87,6 +91,11 @@ let epoch = 0;
 let selection:
   | { type: 'place'; nodeId: string }
   | { type: 'route'; from: string; to: string }
+  | {
+      type: 'alternative';
+      handoff: GroundTransitRouteReevaluationHandoffView;
+      invalid: boolean;
+    }
   | null = null;
 let draftDirty = false;
 let currentUserId: string | null = backupOwner();
@@ -286,6 +295,12 @@ const formBaselines = new Map<string, string>();
 let routeCandidates: readonly RouteCandidateView[] = [];
 let preview: RoutePreviewView | null = null;
 let receipt: OperationReceiptView | null = null;
+let pendingAlternativeAdopt: {
+  ownerUserId: string;
+  tripId: string;
+  previewId: string;
+  input: AdoptRoutePreviewRequest;
+} | null = null;
 let mutationKey = crypto.randomUUID();
 let undoKey = crypto.randomUUID();
 let candidatesBasis = -1;
@@ -355,6 +370,7 @@ const drawer = new DetailDrawer(
   () => {
     authoring.reset();
     selection = null;
+    pendingAlternativeAdopt = null;
     preview = null;
     routeCandidates = [];
     draftDirty = false;
@@ -730,7 +746,7 @@ function renderToday() {
     nextTransport.connection.transport?.mode === 'FLIGHT'
       ? nextTransport.connection.transport.id
       : null;
-  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${impactSummary(trip, tripImpact)}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${impactSummary(trip, tripImpact)}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo"><span class="control-content">撤销刚才的路线修改</span></button></div>' : ''}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
 }
 function render() {
   if (materialsOpen && (viewingBackup || trip)) {
@@ -1080,6 +1096,71 @@ function openRoute(from: string, to: string) {
     ),
   );
 }
+function openAlternatives(handoff: GroundTransitRouteReevaluationHandoffView) {
+  const q = handoff.query ?? handoff.externalQuery;
+  if (
+    !trip ||
+    handoff.tripId !== trip.id ||
+    handoff.readiness !== 'READY' ||
+    !q ||
+    q.basisVersion !== trip.version
+  ) {
+    status('重新规划入口已变化，请重新核验影响。');
+    return;
+  }
+  if (detail.open && !drawerClose()) return;
+  selection = { type: 'alternative', handoff, invalid: false };
+  recoveryRequired = false;
+  detailBasis = null;
+  preview = null;
+  routeCandidates = [];
+  candidatesBasis = -1;
+  epoch++;
+  drawer.open(frame('查看调整方案', alternativeEntry(trip, handoff)));
+}
+async function finishAdoption(result: AdoptRoutePreviewResponse) {
+  acceptedWrite = '路线调整已保存到服务器';
+  pendingAlternativeAdopt = null;
+  receipt = result.operationReceipt;
+  undoKey = crypto.randomUUID();
+  draftDirty = false;
+  disableBusy(false);
+  drawer.close();
+  await loadTrip(result.trip.id);
+  notice = '已使用这条路线。';
+  render();
+}
+async function sendAlternativeAdoption() {
+  const pending = pendingAlternativeAdopt;
+  if (!pending || currentUserId !== pending.ownerUserId)
+    throw new Error('请使用原账户核验本次提交，不能接管其他账户的调整。');
+  try {
+    const user = await api.request<UserView>('/me');
+    if (user.id !== pending.ownerUserId)
+      throw new Error('当前账户不匹配，不能重试这次提交。');
+    const result = await api.request<AdoptRoutePreviewResponse>(
+      `/trips/${pending.tripId}/previews/${pending.previewId}/adopt`,
+      pending.input,
+    );
+    await finishAdoption(result);
+  } catch (error) {
+    if (
+      error instanceof WebError &&
+      error.code === 'NETWORK' &&
+      pendingAlternativeAdopt
+    ) {
+      let retry = detail.querySelector('#adoption-retry');
+      if (!retry) {
+        retry = document.createElement('section');
+        retry.id = 'adoption-retry';
+        detail.querySelector('.sheet-body')!.append(retry);
+      }
+      retry.innerHTML =
+        '<p>尚未确认这次采用是否成功。联网后可核验同一次提交，不会重复采用。</p><button data-action="retry-alternative-adopt"><span class="control-content">核验本次采用</span></button>';
+    } else if (!acceptedWrite) pendingAlternativeAdopt = null;
+    throw error;
+  }
+}
 function showCandidates() {
   const target = detail.querySelector('#candidates');
   if (!target) return;
@@ -1100,8 +1181,19 @@ function showCandidates() {
 function showPreview(p: RoutePreviewView) {
   const target = detail.querySelector('#choice');
   if (!target) return;
-  target.innerHTML = `<section class="choice">${previewMarkup(previewPresentation(p, trip))}<details class="preview-details"><summary>查看方案地点与导航</summary><ol class="legs">${p.candidate.legs.map((leg) => legView(leg)).join('')}</ol></details><button class="primary" data-action="adopt" ${p.adoptable ? '' : 'disabled'}>使用这条路线</button></section>`;
+  target.innerHTML = `<section class="choice">${previewMarkup(previewPresentation(p, trip))}<details class="preview-details"><summary>查看方案地点与导航</summary><ol class="legs">${p.candidate.legs.map((leg) => legView(leg)).join('')}</ol></details><button class="primary" data-action="adopt" ${p.adoptable && p.status === 'ACTIVE' ? '' : 'disabled'}><span class="control-content">${selection?.type === 'alternative' ? '采用此调整' : '使用这条路线'}</span></button></section>`;
   target.scrollIntoView({ block: 'start' });
+}
+function showAlternativeRecovery() {
+  if (selection?.type !== 'alternative' || trip || !detail.open) return;
+  let panel = detail.querySelector('#alternative-recovery');
+  if (!panel) {
+    panel = document.createElement('section');
+    panel.id = 'alternative-recovery';
+    detail.querySelector('.sheet-body')!.append(panel);
+  }
+  panel.innerHTML =
+    '<p>当前无法核验行程与起点。旧方案不会作为当前事实显示。</p><button data-action="recheck-impact"><span class="control-content">重新核验影响</span></button>';
 }
 function showRecovery(error?: unknown) {
   if (authoring.active) {
@@ -1175,6 +1267,18 @@ async function act(operation: () => Promise<void>) {
   try {
     await operation();
   } catch (error) {
+    if (
+      selection?.type === 'alternative' &&
+      error instanceof WebError &&
+      (['VERSION_CONFLICT', 'PREVIEW_STALE'].includes(error.code) ||
+        [401, 403, 404].includes(error.status))
+    ) {
+      selection.invalid = true;
+      preview = null;
+      routeCandidates = [];
+      detail.querySelector('#choice')?.replaceChildren();
+      detail.querySelector('#candidates')?.replaceChildren();
+    }
     if (error instanceof WebError && error.status === 401) {
       sessionStorage.removeItem(tokenKey);
       trip = null;
@@ -1197,13 +1301,27 @@ async function act(operation: () => Promise<void>) {
     if (pending?.textContent === '正在查询…')
       pending.textContent = '未取得路线方案，请核对条件后重试。';
     showRecovery(error);
+    showAlternativeRecovery();
     status(
       `${acceptedWrite ? `${acceptedWrite}；后续读取/核对未完成。` : ''}${errorText(error)}`,
     );
-    notice = errorText(error);
+    notice = `${acceptedWrite ? `${acceptedWrite}；后续读取/核对未完成。` : ''}${errorText(error)}`;
     if (!detail.open) render();
   } finally {
     disableBusy(false);
+    if (
+      selection?.type === 'alternative' &&
+      (selection.invalid || pendingAlternativeAdopt)
+    ) {
+      const search = detail.querySelector<HTMLButtonElement>(
+        '[data-action=search-alternatives]',
+      );
+      if (search) search.disabled = true;
+      if (pendingAlternativeAdopt)
+        detail
+          .querySelector<HTMLButtonElement>('[data-action=adopt]')
+          ?.setAttribute('disabled', '');
+    }
     if (materialsOpen) render();
   }
 }
@@ -1398,7 +1516,10 @@ root.addEventListener('click', (event) => {
     openRoute(target.dataset.routeFrom, target.dataset.routeTo!);
   if (target.dataset.action === 'trips') void listTrips();
   if (target.dataset.action === 'reload')
-    void act(() => (trip ? loadTrip(trip.id) : listTrips()));
+    void act(() => {
+      const id = trip?.id ?? (receipt ? requestedTripId : null);
+      return id ? loadTrip(id) : listTrips();
+    });
   if (target.dataset.action === 'logout')
     void act(async () => {
       try {
@@ -1422,6 +1543,7 @@ root.addEventListener('click', (event) => {
         `/trips/${trip!.id}/operations/${receipt!.id}/undo`,
         { baseTripVersion: trip!.version, idempotencyKey: undoKey },
       );
+      acceptedWrite = '路线修改已撤销到服务器';
       receipt = null;
       await loadTrip(result.trip.id);
       notice = '刚才的路线修改已撤销。';
@@ -1464,12 +1586,11 @@ detail.addEventListener('click', (event) => {
     '[data-impact-handoff]',
   );
   if (handoffEntry) {
-    const entry =
-      handoffEntry.parentElement?.querySelector<HTMLElement>('.handoff-entry');
-    if (entry) {
-      entry.hidden = false;
-      handoffEntry.hidden = true;
-    }
+    if (busy || !trip || tripImpact?.basisVersion !== trip.version) return;
+    const handoff = tripImpact.handoffs.find(
+      (h) => h.sourceTransportEdgeId === handoffEntry.dataset.impactHandoff,
+    );
+    if (handoff) openAlternatives(handoff);
     return;
   }
 
@@ -1493,6 +1614,79 @@ detail.addEventListener('click', (event) => {
   }
   if (target.hasAttribute('data-authoring-ack')) {
     authoring.acknowledge();
+    return;
+  }
+  if (
+    target.dataset.action === 'retry-alternative-adopt' &&
+    pendingAlternativeAdopt
+  ) {
+    void act(sendAlternativeAdoption);
+    return;
+  }
+  if (target.dataset.action === 'recheck-impact') {
+    void act(async () => {
+      const id = trip?.id ?? requestedTripId;
+      if (!id) return;
+      viewMode = 'today';
+      await loadTrip(id);
+      disableBusy(false);
+      drawer.close();
+      drawer.open(frame('查看影响', impactDetails(trip!, tripImpact)));
+    });
+    return;
+  }
+  if (
+    target.dataset.action === 'search-alternatives' &&
+    selection?.type === 'alternative'
+  ) {
+    if (selection.invalid || !trip) {
+      status('请先重新核验影响和起点，再搜索。');
+      return;
+    }
+    const context = selection,
+      basis = trip.version,
+      tripId = trip.id;
+    void act(async () => {
+      const request = ++epoch;
+      preview = null;
+      routeCandidates = [];
+      detail.querySelector('#choice')!.innerHTML = '';
+      detail.querySelector('#candidates')!.textContent = '正在查询…';
+      let response: ControlledAlternativeSearchResponse;
+      try {
+        response = await api.request<ControlledAlternativeSearchResponse>(
+          `/trips/${tripId}/alternatives/query`,
+          { handoff: context.handoff },
+        );
+      } catch (error) {
+        if (
+          error instanceof WebError &&
+          ['PROVIDER_UNAVAILABLE', 'ROUTE_PROVIDER_UNCONFIGURED'].includes(
+            error.code,
+          )
+        ) {
+          detail.querySelector('#candidates')!.innerHTML =
+            '<p class="warning">暂时无法搜索替代方案。原行程与已选路线保持不变，可以稍后重试。</p>';
+          throw new WebError(
+            error.status,
+            error.code,
+            '暂时无法搜索替代方案；这不表示没有可用路线。',
+          );
+        }
+        throw error;
+      }
+      if (request !== epoch || selection !== context || trip?.version !== basis)
+        return;
+      if (
+        response.result.tripId !== tripId ||
+        response.result.basisVersion !== basis
+      )
+        throw new WebError(409, 'VERSION_CONFLICT', '搜索版本已变化。');
+      routeCandidates = response.result.candidates;
+      candidatesBasis = basis;
+      showCandidates();
+      status('搜索完成。请选择一个方案查看变化，尚未修改行程。');
+    });
     return;
   }
   if (target.dataset.action === 'recover-draft') void act(recoverDraft);
@@ -1563,12 +1757,17 @@ detail.addEventListener('click', (event) => {
   if (
     target.dataset.candidate !== undefined &&
     trip &&
-    selection?.type === 'route'
+    (selection?.type === 'route' ||
+      (selection?.type === 'alternative' && !selection.invalid))
   )
     void act(async () => {
       const request = ++epoch;
       const candidate = routeCandidates[Number(target.dataset.candidate)]!;
-      if (candidatesBasis !== trip!.version)
+      if (
+        !candidate ||
+        candidatesBasis !== trip!.version ||
+        candidate.queryBasisVersion !== trip!.version
+      )
         throw new Error('行程已变化，请重新搜索。');
       const result = await api.request<RoutePreviewView>(
         `/trips/${trip!.id}/previews`,
@@ -1578,6 +1777,12 @@ detail.addEventListener('click', (event) => {
         },
       );
       if (request !== epoch) return;
+      if (
+        result.tripId !== trip!.id ||
+        result.basisVersion !== trip!.version ||
+        result.candidateSnapshotId !== candidate.candidateSnapshotId
+      )
+        throw new WebError(409, 'PREVIEW_STALE', '方案已变化，请重新核验。');
       preview = result;
       mutationKey = crypto.randomUUID();
       showPreview(result);
@@ -1585,30 +1790,40 @@ detail.addEventListener('click', (event) => {
     });
   if (target.dataset.action === 'adopt' && preview && trip)
     void act(async () => {
+      if (
+        preview!.status !== 'ACTIVE' ||
+        !preview!.adoptable ||
+        preview!.basisVersion !== trip!.version ||
+        (selection?.type === 'alternative' && selection.invalid)
+      )
+        throw new WebError(409, 'PREVIEW_STALE', '方案已变化，请重新核验。');
       const adjustments = preview!.changeSummary.requiredUserAdjustments ?? [];
       if (
         adjustments.length &&
         !detail.querySelector<HTMLInputElement>('#accept-adjustments')?.checked
       )
         throw new Error('请明确同意停留变更，或选择其他路线。');
-      const result = await api.request<AdoptRoutePreviewResponse>(
-        `/trips/${trip!.id}/previews/${preview!.previewId}/adopt`,
-        {
-          baseTripVersion: trip!.version,
-          idempotencyKey: mutationKey,
-          ...(adjustments.length
-            ? { acceptedUserAdjustments: adjustments }
-            : {}),
-        },
-      );
-      draftDirty = false;
-      disableBusy(false);
-      drawer.close();
-      await loadTrip(result.trip.id);
-      receipt = result.operationReceipt;
-      undoKey = crypto.randomUUID();
-      notice = '已使用这条路线。';
-      render();
+      const input: AdoptRoutePreviewRequest = {
+        baseTripVersion: trip!.version,
+        idempotencyKey: mutationKey,
+        ...(adjustments.length ? { acceptedUserAdjustments: adjustments } : {}),
+      };
+      if (selection?.type === 'alternative') {
+        if (!currentUserId) throw new Error('请先核验当前账户。');
+        pendingAlternativeAdopt = {
+          ownerUserId: currentUserId,
+          tripId: trip!.id,
+          previewId: preview!.previewId,
+          input,
+        };
+        await sendAlternativeAdoption();
+      } else {
+        const result = await api.request<AdoptRoutePreviewResponse>(
+          `/trips/${trip!.id}/previews/${preview!.previewId}/adopt`,
+          input,
+        );
+        await finishAdoption(result);
+      }
     });
 });
 detail.addEventListener('change', (event) => {

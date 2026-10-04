@@ -234,3 +234,8 @@ export {
   PlaceSearchService,
   type PlaceSearchProvider,
 } from './place-search-service.js';
+
+export {
+  ControlledAlternativeSearchService,
+  handoffPlanningIdentity,
+} from './controlled-alternative-search-service.js';

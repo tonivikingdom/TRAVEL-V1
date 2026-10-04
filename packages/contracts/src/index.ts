@@ -202,3 +202,8 @@ export type {
   PlaceSearchResponse,
   PlaceSelectionRequest,
 } from './place-search.js';
+
+export type {
+  ControlledAlternativeSearchRequest,
+  ControlledAlternativeSearchResponse,
+} from './routes.js';

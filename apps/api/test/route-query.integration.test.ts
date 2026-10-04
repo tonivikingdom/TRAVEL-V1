@@ -77,6 +77,7 @@ import {
 } from 'vitest';
 
 import { buildApi } from '../src/app.js';
+import { footprint, onlyWrites } from './helpers/replanning-acceptance.js';
 type JsonInput = Parameters<
   ManagedPrismaClient['client']['routePreview']['create']
 >[0]['data']['previewPayload'];
@@ -195,6 +196,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         authConfig(),
       ),
       tripService: new TripService(tripRepository),
+      staticBackupService: new StaticBackupService(
+        new PrismaStaticBackupRepository(managed.client),
+      ),
       routeQueryService: new RouteQueryService(
         tripRepository,
         provider,
@@ -12504,6 +12508,391 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           )
         ).statusCode,
       ).toBe(404);
+  });
+
+  async function controlledFormalState(tripId: string) {
+    const s = await previewFormalState(tripId);
+    const { routeCandidateSnapshots: _snapshots, ...planning } =
+      s.footprint.planning;
+    void _snapshots;
+    return { ...s, footprint: { ...s.footprint, planning } };
+  }
+  async function controlledCancelledFixture() {
+    const f = await adoptedFixedGroundTrip();
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(async (input) => {
+        providerInputs.push(input);
+        await providerHook?.();
+        return providerResult;
+      }),
+      groundSequence(['CANCELLED', 'RECOVERY']),
+    );
+    const base = `/trips/${f.trip.id}/execution/ground-transit/${f.leg.transportEdgeId}`;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `${base}/refresh`,
+          headers: bearer(userA),
+        })
+      ).statusCode,
+    ).toBe(200);
+    const h = await app.inject({
+      method: 'GET',
+      url: `${base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(h.json().readiness).toBe('READY');
+    const owned = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    return {
+      ...f,
+      base,
+      owned,
+      handoff: h.json<GroundTransitRouteReevaluationHandoffView>(),
+    };
+  }
+  function controlledSearch(
+    tripId: string,
+    handoff: GroundTransitRouteReevaluationHandoffView,
+    who = userA,
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: `/trips/${tripId}/alternatives/query`,
+      headers: bearer(who),
+      payload: { handoff },
+    });
+  }
+  it('P6C-2 controlled FULL search writes only evidence, then explicit Preview Adopt replay and Undo', async () => {
+    const f = await controlledCancelledFixture();
+    const formal = await controlledFormalState(f.trip.id);
+    const searched = await controlledSearch(f.trip.id, f.handoff);
+    expect(searched.statusCode, searched.body).toBe(200);
+    const c =
+      searched.json<
+        import('@travel/contracts').ControlledAlternativeSearchResponse
+      >().result.candidates[0]!;
+    expect(c).toBeDefined();
+    // Evidence is excluded deliberately: Query cannot change any formal or execution facts.
+    const afterQuery = await controlledFormalState(f.trip.id);
+    expect(afterQuery).toEqual(formal);
+    const p = await previewFromSnapshot(userA, f.owned, c.candidateSnapshotId);
+    expect(p.changeSummary.routeCorridor?.replacementScope).toBe(
+      'FULL_CORRIDOR',
+    );
+    expect(await controlledFormalState(f.trip.id)).toEqual(formal);
+    const key = randomUUID();
+    const adopted = await adoptSuccessfully(userA, f.owned, p.previewId, key);
+    const replay = await adopt(userA, f.owned, p.previewId, key);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json().operationReceipt.id).toBe(adopted.operationReceipt.id);
+    expect(adopted.trip.version).toBe(f.owned.version + 1);
+    const impact = await app.inject({
+      method: 'GET',
+      url: `/trips/${f.trip.id}/impact`,
+      headers: bearer(userA),
+    });
+    expect(impact.json().basisVersion).toBe(adopted.trip.version);
+    const today = await app.inject({
+      method: 'GET',
+      url: `/trips/${f.trip.id}/in-trip`,
+      headers: bearer(userA),
+    });
+    expect(today.statusCode).toBe(200);
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      randomUUID(),
+    );
+    expect(undone.trip.version).toBe(adopted.trip.version + 1);
+  });
+  it('P6C-2 controlled external search retains E and only explicit Adopt materializes it', async () => {
+    const f = await confirmedExternalQueryFixture();
+    const h = (
+      await app.inject({
+        method: 'GET',
+        url: `${f.base}/route-reevaluation`,
+        headers: bearer(userA),
+      })
+    ).json<GroundTransitRouteReevaluationHandoffView>();
+    expect(h.originBasis).toBe('CONFIRMED_EXTERNAL_EXECUTION_ORIGIN');
+    const formal = await controlledFormalState(f.trip.id);
+    const searched = await controlledSearch(f.trip.id, h);
+    expect(searched.statusCode, searched.body).toBe(200);
+    expect(await controlledFormalState(f.trip.id)).toEqual(formal);
+    const owned = (
+      await app.inject({
+        method: 'GET',
+        url: `/trips/${f.trip.id}`,
+        headers: bearer(userA),
+      })
+    ).json<TripView>();
+    const p = await previewFromSnapshot(
+      userA,
+      owned,
+      searched.json().result.candidates[0].candidateSnapshotId,
+    );
+    expect(p.changeSummary.externalOriginReplacement?.externalOriginId).toBe(
+      f.result.origin.id,
+    );
+    expect(p.adoptable).toBe(true);
+    const adopted = await adoptSuccessfully(
+      userA,
+      owned,
+      p.previewId,
+      randomUUID(),
+    );
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      randomUUID(),
+    );
+    expect(undone.trip.days.flatMap((d) => d.nodes).map((n) => n.id)).toEqual(
+      owned.days.flatMap((d) => d.nodes).map((n) => n.id),
+    );
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `${f.base}/route-reevaluation`,
+          headers: bearer(userA),
+        })
+      ).json(),
+    ).toMatchObject({
+      readiness: 'READY',
+      externalQuery: { basisVersion: undone.trip.version },
+    });
+  });
+  it.each([
+    'version',
+    'recovery',
+    'origin',
+    'foreign',
+    'admin',
+    'provider',
+    'evidence',
+  ] as const)(
+    'P6C-2 controlled search fences %s without formal writes',
+    async (kind) => {
+      const f = await controlledCancelledFixture();
+      if (kind === 'version')
+        await managed.client.trip.update({
+          where: { id: f.trip.id },
+          data: { version: { increment: 1 } },
+        });
+      if (kind === 'recovery') {
+        currentNow = new Date(currentNow.getTime() + 60000);
+        await app.inject({
+          method: 'POST',
+          url: `${f.base}/refresh`,
+          headers: bearer(userA),
+        });
+      }
+      if (kind === 'evidence') {
+        await managed.client.groundTransitLegExecution.update({
+          where: { id: f.leg.id },
+          data: { latestFetchedAt: new Date(currentNow.getTime() + 1000) },
+        });
+        expect(await readVersion(f.trip.id)).toBe(f.owned.version);
+      }
+      if (kind === 'provider')
+        providerResult = {
+          status: 'PROVIDER_UNAVAILABLE',
+          reason: 'UPSTREAM_UNAVAILABLE',
+        };
+      const h =
+        kind === 'origin'
+          ? {
+              ...f.handoff,
+              query: { ...f.handoff.query!, fromNodeId: randomUUID() },
+            }
+          : f.handoff;
+      const before = await controlledFormalState(f.trip.id),
+        calls = providerInputs.length;
+      const response = await controlledSearch(
+        f.trip.id,
+        h,
+        kind === 'foreign' ? userB : kind === 'admin' ? admin : userA,
+      );
+      expect(response.statusCode, response.body).toBe(
+        kind === 'foreign' || kind === 'admin'
+          ? 404
+          : kind === 'provider'
+            ? 503
+            : 409,
+      );
+      expect(await controlledFormalState(f.trip.id)).toEqual(before);
+      expect(providerInputs.length).toBe(calls + (kind === 'provider' ? 1 : 0));
+    },
+  );
+  it('P6C-2 provider-return version race is rejected by existing snapshot fence', async () => {
+    const f = await controlledCancelledFixture();
+    const count = await managed.client.routeCandidateSnapshot.count({
+      where: { tripId: f.trip.id },
+    });
+    providerHook = async () => {
+      await managed.client.trip.update({
+        where: { id: f.trip.id },
+        data: { version: { increment: 1 } },
+      });
+    };
+    const result = await controlledSearch(f.trip.id, f.handoff);
+    expect(result.statusCode, result.body).toBe(409);
+    expect(
+      await managed.client.routeCandidateSnapshot.count({
+        where: { tripId: f.trip.id },
+      }),
+    ).toBe(count);
+  });
+  it('P6C-2 confirmed suffix search retains prefix and authoritative suffix Preview', async () => {
+    const f = await suffixFixture(false, false, false);
+    await app.close();
+    app = buildTestApi(
+      new SyntheticRouteProvider(() => providerResult),
+      groundSequence(['CANCELLED']),
+    );
+    const source = f.suffixEdges.find((e) => e.fromNodeId === f.C.id)!;
+    const base = `/trips/${f.first.trip.id}/execution/ground-transit/${source.id}`;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `${base}/refresh`,
+          headers: bearer(userA),
+        })
+      ).statusCode,
+    ).toBe(200);
+    const owned = (await confirmSourceOrigin(f.first.trip, f.A.id, f.B.id))
+      .trip;
+    const h = (
+      await app.inject({
+        method: 'GET',
+        url: `${base}/route-reevaluation`,
+        headers: bearer(userA),
+      })
+    ).json<GroundTransitRouteReevaluationHandoffView>();
+    expect(h).toMatchObject({
+      readiness: 'READY',
+      originBasis: 'CONFIRMED_EXECUTION_NODE',
+      query: { fromNodeId: f.B.id, toNodeId: f.D.id },
+    });
+    const before = await controlledFormalState(owned.id);
+    const searched = await controlledSearch(owned.id, h);
+    expect(searched.statusCode, searched.body).toBe(200);
+    expect(await controlledFormalState(owned.id)).toEqual(before);
+    const p = await previewFromSnapshot(
+      userA,
+      owned,
+      searched.json().result.candidates[0].candidateSnapshotId,
+    );
+    expect(p.changeSummary.routeCorridor).toMatchObject({
+      replacementScope: 'SUFFIX',
+      preservedPrefixNodeIds: [f.A.id, f.B.id],
+      preservedPrefixTransportEdgeIds: [f.prefix.id],
+    });
+    const adopted = await adoptSuccessfully(
+      userA,
+      owned,
+      p.previewId,
+      randomUUID(),
+    );
+    const undone = await undoSuccessfully(
+      userA,
+      adopted.trip,
+      adopted.operationReceipt.id,
+      randomUUID(),
+    );
+    expect(undone.trip.days.flatMap((d) => d.nodes).map((n) => n.id)).toEqual(
+      owned.days.flatMap((d) => d.nodes).map((n) => n.id),
+    );
+  });
+  it('P6C-2 integrated Impact/adjustment GET, Query and Preview have exact C row footprints', async () => {
+    const f = await controlledCancelledFixture();
+    const before = await footprint(managed, f.trip.id);
+    const providerBefore = providerInputs.length;
+    const impact = await app.inject({
+      method: 'GET',
+      url: `/trips/${f.trip.id}/impact`,
+      headers: bearer(userA),
+    });
+    const handoff = await app.inject({
+      method: 'GET',
+      url: `${f.base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(impact.statusCode).toBe(200);
+    expect(handoff.statusCode).toBe(200);
+    expect(providerInputs.length).toBe(providerBefore);
+    onlyWrites(before, await footprint(managed, f.trip.id));
+    const result = await controlledSearch(f.trip.id, f.handoff);
+    expect(result.statusCode, result.body).toBe(200);
+    const queried = await footprint(managed, f.trip.id);
+    onlyWrites(before, queried, ['snapshots']);
+    const p = await previewFromSnapshot(
+      userA,
+      f.owned,
+      result.json().result.candidates[0].candidateSnapshotId,
+    );
+    const previewed = await footprint(managed, f.trip.id);
+    onlyWrites(queried, previewed, ['previews']);
+    expect(p.adoptable).toBe(true);
+    expect(previewed.previews.length).toBe(queried.previews.length + 1);
+  });
+
+  it('P6C-2 integrated Query failure and stale Preview/Adopt preserve C full-row footprint and Backup', async () => {
+    const f = await controlledCancelledFixture();
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/backup`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: f.owned.version,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    expect(generated.statusCode, generated.body).toBe(200);
+    const goodResult = providerResult;
+    providerResult = {
+      status: 'PROVIDER_UNAVAILABLE',
+      reason: 'UPSTREAM_UNAVAILABLE',
+    };
+    const before = await footprint(managed, f.trip.id);
+    const failed = await controlledSearch(f.trip.id, f.handoff);
+    expect(failed.statusCode, failed.body).toBe(503);
+    onlyWrites(before, await footprint(managed, f.trip.id));
+    providerResult = goodResult;
+    const result = await controlledSearch(f.trip.id, f.handoff);
+    expect(result.statusCode, result.body).toBe(200);
+    const candidateId = result.json().result.candidates[0].candidateSnapshotId;
+    const p = await previewFromSnapshot(userA, f.owned, candidateId);
+    await managed.client.trip.update({
+      where: { id: f.trip.id },
+      data: { version: { increment: 1 } },
+    });
+    const advanced = await footprint(managed, f.trip.id);
+    const stalePreview = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: f.owned.version,
+        candidateSnapshotId: candidateId,
+      },
+    });
+    const staleAdopt = await adopt(userA, f.owned, p.previewId, randomUUID());
+    expect(stalePreview.statusCode).toBe(409);
+    expect(staleAdopt.statusCode).toBe(409);
+    onlyWrites(advanced, await footprint(managed, f.trip.id));
+    expect(advanced.backups).toEqual(before.backups);
   });
 
   async function createPreview(

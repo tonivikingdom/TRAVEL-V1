@@ -528,11 +528,9 @@ async function verifyHandoffReplacement({
     );
   let alternatives;
   try {
-    alternatives = await apiJson(
-      `/trips/${trip.id}/routes/query`,
-      'POST',
-      handoff.query,
-    );
+    alternatives = (
+      await apiJson(`/trips/${trip.id}/alternatives/query`, 'POST', { handoff })
+    ).result;
   } catch (error) {
     throw new Error(`P5E2 explicit handoff route query: ${error.message}`, {
       cause: error,
@@ -577,6 +575,7 @@ async function verifyHandoffReplacement({
     readiness: handoff.readiness,
     routeStates,
     automaticPlanning: false,
+    controlledAlternativeSearch: true,
   };
 }
 

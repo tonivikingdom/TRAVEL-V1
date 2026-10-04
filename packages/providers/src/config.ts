@@ -2,6 +2,7 @@ export type RouteProviderEnvironment =
   'development' | 'test' | 'staging' | 'production';
 
 export type RouteProviderRuntimeConfig =
+  | { readonly provider: 'regional'; readonly synthetic: false }
   | { readonly provider: 'synthetic'; readonly synthetic: true }
   | {
       readonly provider: 'google_consumer_experimental';
@@ -21,6 +22,7 @@ export function readRouteProviderConfig(
 ): RouteProviderRuntimeConfig {
   const appEnvironment = parseEnvironment(environment.APP_ENV);
   const provider = environment.ROUTE_PROVIDER?.trim() || 'unconfigured';
+  if (provider === 'regional') return { provider, synthetic: false };
   if (provider === 'synthetic') {
     if (appEnvironment === 'staging' || appEnvironment === 'production') {
       throw new Error(
@@ -65,7 +67,7 @@ export function readRouteProviderConfig(
     };
   }
   throw new Error(
-    'ROUTE_PROVIDER must be synthetic, google_consumer_experimental, or unconfigured',
+    'ROUTE_PROVIDER must be regional, synthetic, google_consumer_experimental, or unconfigured',
   );
 }
 

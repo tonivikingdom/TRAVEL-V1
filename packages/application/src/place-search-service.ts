@@ -11,6 +11,7 @@ export interface PlaceSearchProvider {
   search(
     query: string,
     language: string,
+    context?: { readonly latitude: number; readonly longitude: number },
   ): Promise<readonly PlaceSearchCandidate[]>;
 }
 const invalid = () =>
@@ -36,8 +37,16 @@ export class PlaceSearchService {
     tripId: string,
     query: string,
     language = 'ja',
+    contextNodeId?: string,
   ): Promise<PlaceSearchResponse> {
-    await this.trips.getTrip(actor, tripId);
+    const trip = await this.trips.getTrip(actor, tripId);
+    const context =
+      contextNodeId === undefined
+        ? undefined
+        : trip.days
+            .flatMap((day) => day.nodes)
+            .find((node) => node.id === contextNodeId)?.place;
+    if (contextNodeId !== undefined && !context) throw invalid();
     if (
       typeof query !== 'string' ||
       !query.trim() ||
@@ -68,7 +77,11 @@ export class PlaceSearchService {
     const expiresAt = new Date(now.getTime() + 86400000).toISOString();
     let candidates: readonly PlaceSearchCandidate[];
     try {
-      candidates = await this.provider.search(query.trim(), language);
+      candidates = await this.provider.search(
+        query.trim(),
+        language,
+        context ?? undefined,
+      );
     } catch {
       throw new ApplicationError(
         'PLACE_SEARCH_UNAVAILABLE',

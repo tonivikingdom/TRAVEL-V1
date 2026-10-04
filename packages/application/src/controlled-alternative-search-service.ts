@@ -42,9 +42,12 @@ export class ControlledAlternativeSearchService {
           actor,
           tripId,
           current.externalQuery.externalOriginId,
-          current.externalQuery,
+          { ...current.externalQuery, travelMode: 'TRANSIT' },
         )
-      : await this.routes.queryRoutes(actor, tripId, current.query!);
+      : await this.routes.queryRoutes(actor, tripId, {
+          ...current.query!,
+          travelMode: 'TRANSIT',
+        });
     const after = await this.reevaluation.getHandoff(
       actor,
       tripId,

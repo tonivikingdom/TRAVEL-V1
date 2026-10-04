@@ -6,6 +6,7 @@ export interface RouteProviderLocationInput {
   readonly name: string;
   readonly latitude: number;
   readonly longitude: number;
+  readonly timeZone?: string;
 }
 
 export type RouteProviderTimePreference =
@@ -17,6 +18,7 @@ export type RouteProviderTimePreference =
     };
 
 export interface RouteProviderQueryInput {
+  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT';
   readonly origin: RouteProviderLocationInput;
   readonly destination: RouteProviderLocationInput;
   readonly earliestDeparture: Date | null;

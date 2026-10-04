@@ -62,7 +62,7 @@ describe('controlled alternative search orchestration', () => {
     expect(s.routes.queryRoutes).toHaveBeenCalledExactlyOnceWith(
       actor,
       'trip',
-      current.query,
+      { ...current.query, travelMode: 'TRANSIT' },
     );
     expect(s.routes.queryExternalOriginRoutes).not.toHaveBeenCalled();
     expect(s.reevaluation.getHandoff).toHaveBeenCalledTimes(2);
@@ -80,7 +80,7 @@ describe('controlled alternative search orchestration', () => {
       actor,
       'trip',
       'E',
-      h.externalQuery,
+      { ...h.externalQuery, travelMode: 'TRANSIT' },
     );
     expect(s.routes.queryRoutes).not.toHaveBeenCalled();
   });

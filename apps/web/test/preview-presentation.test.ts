@@ -243,4 +243,13 @@ it('legacy missing leg indexes uses original candidate order, never appends walk
     'second service',
   ]);
   expect(view.important.join(' ')).toContain('候选原始顺序');
+  const empty = {
+    ...preview,
+    changeSummary: { ...preview.changeSummary, proposedSegments: [] },
+  };
+  expect(previewPresentation(empty).segments.map((s) => s.service)).toEqual([
+    'first service',
+    '步行',
+    'second service',
+  ]);
 });

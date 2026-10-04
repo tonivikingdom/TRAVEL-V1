@@ -200,17 +200,17 @@ export function previewPresentation(
     endpoints: `${transfer.from.name?.trim() || '换乘起点待定'} → ${transfer.to.name?.trim() || '换乘终点待定'}`,
     time: `换乘时长 ${duration(transfer.durationSeconds)}`,
   }));
-  const segments = s.proposedSegments.every(
-    (segment) => segment.legIndex !== undefined,
-  )
-    ? [...orderedSegments, ...internal].sort((a, b) => a.order - b.order)
-    : internal.length
-      ? p.candidate.legs.map((leg) => ({
-          service: leg.serviceLabel?.trim() || modeLabel[leg.mode] || '交通',
-          endpoints: `${leg.from.name?.trim() || '起点待定'} → ${leg.to.name?.trim() || '终点待定'}`,
-          time: `计划 ${time(leg.departure)} → ${time(leg.arrival)}`,
-        }))
-      : orderedSegments;
+  const segments =
+    s.proposedSegments.length > 0 &&
+    s.proposedSegments.every((segment) => segment.legIndex !== undefined)
+      ? [...orderedSegments, ...internal].sort((a, b) => a.order - b.order)
+      : internal.length
+        ? p.candidate.legs.map((leg) => ({
+            service: leg.serviceLabel?.trim() || modeLabel[leg.mode] || '交通',
+            endpoints: `${leg.from.name?.trim() || '起点待定'} → ${leg.to.name?.trim() || '终点待定'}`,
+            time: `计划 ${time(leg.departure)} → ${time(leg.arrival)}`,
+          }))
+        : orderedSegments;
   if (
     internal.length &&
     (!s.proposedSegments.length ||

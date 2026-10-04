@@ -1392,17 +1392,10 @@ dialog {
 }
 
 .alternative-search > button,
-.alternative-changes,
 #alternative-recovery,
 #adoption-retry {
   margin-block: 0.75rem;
 }
-.alternative-search h3,
-.alternative-changes p {
+.alternative-search h3 {
   overflow-wrap: anywhere;
-}
-.alternative-changes {
-  padding: 1rem;
-  border-radius: 1rem;
-  background: #f0f6fd;
 }

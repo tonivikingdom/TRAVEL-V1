@@ -6,6 +6,7 @@ import type {
 } from '@travel/contracts';
 import { fixtureCandidate, fixtureSchedule } from './fixture.js';
 import { inTripFixture } from './in-trip-fixture.js';
+import { dragHandle, noOverflow } from './helpers/replanning-acceptance.js';
 test.use({ viewport: { width: 390, height: 844 }, timezoneId: 'Asia/Tokyo' });
 let f = inTripFixture(),
   calls: string[] = [],
@@ -316,7 +317,7 @@ for (const state of ['NOT_REQUIRED', 'ORIGIN_UNRESOLVED'] as const)
     expect(count('/alternatives/query')).toBe(0);
   });
 for (const [scope, name, text] of [
-  ['FULL_CORRIDOR', 'mobile-preview-full', '替换这段路线'],
+  ['FULL_CORRIDOR', 'mobile-preview-full', '将重新规划这一段路线'],
   ['SUFFIX', 'mobile-preview-suffix', '前面的已确认部分保持不变'],
   ['EXTERNAL_ORIGIN', 'mobile-preview-external', 'SYNTHETIC 已确认临时终点'],
 ] as const)
@@ -340,7 +341,7 @@ for (const [scope, name, text] of [
         query: { ...h.query!, fromNodeId: f.trip.days[0]!.nodes[1]!.id },
       };
     await choose(page);
-    await expect(page.locator('.alternative-changes')).toContainText(text);
+    await expect(page.locator('.preview-presentation')).toContainText(text);
     await shot(page, name);
     await page
       .getByRole('button', { name: '采用此调整' })
@@ -464,6 +465,33 @@ for (const width of [320, 375, 390, 430])
       page.getByRole('button', { name: '采用此调整' }),
     ).toBeVisible();
     if (width === 320 || width === 390) await shot(page, `mobile-${width}`);
+    await page.addStyleTag({ content: ':root { font-size: 24px; }' });
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, 'height', {
+        configurable: true,
+        value: 360,
+      });
+      Object.defineProperty(visualViewport!, 'offsetTop', {
+        configurable: true,
+        value: 30,
+      });
+      visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await noOverflow(page);
+    await page.locator('[data-action=adopt]').scrollIntoViewIfNeeded();
+    await expect(page.locator('[data-action=adopt]')).toBeInViewport();
+    await page.evaluate(() => {
+      delete (visualViewport as unknown as { height?: number }).height;
+      delete (visualViewport as unknown as { offsetTop?: number }).offsetTop;
+      visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await noOverflow(page);
+    await dragHandle(page, 50);
+    await expect(page.locator('#detail')).toBeVisible();
+    await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+    await page.locator('#detail').dispatchEvent('pointercancel');
+    await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
+    expect(count('/adopt')).toBe(0);
   });
 test('enlarged mobile text remains reachable', async ({ page }) => {
   await choose(page);
@@ -545,4 +573,172 @@ test('accepted Adopt with failed reread reports written state and preserves rece
   await page.getByRole('button', { name: '重新载入' }).click();
   await expect(page.locator('.undo')).toBeVisible();
   expect(count('/adopt')).toBe(1);
+});
+
+for (const destination of ['impact', 'adjustment'] as const)
+  test(`P6C2-01 joined ${destination} replacement refuses discard, retains search/note/language and sends zero Query`, async ({
+    page,
+  }) => {
+    await enter(page);
+    const entry = await page
+      .locator('[data-impact-handoff]')
+      .evaluate((e) => e.outerHTML);
+    await page.locator('[data-close]').click();
+    await page.getByRole('button', { name: '全部日程', exact: true }).click();
+    await page.locator('[data-action=add-arrangement]').click();
+    await page.getByRole('button', { name: '地点', exact: true }).click();
+    await page.locator('[data-place-query]').fill('  SYNTHETIC 東京駅 draft  ');
+    await page.locator('[data-place-language]').selectOption('zh');
+    await page
+      .locator('#authoring-add textarea[name=note]')
+      .fill('SYNTHETIC keep note');
+    const before = await page
+      .locator('#authoring-add')
+      .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]);
+    let prompts = 0;
+    page.on('dialog', async (d) => {
+      prompts++;
+      await d.dismiss();
+    });
+    if (destination === 'impact') {
+      await page
+        .locator('[data-view=today]')
+        .evaluate((e: HTMLElement) => e.click());
+    } else {
+      // A retained authoritative entry exercises the same replacement event after another drawer opens.
+      await page
+        .locator('.sheet-body')
+        .evaluate((e, html) => e.insertAdjacentHTML('beforeend', html), entry);
+      await page.locator('[data-impact-handoff]').click();
+    }
+    expect(prompts).toBe(1);
+    await expect(page.locator('[data-place-query]')).toHaveValue(
+      '  SYNTHETIC 東京駅 draft  ',
+    );
+    await expect(page.locator('[data-place-language]')).toHaveValue('zh');
+    expect(
+      await page
+        .locator('#authoring-add')
+        .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]),
+    ).toEqual(before);
+    await expect(page.locator('#save-status')).toContainText(
+      '还有未保存的修改',
+    );
+    await expect(
+      page.locator('.alternative-search, .preview-presentation'),
+    ).toHaveCount(0);
+    expect(count('/alternatives/query')).toBe(0);
+    expect(count('/previews')).toBe(0);
+    expect(count('/adopt')).toBe(0);
+  });
+
+test('A workflow uses only B presentation and its single unchecked dwell consent', async ({
+  page,
+}) => {
+  const adjustment = {
+    intentId: 'SYNTHETIC-intent',
+    nodeId: f.trip.days[0]!.nodes[0]!.id,
+    fromDurationSeconds: 3600,
+    toDurationSeconds: 1800,
+  };
+  p = {
+    ...p,
+    changeSummary: {
+      ...p.changeSummary,
+      requiredUserAdjustments: [adjustment],
+    },
+  };
+  await choose(page);
+  await expect(page.locator('.preview-presentation')).toHaveCount(1);
+  await expect(page.locator('.alternative-changes')).toHaveCount(0);
+  await expect(page.locator('#accept-adjustments')).toHaveCount(1);
+  await expect(page.locator('#accept-adjustments')).not.toBeChecked();
+  await page.getByRole('button', { name: '采用此调整' }).click();
+  await expect(page.locator('#save-status')).toContainText(
+    '请明确同意停留变更',
+  );
+  expect(count('/adopt')).toBe(0);
+  await page.locator('#accept-adjustments').check();
+  const submitted = page.waitForRequest((r) => r.url().endsWith('/adopt'));
+  await page.getByRole('button', { name: '采用此调整' }).click();
+  expect((await submitted).postDataJSON().acceptedUserAdjustments).toEqual([
+    adjustment,
+  ]);
+  await expect(page.locator('.undo')).toBeVisible();
+  expect(count('/adopt')).toBe(1);
+});
+
+for (const exit of ['button', 'escape', 'drag'] as const)
+  test(`integrated Preview ${exit} closes without Adopt`, async ({ page }) => {
+    await choose(page);
+    await page
+      .locator('.preview-presentation .preview-details > summary')
+      .click();
+    if (exit === 'button') await page.locator('[data-close]').click();
+    else if (exit === 'escape') await page.keyboard.press('Escape');
+    else {
+      const { dragHandle } = await import('./helpers/replanning-acceptance.js');
+      await dragHandle(page);
+    }
+    await expect(page.locator('#detail')).not.toBeVisible();
+    expect(count('/adopt')).toBe(0);
+  });
+
+test('pending A Query blocks close/Trip switch/logout; 401 discards late candidates', async ({
+  page,
+}) => {
+  await open(page);
+  hold = '/alternatives/query';
+  await page.route('**/api/trips/*/alternatives/query', async (route) => {
+    calls.push('POST /alternatives/query');
+    await new Promise<void>((r) => {
+      release = r;
+    });
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }),
+    });
+  });
+  await page.getByRole('button', { name: '搜索替代方案' }).click();
+  await expect.poll(() => !!release).toBe(true);
+  await expect(page.locator('[data-close]')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await page
+    .locator('[data-action=trips]')
+    .evaluate((e: HTMLElement) => e.click());
+  await page
+    .locator('[data-action=logout]')
+    .evaluate((e: HTMLElement) => e.click());
+  expect(count('/auth/logout')).toBe(0);
+  await expect(page.locator('#detail')).toBeVisible();
+  release!();
+  await expect(page.locator('#save-status')).toContainText('登录已失效');
+  await expect(page.locator('.candidate, [data-action=adopt]')).toHaveCount(0);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('travel.web.session')),
+  ).toBeNull();
+});
+
+test('lost Adopt response cannot be replayed by a switched owner', async ({
+  page,
+}) => {
+  await choose(page);
+  let attempts = 0;
+  await page.route('**/api/trips/*/previews/*/adopt', async (route) => {
+    attempts++;
+    await route.abort('failed');
+  });
+  await page.getByRole('button', { name: '采用此调整' }).click();
+  await expect(page.locator('#adoption-retry')).toBeVisible();
+  await page.route('**/api/me', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ id: 'SYNTHETIC-other-owner' }),
+    }),
+  );
+  await page.getByRole('button', { name: '核验本次采用' }).click();
+  await expect(page.locator('#save-status')).toContainText('当前账户不匹配');
+  expect(attempts).toBe(1);
+  expect(f.trip.version).toBe(1);
 });

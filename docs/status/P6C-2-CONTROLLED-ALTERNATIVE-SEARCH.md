@@ -4,6 +4,25 @@ Starting main: `0e5a94c7bd4f64c4e94f208053074c4ddcdbb22f`. Branch: `feat/p6c-2-c
 
 Recommended configuration: GPT-5.6 Sol / High. The execution interface cannot independently verify a model subconfiguration or a switch. Escalation would be reserved for a concrete timeline/transaction conflict; no schema redesign was needed.
 
+## Final A/B/C integration
+
+Integration base: **`c56aca32e9ba4feca514cd356cad709c4b9b46c8`**, fetched and matched before work. Both branch histories are retained by an ordinary merge; no rebase, force push or whole-file ours/theirs resolution. Only conflicted file: `apps/web/src/main.ts` (imports and `showPreview`). Each block preserves the two responsibilities below.
+
+- **A workflow:** READY Handoff authority, explicit alternatives search, explicit candidate/Preview, ACTIVE + adoptable gating, dwell consent, exact-key Adopt recovery, projection reload and Undo.
+- **B presentation:** unchanged `previewPresentation(preview, trip)` → `previewMarkup(view)` is the **only** formal Preview explanation layer, for ordinary route selection and controlled alternatives. `alternativeChanges()` and its unused CSS are removed. Navigation remains a separate expandable section; A's Adopt button stays outside B's renderer. The single `#accept-adjustments` is supplied by B, starts unchecked, and A sends existing acceptedUserAdjustments only after explicit consent.
+- **C hardening / P6C2-01:** authoring/place-search draft fixes, all 18 PostgreSQL failure/concurrency cases, original browser assertions and historical RESOLVED CURRENT-TASK are inherited unchanged. Joined regressions refuse Impact/adjustment drawer replacement while retaining exact search text, language and note with zero Query/Preview/Adopt. Pending-write search edits, pre-load baseline, cancel semantics, drag and recovery remain covered by C's unchanged suites.
+
+Eight added A/B/C browser cases plus strengthened 320/375/390/430 checks cover the joined draft guard, one dwell checkbox, Preview close/Escape/drag without Adopt, pending Query navigation/logout blocking and 401 response, and refusal to replay lost Adopt under a different owner. Two new real PostgreSQL tests reuse C's full-row footprint comparator on A's controlled endpoint: zero-write reads, snapshots-only Query, previews-only Preview, provider failure and stale Preview/Adopt preserving all formal rows and the saved static Backup. Existing A FULL/SUFFIX/external Adopt/Undo chains and C concurrency/fault-injection tests remain active.
+
+No new product capability, production service/contract change, schema or migration is introduced by this integration. Relative to main, the earlier A thin endpoint/contract remains the P6C-2 delta described below. Canonical midnight helper and all 13 guards are unchanged.
+
+### Contract limits still BLOCKED
+
+- Complete before/after schedule delta and whole-day comparison are not supplied by the existing Preview contract. B shows authoritative proposed plan/downstream evidence and explains the absent comparison.
+- Finer blocking reasons without supplied evidence cannot be inferred. B uses existing statuses/protection reasons and explicitly reports unknown evidence.
+
+No API expansion or second schedule/replacement engine was added to close these limits.
+
 ## Implementation matrix
 
 | Category                    | Existing authority                                                                                                                                                                                       | Delivery                                                                                                   |
@@ -22,7 +41,7 @@ Only “搜索替代方案” calls `POST /trips/:tripId/alternatives/query`, wi
 
 The additive Handoff `planningFactsHash` fingerprints current route/leg facts and accepted execution-origin evidence. It is read evidence, not a new authorization state machine or persisted token. Canonicalization preserves Date instants and ignores object property order. An observation change can invalidate an old handoff even without a Trip.version change. Only the advancing server DEPART_AT-now instant is excluded from identity comparison; the query uses the freshly revalidated server handoff, retains ARRIVE_BY identity, and delegates all bounds/timezone validation, ranking and locked snapshot authorization to the existing Query service. Revalidation after Provider return prevents changed authorization from returning usable alternatives. Existing lock-level version/external-origin guards remain intact; query evidence is disposable and does not mutate the formal Trip.
 
-Candidates remain unselected until the user clicks one. Only that choice requests a formal Preview. Replacement information is rendered directly from `changeSummary`; Web computes no replacement set. The Preview explains the current route segment, preserved prefix, suffix-only change, or start at the confirmed external location, removed generated arrangements where supplied, destination retention, fare and downstream/user dwell adjustments. Extra costs remain unknown when the Provider does not supply fare. No gap transport or execution fact is synthesized by the UI.
+Candidates remain unselected until the user clicks one. Only that choice requests a formal Preview. Replacement information is rendered only through B's shared presentation from `changeSummary`; Web computes no replacement set. The Preview explains the current route segment, preserved prefix, suffix-only change or confirmed external start, important/protected removals, supplied proposed times, transfer order and downstream/user dwell adjustments. Candidate cards and the original proposal retain supplied fare; no invented price comparison is shown. Extra costs remain unknown when the Provider does not supply fare. No gap transport or execution fact is synthesized by the UI.
 
 Only `status = ACTIVE`, `adoptable = true`, matching version and explicit “采用此调整” dispatch the existing Adopt service. Protected dwell changes require their existing explicit acceptance. Successful Adopt retains its receipt before fresh reads; Impact and Today/Next are reread. The existing light Undo action rereads those projections again after success. Its execution/audit guards remain unchanged; a changed state is described neutrally, never as proof that the user started execution.
 
@@ -51,19 +70,21 @@ All acceptance data is **SYNTHETIC**, using isolated local/test PostgreSQL and l
 
 Local validation uses the current implementation, not P6C-1 branch CI. Final-head independent GitHub CI is linked in the Draft PR, including measured Chromium/WebKit totals.
 
-| Check                                                                    | Actual result                                                                                                                      |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Frozen install, Prisma generate/validate, format, lint, typecheck, build | PASS                                                                                                                               |
-| Unit                                                                     | 798 PASS (17 new orchestration/read-basis regressions)                                                                             |
-| PostgreSQL 17                                                            | 652 PASS: 106 persistence + 546 API; 11 new controlled-search cases                                                                |
-| Chromium                                                                 | 213 PASS, including 25 controlled alternatives browser cases                                                                       |
-| Real Chromium → HTTP → PostgreSQL                                        | PASS; zero entry query/formal planning writes, Adopt/Undo each +1, original IDs restored                                           |
-| Migration                                                                | Clean Prisma deploy of all 26 PASS; existing populated/history/anchor/FK regression suite PASS; schema/migration delta 0/0         |
-| Compose                                                                  | PASS, including explicit controlled Handoff search and existing suffix/external chains, Worker, outage/recovery and object storage |
-| P5B                                                                      | PASS: 5 users, 200 requests, zero isolation failures/unexpected 5xx/network failures                                               |
-| Independent final-head WebKit/Chromium/Compose/P5B                       | See final run and results in this PR; no old-head result substitutes for these checks                                              |
+| Check                                                                    | Actual result                                                                                                                                              |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen install, Prisma generate/validate, format, lint, typecheck, build | PASS                                                                                                                                                       |
+| Unit                                                                     | 821 PASS (inherited B cases + 17 A orchestration/read-basis regressions)                                                                                   |
+| PostgreSQL 17                                                            | 672 PASS: 106 persistence + 566 API; 18 inherited C cases, 11 A cases and 2 joined footprint tests                                                         |
+| Chromium                                                                 | 281 PASS, including 33 A workflow/joined browser cases                                                                                                     |
+| Real Chromium → HTTP → PostgreSQL                                        | PASS; zero entry query/formal planning writes, Adopt/Undo each +1, original IDs restored                                                                   |
+| Migration                                                                | Clean Prisma deploy of all 26 PASS; existing populated/history/anchor/FK regression suite PASS; schema/migration delta 0/0                                 |
+| Compose                                                                  | PASS, including explicit controlled Handoff search and existing suffix/external chains, Worker, outage/recovery and object storage                         |
+| P5B                                                                      | PASS: 5 users, 200 requests, zero isolation failures/unexpected 5xx/network failures                                                                       |
+| Independent final-head WebKit/Chromium/Compose/P5B                       | Exact final integration HEAD/run is recorded in [PR #50 checks](https://github.com/tonivikingdom/TRAVEL-V1/pull/50/checks); no old-head result substitutes |
 
-The first full Chromium run found four legacy reload-flow regressions. One additional page-load timeout was not reproduced in the complete rerun. Same-Trip recovery is now limited to the known successful adoption receipt; unrelated drafts/backups retain their original reload/list behavior. All original safety assertions are retained. An intermediate run overlapped a copy edit and retained two already-loaded old-text assertions; the complete run was restarted against frozen source and tests. The complete suite and final captures were rerun; documentation and synthetic fixture captions do not represent real Provider acceptance.
+Canonical midnight evidence: **13 PASS** (5 Unit in `scripts/synthetic-route-day.test.ts` + 8 PostgreSQL in `compose-ground-fixture.integration.test.ts`), including full UTC-day sweep, Tokyo midnight, trusted external Tokyo context and exact invalid-fixture negative controls. Helper byte hash matches integration main. Inherited C PostgreSQL hardening file remains unchanged.
+
+The first added integration checks found two test-harness wiring issues: a non-unique itinerary button selector and an API helper without StaticBackupService. Both were corrected in test wiring; all original assertions remain. No production semantics were changed to make them pass. Local WebKit installation was attempted but the managed network rejected its browser download with 403 Domain forbidden; exact-final-head GitHub CI must provide the independent WebKit result. This is separate from physical iPhone verification.
 
 New coverage includes READY explicit query; unavailable/unresolved/no-required entry; explicit candidate and Preview; FULL/SUFFIX/external replacement; blocked/expired/unsupported Preview; Adopt/Undo and projection refresh; version and changed-evidence races; owner isolation; double actions; lost response replay; accepted-write/read-failure recovery; narrow/enlarged/desktop layout. Existing Place Search, backup, saved transport timing/navigation, authoring/drafts, endpoint binding, provider ACTUAL and route/receipt history tests remain in the full suites.
 
@@ -71,7 +92,7 @@ New coverage includes READY explicit query; unavailable/unresolved/no-required e
 
 ## Visual review artifacts
 
-All captures show SYNTHETIC data, are committed to this branch and were actually opened. Phone images are viewport captures, not a resized desktop view. Confirmation views additionally show the scrolled primary action. The contact sheet preserves original proportions and does not replace the originals or device acceptance.
+All 17 PNG captures and the regenerated 13-panel contact sheet show SYNTHETIC data, are committed to this branch and were actually opened. Phone images are viewport captures of the final integrated A workflow with B presentation, not a resized desktop view. Confirmation views additionally show the scrolled primary action. The contact sheet preserves original proportions and does not replace the originals or device acceptance.
 
 [Review contact sheet](assets/p6c-2/review-contact-sheet.jpg)
 

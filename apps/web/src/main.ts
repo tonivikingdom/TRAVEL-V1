@@ -66,8 +66,10 @@ import {
   saveLocalBackup,
 } from './essentials.js';
 import { impactSummary, impactDetails } from './impact.js';
-import { alternativeEntry, alternativeChanges } from './alternatives.js';
+import { alternativeEntry } from './alternatives.js';
+import { previewPresentation, previewMarkup } from './preview-presentation.js';
 import './styles.css';
+import './preview-presentation.css';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const detail = document.querySelector<HTMLDialogElement>('#detail')!;
@@ -1179,9 +1181,7 @@ function showCandidates() {
 function showPreview(p: RoutePreviewView) {
   const target = detail.querySelector('#choice');
   if (!target) return;
-  const adjustments = p.changeSummary.requiredUserAdjustments ?? [];
-  const impact = p.changeSummary.downstreamImpact;
-  target.innerHTML = `<section class="choice"><h3>${selection?.type === 'alternative' ? '方案变化' : '这条路线'}</h3>${selection?.type === 'alternative' && trip ? alternativeChanges(trip, p) : ''}<ol class="legs">${p.candidate.legs.map((leg) => legView(leg)).join('')}</ol><p>会${p.changeSummary.transportAction === 'REPLACE' ? '替换当前交通' : '新增交通'}；目的地保持不变。</p>${impact ? `<p>后续停留：${esc(duration(impact.projectedDwellSeconds))}${['INFEASIBLE', 'USER_REQUIREMENT_VIOLATION'].includes(impact.status) ? ' · 重要安排存在冲突' : ''}</p>` : ''}${adjustments.length ? `<label class="check"><input id="accept-adjustments" type="checkbox">我同意将以下最短停留改为：${adjustments.map((a) => `${esc(node(a.nodeId) ? nodeTitle(node(a.nodeId)!) : '相关地点')} ${duration(a.fromDurationSeconds)} → ${duration(a.toDurationSeconds)}`).join('；')}</label>` : ''}${!p.adoptable ? '<p class="warning">这条方案当前不能使用：存在受保护事实、时间冲突或已过期。请核对后重新查询。</p>' : ''}<button class="primary" data-action="adopt" ${p.adoptable && p.status === 'ACTIVE' ? '' : 'disabled'}><span class="control-content">${selection?.type === 'alternative' ? '采用此调整' : '使用这条路线'}</span></button></section>`;
+  target.innerHTML = `<section class="choice">${previewMarkup(previewPresentation(p, trip))}<details class="preview-details"><summary>查看方案地点与导航</summary><ol class="legs">${p.candidate.legs.map((leg) => legView(leg)).join('')}</ol></details><button class="primary" data-action="adopt" ${p.adoptable && p.status === 'ACTIVE' ? '' : 'disabled'}><span class="control-content">${selection?.type === 'alternative' ? '采用此调整' : '使用这条路线'}</span></button></section>`;
   target.scrollIntoView({ block: 'start' });
 }
 function showAlternativeRecovery() {

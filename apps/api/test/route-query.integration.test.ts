@@ -77,6 +77,7 @@ import {
 } from 'vitest';
 
 import { buildApi } from '../src/app.js';
+import { footprint, onlyWrites } from './helpers/replanning-acceptance.js';
 type JsonInput = Parameters<
   ManagedPrismaClient['client']['routePreview']['create']
 >[0]['data']['previewPayload'];
@@ -195,6 +196,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         authConfig(),
       ),
       tripService: new TripService(tripRepository),
+      staticBackupService: new StaticBackupService(
+        new PrismaStaticBackupRepository(managed.client),
+      ),
       routeQueryService: new RouteQueryService(
         tripRepository,
         provider,
@@ -12811,6 +12815,86 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
       owned.days.flatMap((d) => d.nodes).map((n) => n.id),
     );
   });
+  it('P6C-2 integrated Impact/adjustment GET, Query and Preview have exact C row footprints', async () => {
+    const f = await controlledCancelledFixture();
+    const before = await footprint(managed, f.trip.id);
+    const providerBefore = providerInputs.length;
+    const impact = await app.inject({
+      method: 'GET',
+      url: `/trips/${f.trip.id}/impact`,
+      headers: bearer(userA),
+    });
+    const handoff = await app.inject({
+      method: 'GET',
+      url: `${f.base}/route-reevaluation`,
+      headers: bearer(userA),
+    });
+    expect(impact.statusCode).toBe(200);
+    expect(handoff.statusCode).toBe(200);
+    expect(providerInputs.length).toBe(providerBefore);
+    onlyWrites(before, await footprint(managed, f.trip.id));
+    const result = await controlledSearch(f.trip.id, f.handoff);
+    expect(result.statusCode, result.body).toBe(200);
+    const queried = await footprint(managed, f.trip.id);
+    onlyWrites(before, queried, ['snapshots']);
+    const p = await previewFromSnapshot(
+      userA,
+      f.owned,
+      result.json().result.candidates[0].candidateSnapshotId,
+    );
+    const previewed = await footprint(managed, f.trip.id);
+    onlyWrites(queried, previewed, ['previews']);
+    expect(p.adoptable).toBe(true);
+    expect(previewed.previews.length).toBe(queried.previews.length + 1);
+  });
+
+  it('P6C-2 integrated Query failure and stale Preview/Adopt preserve C full-row footprint and Backup', async () => {
+    const f = await controlledCancelledFixture();
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/backup`,
+      headers: bearer(userA),
+      payload: {
+        baseTripVersion: f.owned.version,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    expect(generated.statusCode, generated.body).toBe(200);
+    const goodResult = providerResult;
+    providerResult = {
+      status: 'PROVIDER_UNAVAILABLE',
+      reason: 'UPSTREAM_UNAVAILABLE',
+    };
+    const before = await footprint(managed, f.trip.id);
+    const failed = await controlledSearch(f.trip.id, f.handoff);
+    expect(failed.statusCode, failed.body).toBe(503);
+    onlyWrites(before, await footprint(managed, f.trip.id));
+    providerResult = goodResult;
+    const result = await controlledSearch(f.trip.id, f.handoff);
+    expect(result.statusCode, result.body).toBe(200);
+    const candidateId = result.json().result.candidates[0].candidateSnapshotId;
+    const p = await previewFromSnapshot(userA, f.owned, candidateId);
+    await managed.client.trip.update({
+      where: { id: f.trip.id },
+      data: { version: { increment: 1 } },
+    });
+    const advanced = await footprint(managed, f.trip.id);
+    const stalePreview = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.trip.id}/previews`,
+      headers: bearer(userA),
+      payload: {
+        basisVersion: f.owned.version,
+        candidateSnapshotId: candidateId,
+      },
+    });
+    const staleAdopt = await adopt(userA, f.owned, p.previewId, randomUUID());
+    expect(stalePreview.statusCode).toBe(409);
+    expect(staleAdopt.statusCode).toBe(409);
+    onlyWrites(advanced, await footprint(managed, f.trip.id));
+    expect(advanced.backups).toEqual(before.backups);
+  });
+
   async function createPreview(
     identity: SyntheticIdentity,
     trip: TripView,

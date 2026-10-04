@@ -2,7 +2,7 @@ import type { RouteProvider } from '@travel/application';
 import { readRouteProviderConfig } from './config.js';
 import { GoogleConsumerExperimentalRouteProvider } from './google-consumer-transit-route-provider.js';
 import { createRegionalProviders } from './regional-config.js';
-import { RegionalRouteProvider } from './regional-router.js';
+import { UnconfiguredRouteProvider } from './unconfigured-route-provider.js';
 import {
   createDevelopmentSyntheticRouteProvider,
   createDevelopmentSyntheticGroundTransitRouteProvider,
@@ -30,7 +30,10 @@ export function createRuntimeRouteProvider(
       );
     return createDevelopmentSyntheticGroundTransitRouteProvider();
   }
-  if (config.provider === 'unconfigured') return new RegionalRouteProvider({});
+  // Explicitly disabled service keeps its existing error before input/region validation.
+  // This sentinel performs no dispatch or I/O; every configured live path is regional.
+  if (config.provider === 'unconfigured')
+    return new UnconfiguredRouteProvider();
   const enabled = env.GOOGLE_CONSUMER_TRANSIT_ENABLED;
   if (enabled !== undefined && !['true', 'false'].includes(enabled))
     throw new Error('GOOGLE_CONSUMER_TRANSIT_ENABLED must be true or false');

@@ -137,6 +137,20 @@ describe('SYNTHETIC runtime Japan slot; no live/paid calls', () => {
       );
     },
   );
+  it('explicitly unconfigured runtime preserves unavailable before legacy missing-mode validation; zero I/O', async () => {
+    const fetcher = vi.fn();
+    const { travelMode: ignoredMode, ...withoutMode } = input();
+    void ignoredMode;
+    const p = createRuntimeRouteProvider(
+      { APP_ENV: 'test', ROUTE_PROVIDER: 'unconfigured' },
+      { fetcher },
+    );
+    expect(await p.queryRoutes(withoutMode)).toEqual({
+      status: 'PROVIDER_UNAVAILABLE',
+      reason: 'ROUTE_PROVIDER_UNCONFIGURED',
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it.each(['staging', 'production'])(
     'never enables Consumer transit in %s',
     (APP_ENV) => {

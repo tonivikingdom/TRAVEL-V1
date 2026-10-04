@@ -5,10 +5,31 @@ import { esc } from './model.js';
 export class PlaceSearchPicker {
   private selected: PlaceSearchResult | null = null;
   private generation = 0;
+  private draft: {
+    query: HTMLInputElement;
+    language: HTMLSelectElement;
+  } | null = null;
+  private baseline: string | null = null;
   constructor(private readonly api: TravelApi) {}
-  reset() {
+  clearSelection() {
     this.selected = null;
     this.generation++;
+  }
+  reset() {
+    this.clearSelection();
+    this.draft = null;
+    this.baseline = null;
+  }
+  get snapshot() {
+    return this.draft?.query.isConnected
+      ? JSON.stringify([this.draft.query.value, this.draft.language.value])
+      : null;
+  }
+  get dirty() {
+    return this.snapshot !== null && this.snapshot !== this.baseline;
+  }
+  acknowledge(snapshot: string | null) {
+    this.baseline = snapshot;
   }
   get candidate() {
     return this.selected;
@@ -31,6 +52,15 @@ export class PlaceSearchPicker {
     section.innerHTML =
       '<h3>搜索新地点</h3><label>地点名称或地址<input data-place-query maxlength="200" autocomplete="off" placeholder="例如：东京站"></label><label>结果语言<select data-place-language><option value="ja">日本語</option><option value="zh">中文</option><option value="en">English</option></select></label><button type="button" data-place-search>搜索地点</button><button type="button" data-place-cancel>取消搜索</button><p data-search-status role="status"></p><div data-search-results></div><div data-selected-summary></div><p class="muted">搜索和选择不会保存地点。核对后点击下方“添加地点”才加入旅行。</p>';
     form.prepend(section);
+    this.draft = {
+      query: section.querySelector<HTMLInputElement>('[data-place-query]')!,
+      language: section.querySelector<HTMLSelectElement>(
+        '[data-place-language]',
+      )!,
+    };
+    this.baseline = this.snapshot;
+    const initialQuery = this.draft.query.value;
+    const initialLanguage = this.draft.language.value;
     const status = section.querySelector('[data-search-status]')!;
     const results = section.querySelector('[data-search-results]')!;
     const select = form.elements.namedItem('place') as HTMLSelectElement;
@@ -69,6 +99,13 @@ export class PlaceSearchPicker {
       .querySelector('[data-place-cancel]')!
       .addEventListener('click', () => {
         this.generation++;
+        // Discard only the local search. Note/saved-place dirtiness belongs to authoring.
+        section.querySelector<HTMLInputElement>('[data-place-query]')!.value =
+          initialQuery;
+        section.querySelector<HTMLSelectElement>(
+          '[data-place-language]',
+        )!.value = initialLanguage;
+        this.baseline = this.snapshot;
         clear();
         status.textContent = '已取消搜索，未保存地点或修改旅行。';
         (

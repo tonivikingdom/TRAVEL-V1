@@ -41,3 +41,24 @@ export {
   UnconfiguredPlaceSearchProvider,
   createPlaceSearchProvider,
 } from './place-search-provider.js';
+export {
+  classifyProviderRegion,
+  mapProviderProjection,
+  type ProviderRegion,
+  type RegionalCoordinates,
+} from './region-policy.js';
+export {
+  RegionalRouteProvider,
+  RegionalPlaceSearchProvider,
+  type RegionalProviderSlots,
+} from './regional-router.js';
+export { createRegionalProviders } from './regional-config.js';
+export {
+  BaiduPlaceSearchProvider,
+  GooglePlaceSearchProvider,
+} from './regional-place-adapters.js';
+export {
+  BaiduOrdinaryRouteProvider,
+  GoogleOrdinaryRouteProvider,
+} from './regional-route-adapters.js';
+export { baiduToWgs84 } from './baidu-coordinates.js';

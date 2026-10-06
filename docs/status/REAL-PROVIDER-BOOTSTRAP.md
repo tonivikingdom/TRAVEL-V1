@@ -34,3 +34,11 @@ Migration delta: 0。现存 migration 数量见交付验证记录。
 ## 修改文件
 
 `.env.provider.example`、`package.json`、`packages/providers/src/baidu-coordinates.ts`、`packages/providers/src/regional-route-adapters.ts`、`packages/providers/src/route-endpoint-binding.ts`、`packages/providers/test/route-endpoint-binding.test.ts`、`scripts/provider-doctor/{cli,config,runner,doctor.test}.ts`、`docs/provider-environment-setup.md`、本状态文件。
+
+## GitHub 交付
+
+实现提交 `335ec57` 已成功 push 到 `origin/feat/real-provider-bootstrap`。
+Draft PR **BLOCKED**：执行 `gh pr create --draft`，GitHub GraphQL 返回 `Forbidden`；当前 CLI 认证检查也失败。未创建 PR，不宣称已完成 PR 或 CI；无合并、无部署。
+分支比较页：https://github.com/tonivikingdom/TRAVEL-V1/compare/main...feat/real-provider-bootstrap 。
+PR 正文已准备于当前任务临时文件 `/tmp/travel-provider-pr.md`，权限恢复后可用 `gh pr create --repo tonivikingdom/TRAVEL-V1 --base main --head feat/real-provider-bootstrap --draft --title "feat(providers): safe acceptance bootstrap (PARTIAL)" --body-file /tmp/travel-provider-pr.md`。
+最终 SHA 由交付回复和远程分支记录确认（本报告不会自引用自身 commit SHA）。

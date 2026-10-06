@@ -5,7 +5,7 @@ import type {
   RouteProviderResult,
 } from '@travel/application';
 import type { NormalizedRouteCandidate } from '@travel/domain';
-import { matchesTrustedRouteEndpoint } from '@travel/domain';
+import { endpointWithinBinding } from './route-endpoint-binding.js';
 import { json, record, coordinate } from './regional-http.js';
 import { baiduToWgs84 } from './baidu-coordinates.js';
 function knownZones(input: RouteProviderQueryInput): boolean {
@@ -31,14 +31,8 @@ function bindEndpoints(
   const a = normalize(from),
     b = normalize(to);
   if (
-    !matchesTrustedRouteEndpoint(
-      { name: input.origin.name, ...a, providerPlaceRef: null },
-      { ...input.origin, providerPlaceRef: null },
-    ) ||
-    !matchesTrustedRouteEndpoint(
-      { name: input.destination.name, ...b, providerPlaceRef: null },
-      { ...input.destination, providerPlaceRef: null },
-    )
+    !endpointWithinBinding(input.origin, a, baidu ? 'BAIDU' : 'GOOGLE') ||
+    !endpointWithinBinding(input.destination, b, baidu ? 'BAIDU' : 'GOOGLE')
   )
     throw new Error('INVALID_PROVIDER_ENDPOINTS');
 }

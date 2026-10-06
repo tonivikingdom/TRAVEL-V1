@@ -15,7 +15,7 @@ export function baiduToWgs84(lat: number, lng: number) {
     longitude -= longitude + d.lng - gcjLng;
   }
   // Canonical WGS84 precision of the existing Place contract (Decimal(9,6)).
-  // Endpoint matching still uses exact equality; this is not a proximity match.
+  // Non-authoritative approximation; endpoint binding uses a bounded error budget.
   return {
     latitude: Number(latitude.toFixed(6)),
     longitude: Number(longitude.toFixed(6)),

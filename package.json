@@ -31,7 +31,8 @@
     "test:integration": "pnpm --filter @travel/persistence test:integration && pnpm --filter @travel/api test:integration",
     "typecheck": "pnpm prisma:generate && tsc --noEmit -p scripts/tsconfig.json && pnpm -r --if-present typecheck",
     "dev:web": "pnpm --filter @travel/web dev",
-    "test:web": "playwright test --config scripts/p6a1.playwright.config.ts"
+    "test:web": "playwright test --config scripts/p6a1.playwright.config.ts",
+    "provider:doctor": "tsx scripts/provider-doctor/cli.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

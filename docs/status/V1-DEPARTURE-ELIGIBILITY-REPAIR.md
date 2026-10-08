@@ -64,7 +64,7 @@ Confirmed external origins use the same fixed-clock predicate after Provider I/O
 - Clean PostgreSQL migration deploy: **27** migrations. Existing schema/migrations and public contracts are unchanged.
 - Final local checks and required CI job results are recorded in the repair PR body together with exact HEAD and CI URL. The PR targets `fix/pr53-review-findings` and remains Draft. CI verifies Chromium/WebKit, Compose and P5B in addition to Unit/PostgreSQL/build/lint/typecheck.
 
-Existing P5E2 topology/reference repair fixtures now explicitly execute their historical edits after the Trip period, with both temporary and replacement Previews created in the same unexpired window. Original candidate clocks, execution facts, protection assertions and full durable-state comparisons are retained. Canonical midnight fixtures remain unchanged, including their negative controls.
+Existing P5E2 topology/reference repair fixtures now explicitly execute their historical edits after the Trip period, with both temporary and replacement Previews created in the same unexpired window. Original candidate clocks, execution facts, protection assertions and full durable-state comparisons are retained. Canonical midnight fixtures remain unchanged, including their negative controls. Compose suffix acceptance additionally asserts that the original, now-expired fixed replacement is rejected without any writes, then explicitly requests a later SYNTHETIC service for its positive Adopt/Undo chain. Original route and ACTUAL clocks remain intact; no production time window or guard is changed.
 
 ## Remaining limits
 

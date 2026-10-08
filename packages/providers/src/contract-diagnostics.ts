@@ -22,6 +22,10 @@ export const DIAGNOSTIC_FIELDS = [
   'response.place.identity',
   'response.place.region',
   'response.status',
+  'response.result.routes',
+  'response.result.origin/destination',
+  'response.result.origin.originPt/destination.destinationPt',
+  'response.result.routes[].duration',
   'candidate',
 ] as const;
 export const DIAGNOSTIC_CODES = [

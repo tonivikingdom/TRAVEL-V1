@@ -139,7 +139,7 @@ it.each([
       expect(JSON.stringify(report)).not.toContain(secret);
   },
 );
-it('live future probe uses tomorrow, all nine verified server contracts use one request, and approvals remain false', async () => {
+it('SYNTHETIC probes retain the request budget and gates; approximate wrong Baidu endpoints fail closed', async () => {
   const fetcher = vi.fn(
     async (value: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(value));
@@ -223,14 +223,58 @@ it('live future probe uses tomorrow, all nine verified server contracts use one 
     fetcher: fetcher as typeof fetch,
     now: () => now,
   });
-  expect(report.capabilities.map((c) => c.status)).toEqual(
-    Array(9).fill('LIVE_CONTRACT_PASS'),
-  );
+  expect(report.capabilities.map((c) => c.status)).toEqual([
+    ...Array(4).fill('LIVE_CONTRACT_PASS'),
+    ...Array(5).fill('CONTRACT_MISMATCH'),
+  ]);
   expect(report.requestCount).toBe(9);
   expect(Object.values(report.gates).every((g) => g === 'FALSE')).toBe(true);
   const future = new URL(String(fetcher.mock.calls.at(-1)![0]));
   expect(future.pathname).toBe('/direction/v2/driving');
   expect(future.searchParams.get('departure_time')).toBe(
     String(now.getTime() / 1000 + 86400),
+  );
+});
+
+it.each([
+  ['TRANSIT', 200, 1002, 'UNSUPPORTED'],
+  ['WALKING', 200, 1002, 'PROVIDER_ERROR'],
+  ['DRIVING', 200, 1002, 'PROVIDER_ERROR'],
+  ['CYCLING', 200, 1002, 'PROVIDER_ERROR'],
+  ['TRANSIT', 500, 1002, 'PROVIDER_ERROR'],
+  ['TRANSIT', 200, 1003, 'PROVIDER_ERROR'],
+] as const)(
+  'Doctor precisely classifies Baidu %s / HTTP %s / %s',
+  (mode, http, code, expected) => {
+    expect(
+      classifyProviderFailure(
+        'BAIDU',
+        http,
+        { status: code, result: null },
+        mode,
+      ),
+    ).toBe(expected);
+  },
+);
+it('SYNTHETIC Doctor reports TRANSIT 1002 as UNSUPPORTED while unrelated capabilities stay failures', async () => {
+  const fetcher = vi.fn<typeof fetch>(
+    async () => new Response(JSON.stringify({ status: 1002, result: null })),
+  );
+  const report = await providerDoctor(
+    {
+      APP_ENV: 'test',
+      BAIDU_SERVER_API_KEY: 'SYNTHETIC_NETWORK_SECRET_PLACEHOLDER',
+    },
+    { live: true, fetcher, now: () => now },
+  );
+  expect(
+    report.capabilities.find((c) => c.name === 'Baidu Transit')?.status,
+  ).toBe('UNSUPPORTED');
+  expect(
+    report.capabilities.find((c) => c.name === 'Baidu Walking')?.status,
+  ).toBe('PROVIDER_ERROR');
+  expect(report.requestCount).toBe(6);
+  expect(JSON.stringify(report)).not.toContain(
+    'SYNTHETIC_NETWORK_SECRET_PLACEHOLDER',
   );
 });

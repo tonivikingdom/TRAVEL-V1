@@ -18,6 +18,8 @@
 4. 在 `/workspace/TRAVEL-V1` 运行 `pnpm provider:doctor`。
 5. 核对配置结果后，显式运行 `pnpm provider:doctor --live`。验收任务使用 `APP_ENV=development` 或 `test`；production/staging 被此工具拒绝。
 
+Doctor 启动命令使用 Node 24 `--use-env-proxy`，尊重 `HTTPS_PROXY` / `HTTP_PROXY` 与 `NO_PROXY`。Network Secret 占位值原样进入请求，经环境规定的 HTTPS CONNECT 代理发送；不要解析占位值或提取真实 Key。保留环境 `NODE_EXTRA_CA_CERTS` 和 TLS 证书验证，不使用 `NODE_TLS_REJECT_UNAUTHORIZED=0`。通过本地 SYNTHETIC CONNECT 代理测试占位值传递、可信 CA、未可信证书拒绝和 NO_PROXY；这不等于真实 Provider 授权或代理端 Secret 替换验收。
+
 四项只通过进程环境读取。示例 [.env.provider.example](../.env.provider.example) 仅描述空配置形状，不应复制后填真实值。`.env*` 的非 example 文件仍被 Git 忽略；本工具不加载凭据文件、不创建真实凭据文件、不输出值、长度、前后缀或摘要。浏览器 Key 本身会用于浏览器 SDK，需按网站来源限制；两个 Server key 永远不进入 Web HTML/JS/source map。更换 Browser build variables 后需重建 Web 或重启 Vite；发布旧构建不能让新 Key 生效。
 
 ## 网络与验收结果
@@ -40,7 +42,8 @@ doctor 的 Node 模式不加载 Browser SDK，不创建真实地图截图。Goog
 - Baidu 使用 `direction/v2/walking`、`driving`、`riding`、`transit`。CYCLING 使用普通自行车 `riding_type=0`，作为正式查询/存储/展示模式，不添加 UI 推荐。TRANSIT 当前只接受返回明确相同 `city_id` 的同城方案，保留**聚合预计耗时**，不编造 BUS/RAIL 分段、车次、站点、固定发车时间或监控能力。官方接口描述支持跨城，但当前跨城接入/实测为 **PARTIAL/UNSUPPORTED**，需独立验收。公交接口时间精度为分钟；指定出发必须对齐分钟，NOW 则向后对齐下一分钟并保留该查询时间，不向前截断。
 - Future driving 使用 v2 `departure_time`，仅接受当前之后至 7 天内的时间，并要求高级权限审核 gate；过期/超范围/未审批返回 UNSUPPORTED，不退回当前路况。所有未来指定时间，包括数秒后的出发，都不能由当前路况替代；v2 UNIX 时间精度为秒，非整秒的未来驾车输入明确 UNSUPPORTED。返回 duration 只作为 Provider 估算，不是车辆 ACTUAL。
 - ARRIVE_BY 保持 **UNSUPPORTED**。官方描述了 `expect_arrival_time` / `suggest_departure_time` 高级契约，但尚未通过实际账户验收；本实现不倒推、不把当前 duration 当建议出发事实。
-- Google 官方 RouteLeg 允许起终点 snap 到道路。适配器以球面距离校验两个端点：Google 各 ≤100 米，Baidu 各 ≤30 米，并拒绝明显对调。阈值是本项目安全策略，**不是 Provider 的准确性保证**；合法但超过阈值的 snapping 仍 fail closed。Domain 的可信端点匹配不放宽；校验通过后候选保持用户查询的 canonical 端点，不把 snapped 路面点写回地点。
+- Google 官方 RouteLeg 允许起终点 snap 到道路，但距离本身不证明道路/地点身份。Google 100 米、Baidu 30 米只保留为外层排除边界；没有可靠接驳证据时，返回端点必须与输入在现有 Place 六位小数精度上等价。不同端点坍缩、倒置、歧义、平行道路位移及超阈值一律 fail closed。候选保留返回的 normalized 坐标，不再以用户输入覆盖；`legs[].providerRef` 使用 `endpoint-evidence:v1:` 的应用自有 opaque provenance，白名单记录 raw/normalized 坐标、坐标系和偏移，不是 Provider 车次 ID，不含 URL/Key/原始响应。Domain 可信端点保护不变。不虚构接驳时间/距离；普通 snapping 或 Baidu 近似逆变换的精度差异可能导致合法路线拒绝，这是当前契约下的保守限制。
+- Baidu TRANSIT 的 HTTP 200 / numeric `status=1002` / `result=null` 表示不支持该跨域查询，映射 `UNSUPPORTED_QUERY`，Doctor 为 `UNSUPPORTED`。其他 mode、未知代码、HTTP 故障不随之改为 unsupported；1001 仍为无候选。
 - Internal canonical 仍为 WGS84。Baidu 请求明确 `coord_type=wgs84`，响应明确 `ret_coordtype=bd09ll`。服务端 BD09→GCJ02→WGS84 的数值逆变换是 **approximate / non-authoritative**，绝非“官方 round-trip”；六位小数及 fixture 回归不证明真实地理误差。30 米绑定只约束错点风险，不能自动批准坐标 gate。
 - Browser display 使用官方 JSAPI 4.0 `BMap.Convertor.translate`、`COORDINATES_WGS84`→`COORDINATES_BD09`。只在 callback status=0、点数/坐标及逐点偏移 sanity 校验通过后 mount；超时/缺模块/错误结果局部降级。取消只忽略迟到结果，SDK 没有公开取消网络请求接口。没有复制反向近似算法到 Web。
 

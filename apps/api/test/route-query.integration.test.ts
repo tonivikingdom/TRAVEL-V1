@@ -10506,9 +10506,16 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     onlyWrites(before, await footprint(managed, trip.id), []);
   });
 
-  it.each(['google', 'baidu'] as const)(
-    'regional %s HTTP normalization persists through authoritative Query with snapshots-only footprint',
-    async (name) => {
+  it.each([
+    ['google', 'valid'],
+    ['baidu', 'valid'],
+    ['google', 'collapse'],
+    ['baidu', 'collapse'],
+    ['baidu', 'transit-1002'],
+    ['baidu', 'transit-1003'],
+  ] as const)(
+    'SYNTHETIC regional %s / %s preserves evidence or fails without planning writes',
+    async (name, fault) => {
       let trip = await tripWithVisits(userA, [
         'SYNTHETIC origin',
         'SYNTHETIC destination',
@@ -10517,16 +10524,22 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
         from =
           name === 'google' ? nodes[0]!.place! : baiduToWgs84(39.915, 116.404),
         to =
-          name === 'google' ? nodes[1]!.place! : baiduToWgs84(39.916, 116.405);
-      if (name === 'baidu')
-        for (const [node, point] of [
-          [nodes[0]!, from],
-          [nodes[1]!, to],
-        ] as const)
-          await managed.client.place.update({
-            where: { id: node.place!.id },
-            data: { latitude: point.latitude, longitude: point.longitude },
-          });
+          name === 'google'
+            ? {
+                ...nodes[1]!.place!,
+                latitude: nodes[0]!.place!.latitude! + 0.0009,
+              }
+            : fault === 'collapse'
+              ? baiduToWgs84(39.9154, 116.404)
+              : baiduToWgs84(39.916, 116.405);
+      for (const [node, point] of [
+        [nodes[0]!, from],
+        [nodes[1]!, to],
+      ] as const)
+        await managed.client.place.update({
+          where: { id: node.place!.id },
+          data: { latitude: point.latitude, longitude: point.longitude },
+        });
       const zone = name === 'google' ? 'Asia/Tokyo' : 'Asia/Shanghai';
       for (const [node, pointKind, instant] of [
         [nodes[0]!, 'DEPARTURE', '2030-10-01T10:00:00Z'],
@@ -10554,31 +10567,54 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
                           {
                             startLocation: {
                               latLng: {
-                                latitude: from.latitude,
+                                latitude:
+                                  fault === 'collapse'
+                                    ? (from.latitude! + to.latitude!) / 2
+                                    : from.latitude,
                                 longitude: from.longitude,
                               },
                             },
                             endLocation: {
-                              latLng: {
-                                latitude: to.latitude,
-                                longitude: to.longitude,
-                              },
+                              latLng:
+                                fault === 'collapse'
+                                  ? {
+                                      latitude:
+                                        (from.latitude! + to.latitude!) / 2,
+                                      longitude: from.longitude,
+                                    }
+                                  : {
+                                      latitude: to.latitude,
+                                      longitude: to.longitude,
+                                    },
                             },
                           },
                         ],
                       },
                     ],
                   }
-                : {
-                    status: 0,
-                    result: {
-                      origin: { originPt: { lat: 39.915, lng: 116.404 } },
-                      destination: {
-                        destinationPt: { lat: 39.916, lng: 116.405 },
+                : fault.startsWith('transit-')
+                  ? {
+                      status: fault === 'transit-1002' ? 1002 : 1003,
+                      result: null,
+                    }
+                  : {
+                      status: 0,
+                      result: {
+                        origin: {
+                          originPt: {
+                            lat: fault === 'collapse' ? 39.9152 : 39.915,
+                            lng: 116.404,
+                          },
+                        },
+                        destination: {
+                          destinationPt:
+                            fault === 'collapse'
+                              ? { lat: 39.9152, lng: 116.404 }
+                              : { lat: 39.916, lng: 116.405 },
+                        },
+                        routes: [{ duration: 600 }],
                       },
-                      routes: [{ duration: 600 }],
                     },
-                  },
             ),
           ),
       );
@@ -10611,7 +10647,7 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           basisVersion: trip.version,
           fromNodeId: nodes[0]!.id,
           toNodeId: nodes[1]!.id,
-          travelMode: 'WALKING',
+          travelMode: fault.startsWith('transit-') ? 'TRANSIT' : 'WALKING',
           hint: {
             type: 'DEPART_AT',
             instant: '2030-10-01T10:00:00Z',
@@ -10619,8 +10655,20 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           },
         },
       });
-      expect(response.statusCode, response.body).toBe(200);
       expect(fetcher).toHaveBeenCalledTimes(1);
+      if (fault !== 'valid') {
+        expect(response.statusCode, response.body).toBe(
+          fault === 'transit-1002' ? 422 : 503,
+        );
+        expect(response.json().error.code).toBe(
+          fault === 'transit-1002'
+            ? 'ROUTE_QUERY_UNSUPPORTED'
+            : 'PROVIDER_UNAVAILABLE',
+        );
+        onlyWrites(before, await footprint(managed, trip.id), []);
+        return;
+      }
+      expect(response.statusCode, response.body).toBe(200);
       const result = response.json() as RouteQueryResponse;
       expect(result.candidates[0]?.provider).toBe(name);
       expect(result.candidates[0]?.overall.departure.timeZone).toBe(zone);
@@ -10630,6 +10678,20 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           where: { id: result.candidates[0]!.candidateSnapshotId },
         });
       expect(snapshot.provider).toBe(name);
+      const persisted = snapshot.candidatePayload as {
+        legs: {
+          providerRef: string;
+          from: { latitude: number; longitude: number };
+        }[];
+      };
+      expect(persisted.legs[0]!.providerRef).toBe(
+        result.candidates[0]!.legs[0]!.providerRef,
+      );
+      expect(persisted.legs[0]!.providerRef).toMatch(/^endpoint-evidence:v1:/);
+      expect(persisted.legs[0]!.from).toMatchObject({
+        latitude: from.latitude,
+        longitude: from.longitude,
+      });
     },
   );
   async function tripWithVisits(

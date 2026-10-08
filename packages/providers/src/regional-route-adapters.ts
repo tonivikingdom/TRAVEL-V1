@@ -37,7 +37,7 @@ function candidate(
   at: Date,
   seconds: number,
   observedAt: Date,
-  ref: string | null,
+  binding: ReturnType<typeof bindProviderEndpoints>,
 ): NormalizedRouteCandidate {
   if (
     !Number.isSafeInteger(seconds) ||
@@ -65,7 +65,7 @@ function candidate(
   return {
     candidateId: randomUUID(),
     provider,
-    providerCandidateRef: ref,
+    providerCandidateRef: null,
     observedAt,
     validUntil: null,
     departure: start,
@@ -74,14 +74,14 @@ function candidate(
     legs: [
       {
         mode: input.travelMode ?? 'WALKING',
-        from: location(input.origin),
-        to: location(input.destination),
+        from: { ...location(input.origin), ...binding.from },
+        to: { ...location(input.destination), ...binding.to },
         departure: start,
         arrival: end,
         durationSeconds: seconds,
         fixedService: false,
         serviceLabel: null,
-        providerRef: ref,
+        providerRef: binding.evidenceRef,
       },
     ],
     fare: null,
@@ -146,7 +146,7 @@ export class GoogleOrdinaryRouteProvider implements RouteProvider {
         if (!Array.isArray(r.legs) || r.legs.length !== 1)
           throw new Error('INVALID_PROVIDER_RESPONSE');
         const leg = record(r.legs[0]);
-        bindProviderEndpoints(
+        const binding = bindProviderEndpoints(
           'GOOGLE',
           input.origin,
           input.destination,
@@ -164,7 +164,7 @@ export class GoogleOrdinaryRouteProvider implements RouteProvider {
           at,
           Math.ceil(Number(r.duration.slice(0, -1))),
           observedAt,
-          null,
+          binding,
         );
       });
       return { status: 'SUCCESS', candidates };
@@ -272,6 +272,8 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
       url.search = params.toString();
       const body = await json(this.fetcher, url),
         result = record(body.result);
+      if (mode === 'TRANSIT' && body.status === 1002)
+        return { status: 'UNSUPPORTED_QUERY' };
       if (body.status === 7 || (mode === 'TRANSIT' && body.status === 1001))
         return { status: 'NO_MATCHING_CANDIDATE' };
       if (
@@ -292,7 +294,7 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
         )
           return { status: 'UNSUPPORTED_QUERY' }; // Cross-city contracts require separate acceptance.
       }
-      bindProviderEndpoints(
+      const binding = bindProviderEndpoints(
         'BAIDU',
         input.origin,
         input.destination,
@@ -317,7 +319,7 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
             plannedAt,
             record(raw).duration as number,
             observedAt,
-            null,
+            binding,
           ),
         ),
       };

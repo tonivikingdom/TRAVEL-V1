@@ -22,20 +22,57 @@ export function bindProviderEndpoints(
   destination: { latitude: number; longitude: number },
   from: unknown,
   to: unknown,
-): void {
-  const normalize = (value: unknown) => {
-    const p = coordinate(value);
-    return provider === 'BAIDU' ? baiduToWgs84(p.latitude, p.longitude) : p;
-  };
+): {
+  from: ReturnType<typeof coordinate>;
+  to: ReturnType<typeof coordinate>;
+  evidenceRef: string;
+} {
+  const normalize = (p: ReturnType<typeof coordinate>) =>
+    provider === 'BAIDU' ? baiduToWgs84(p.latitude, p.longitude) : p;
+  const same = (
+    a: ReturnType<typeof coordinate>,
+    b: ReturnType<typeof coordinate>,
+  ) =>
+    a.latitude.toFixed(6) === b.latitude.toFixed(6) &&
+    a.longitude.toFixed(6) === b.longitude.toFixed(6);
   const a = coordinate(origin),
     b = coordinate(destination),
-    start = normalize(from),
-    end = normalize(to);
+    rawStart = coordinate(from),
+    rawEnd = coordinate(to),
+    start = normalize(rawStart),
+    end = normalize(rawEnd);
+  const distinct = a.latitude !== b.latitude || a.longitude !== b.longitude;
   if (
     distanceMeters(a, start) > ENDPOINT_LIMIT_METERS[provider] ||
     distanceMeters(b, end) > ENDPOINT_LIMIT_METERS[provider] ||
-    distanceMeters(b, start) + 5 < distanceMeters(a, start) ||
-    distanceMeters(a, end) + 5 < distanceMeters(b, end)
+    // Distance alone does not identify a road/place. Without authoritative
+    // access legs, accept only coordinate equivalence at Place's Decimal(9,6)
+    // precision; do not rewrite a snapped road endpoint into a requested place.
+    !same(a, start) ||
+    !same(b, end) ||
+    same(start, end) ||
+    (distinct &&
+      (same(a, b) ||
+        distanceMeters(a, start) >= distanceMeters(b, start) ||
+        distanceMeters(b, end) >= distanceMeters(a, end)))
   )
     throw new Error('INVALID_PROVIDER_ENDPOINTS');
+  return {
+    from: start,
+    to: end,
+    // Application-owned opaque provenance, NOT a provider-issued service ID.
+    // Whitelist numbers only: no raw response, URLs, messages or credentials.
+    evidenceRef: `endpoint-evidence:v1:${JSON.stringify({
+      provider,
+      coordinateSystem: provider === 'BAIDU' ? 'BD09' : 'WGS84',
+      requestedOrigin: a,
+      requestedDestination: b,
+      rawStart,
+      rawEnd,
+      normalizedStart: start,
+      normalizedEnd: end,
+      originOffsetMeters: distanceMeters(a, start),
+      destinationOffsetMeters: distanceMeters(b, end),
+    })}`,
+  };
 }

@@ -264,7 +264,7 @@ it('Baidu inverse is approximate and independently bounded; malformed/far/swappe
   ); // SYNTHETIC regression, not official survey/round-trip evidence.
 });
 it.each([0, 25, 99, 101, 1000])(
-  'Google snapping %sm preserves a strict bounded binding',
+  'Google snapping %sm needs coordinate equivalence, not just a radius',
   async (meters) => {
     const origin = { latitude: 35.681236, longitude: 139.767125 },
       destination = { ...origin, longitude: origin.longitude + 0.02 };
@@ -302,7 +302,7 @@ it.each([0, 25, 99, 101, 1000])(
       () => now,
     ).queryRoutes(query);
     expect(result.status).toBe(
-      meters <= 100 ? 'SUCCESS' : 'PROVIDER_UNAVAILABLE',
+      meters === 0 ? 'SUCCESS' : 'PROVIDER_UNAVAILABLE',
     );
     if (result.status === 'SUCCESS')
       expect(result.candidates[0]!.legs[0]!.from.latitude).toBe(

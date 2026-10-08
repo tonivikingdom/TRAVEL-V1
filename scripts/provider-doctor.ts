@@ -72,6 +72,7 @@ export function classifyProviderFailure(
   provider: 'GOOGLE' | 'BAIDU',
   status: number,
   body: unknown,
+  mode?: RouteProviderQueryInput['travelMode'],
 ): DoctorStatus | null {
   const data = object(body),
     error = object(data.error);
@@ -80,6 +81,8 @@ export function classifyProviderFailure(
     typeof data.status === 'number' &&
     data.status !== 0
   ) {
+    if (status === 200 && mode === 'TRANSIT' && data.status === 1002)
+      return 'UNSUPPORTED';
     if ([4, 9, 302, 401].includes(data.status)) return 'BILLING_OR_ENTITLEMENT';
     if ([240, 260, 261].includes(data.status)) return 'API_NOT_ENABLED';
     if ([3, 5, 101, 200, 201, 202, 203, 210, 211].includes(data.status))
@@ -231,6 +234,7 @@ export async function providerDoctor(
             check.provider,
             response.status,
             parsed,
+            check.mode,
           );
           if (!failure && malformed) failure = 'CONTRACT_MISMATCH';
         }

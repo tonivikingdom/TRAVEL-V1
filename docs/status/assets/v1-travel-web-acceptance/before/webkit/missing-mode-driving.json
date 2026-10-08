@@ -1,0 +1,16 @@
+[
+  {
+    "method": "POST",
+    "path": "/trips/10000000-0000-4000-8000-000000000001/routes/query",
+    "body": {
+      "basisVersion": 1,
+      "fromNodeId": "10000000-0000-4000-8000-000000000002",
+      "toNodeId": "10000000-0000-4000-8000-000000000003",
+      "hint": {
+        "type": "DEPART_AT",
+        "instant": "2026-10-10T10:00:00.000Z",
+        "timeZone": "Asia/Shanghai"
+      }
+    }
+  }
+]

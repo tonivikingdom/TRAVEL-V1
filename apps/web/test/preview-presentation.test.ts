@@ -6,6 +6,66 @@ import {
 import { previewFixture, previewCases } from './preview-fixture.js';
 import { fromId, dayId } from './fixture.js';
 describe('Preview presentation (SYNTHETIC, existing contracts only)', () => {
+  it.each(['FIRST', 'LAST'] as const)(
+    'mixed fixed/aggregate route qualifies only its %s aggregate endpoint',
+    (position) => {
+      const f = previewFixture();
+      const leg = f.preview.candidate.legs[0]!;
+      const fixed = { ...leg, mode: 'BUS' as const, fixedService: true };
+      const aggregate = {
+        ...leg,
+        mode: 'TRANSIT' as const,
+        fixedService: false,
+        serviceLabel: null,
+      };
+      const preview = {
+        ...f.preview,
+        candidate: {
+          ...f.preview.candidate,
+          legs: position === 'FIRST' ? [aggregate, fixed] : [fixed, aggregate],
+        },
+      };
+      const view = previewPresentation(preview, f.trip);
+      expect(view.times[0]).toContain(
+        position === 'FIRST' ? '预计出发' : '计划出发',
+      );
+      expect(view.times[1]).toContain(
+        position === 'LAST' ? '预计到达' : '计划到达',
+      );
+    },
+  );
+  it.each(['TRANSIT', 'BUS'] as const)(
+    '%s Preview preserves evidence and distinguishes estimates from fixed service',
+    (mode) => {
+      const f = previewFixture();
+      const fixedService = mode === 'BUS';
+      const preview = {
+        ...f.preview,
+        candidate: {
+          ...f.preview.candidate,
+          legs: f.preview.candidate.legs.map((leg) => ({
+            ...leg,
+            mode,
+            fixedService,
+          })),
+        },
+        changeSummary: {
+          ...f.preview.changeSummary,
+          proposedSegments: f.preview.changeSummary.proposedSegments.map(
+            (segment) => ({ ...segment, mode, fixedService }),
+          ),
+        },
+      };
+      const before = JSON.stringify(preview);
+      const view = previewPresentation(preview, f.trip);
+      const qualifier = fixedService ? '计划' : '预计';
+      expect(view.times[0]).toContain(`新方案${qualifier}出发`);
+      expect(view.times[1]).toContain(`新方案${qualifier}到达`);
+      expect(view.segments.length).toBeGreaterThan(0);
+      expect(view.segments[0]!.time).toMatch(new RegExp(`^${qualifier} `));
+      expect(JSON.stringify(preview)).toBe(before);
+    },
+  );
   it.each(previewCases)(
     '%s is pure, escaped, and contains no source identifiers',
     (kind) => {

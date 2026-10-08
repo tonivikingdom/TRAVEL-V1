@@ -195,8 +195,10 @@ export async function browserHarness(page: Page) {
   async function open() {
     await page.locator('.connection').click();
     await expect(page.locator('#route-search')).toBeVisible();
+    await chooseFixtureQueryMode(page);
   }
   async function query() {
+    await chooseFixtureQueryMode(page);
     await page.getByRole('button', { name: '搜索路线', exact: true }).click();
     await expect(page.locator('.candidate')).toBeVisible();
   }
@@ -258,4 +260,12 @@ export async function evidence(page: Page, name: string, project: string) {
     path: `docs/status/assets/p6c-2-hardening/${name}.png`,
     fullPage: true,
   });
+}
+
+/** Explicit SYNTHETIC user choice for existing tests with a missing connection.
+ * Their walking candidate is fixture evidence, never a production default. */
+export async function chooseFixtureQueryMode(page: Page) {
+  const select = page.locator('#route-search select[name=travelMode]');
+  if ((await select.count()) && (await select.inputValue()) === '')
+    await select.selectOption('WALKING');
 }

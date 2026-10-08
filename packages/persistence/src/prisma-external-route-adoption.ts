@@ -3,6 +3,8 @@ import {
   compareCanonicalDwellAdjustments,
   hashRoutePreviewPayload,
   type AdoptRoutePreviewResult,
+  type Clock,
+  restoreNormalizedCandidate,
   type StoredRoutePreviewPayload,
 } from '@travel/application';
 import type {
@@ -46,6 +48,7 @@ export async function executeExternalRouteAdoption(
   input: AdoptionInput,
   lockedTrip: LockedTripRow,
   preview: Preview,
+  clock: Clock,
 ): Promise<AdoptRoutePreviewResult> {
   if (lockedTrip.version !== input.baseTripVersion)
     return { status: 'VERSION_CONFLICT' };
@@ -95,13 +98,16 @@ export async function executeExternalRouteAdoption(
     externalOriginId: snapshot.origin.externalOriginId,
   });
   if (!trip || !context) return { status: 'PREVIEW_STALE' };
+  const eligibilityNow = new Date(
+    Math.max(input.now.getTime(), clock.now().getTime()),
+  );
   let locked: StoredRoutePreviewPayload;
   try {
     locked = buildExternalOriginPreviewPayload({
       trip,
       snapshot,
       context,
-      now: input.now,
+      now: eligibilityNow,
       sameHubWalkingLegIndexes: payload.changeSummary.internalTransferDetails
         ?.filter((detail) => detail.evidence === 'USER_CONFIRMED')
         .map((detail) => detail.legIndex),
@@ -551,6 +557,13 @@ export async function executeExternalRouteAdoption(
       createdAt: input.now,
     },
   });
+  // The existing external-origin rule already requires departure >= now.
+  // Recheck with a fresh clock before commit, without altering its time policy.
+  if (
+    restoreNormalizedCandidate(snapshot.candidatePayload).departure.instant <
+    new Date(Math.max(eligibilityNow.getTime(), clock.now().getTime()))
+  )
+    throw new AdoptionAbort('PREVIEW_STALE');
   return {
     status: 'SUCCESS',
     receipt: toReceiptRecord(result),

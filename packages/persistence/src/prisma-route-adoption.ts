@@ -1,6 +1,12 @@
+import { readTripAggregateRecord } from './prisma-trip-repository.js';
 import { executeExternalRouteAdoption } from './prisma-external-route-adoption.js';
 import {
   generatedNodeDeletionProtectionReasons,
+  hasMissedFixedDeparture,
+  restoreNormalizedCandidate,
+  systemClock,
+  type Clock,
+  type RouteCandidatePayload,
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
   compareCanonicalDwellAdjustments,
@@ -92,10 +98,11 @@ export interface ReceiptDelta {
 export async function adoptRoutePreview(
   client: PrismaClient,
   input: AdoptionInput,
+  clock: Clock = systemClock,
 ): Promise<AdoptRoutePreviewResult> {
   try {
     return await client.$transaction(
-      async (transaction) => executeAdoption(transaction, input),
+      async (transaction) => executeAdoption(transaction, input, clock),
       // The owner advisory lock and Trip row lock are the serialization
       // boundary. READ COMMITTED intentionally takes a fresh snapshot after a
       // waiter acquires that advisory lock, so a second device observes the
@@ -113,6 +120,7 @@ export async function adoptRoutePreview(
 async function executeAdoption(
   transaction: Transaction,
   input: AdoptionInput,
+  clock: Clock,
 ): Promise<AdoptRoutePreviewResult> {
   await lockOwner(transaction, input.ownerUserId);
   const existingReceipt = await transaction.operationReceipt.findFirst({
@@ -160,6 +168,7 @@ async function executeAdoption(
       input,
       lockedTrip,
       preview,
+      clock,
     );
   }
   if (lockedTrip.version !== input.baseTripVersion) {
@@ -203,6 +212,32 @@ async function executeAdoption(
   ) {
     return { status: 'PREVIEW_STALE' };
   }
+
+  // Fresh execution facts and server time are read inside the existing locks.
+  // Receipt replay stays above this guard: replay is not a new boarding decision.
+  const departureTrip = await readTripAggregateRecord(transaction, input);
+  if (departureTrip === null) return { status: 'NOT_FOUND' };
+  let departureCandidate;
+  try {
+    departureCandidate = restoreNormalizedCandidate(
+      preview.candidateSnapshot
+        .candidatePayload as unknown as RouteCandidatePayload,
+    );
+  } catch {
+    return { status: 'PREVIEW_STALE' };
+  }
+  const eligibilityNow = new Date(
+    Math.max(input.now.getTime(), clock.now().getTime()),
+  );
+  if (
+    hasMissedFixedDeparture(
+      departureTrip,
+      preview.candidateSnapshot.fromNodeId,
+      departureCandidate,
+      eligibilityNow,
+    )
+  )
+    return { status: 'PREVIEW_STALE' };
 
   const plan = requireCurrentPlan(payload);
   if (plan.protectedBlockingNodes.length > 0) {
@@ -604,6 +639,17 @@ async function executeAdoption(
       createdAt: input.now,
     },
   });
+  // If a departure crosses while writes run, abort rolls back version, edges,
+  // dates, receipts and outbox together. No synthetic access time is inserted.
+  if (
+    hasMissedFixedDeparture(
+      departureTrip,
+      preview.candidateSnapshot.fromNodeId,
+      departureCandidate,
+      new Date(Math.max(eligibilityNow.getTime(), clock.now().getTime())),
+    )
+  )
+    throw new AdoptionAbort('PREVIEW_STALE');
   return {
     status: 'SUCCESS',
     receipt: toReceiptRecord(finalReceipt),

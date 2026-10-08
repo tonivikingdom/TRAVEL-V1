@@ -81,7 +81,12 @@ import {
 } from 'vitest';
 
 import { buildApi } from '../src/app.js';
-import { footprint, onlyWrites } from './helpers/replanning-acceptance.js';
+import {
+  footprint,
+  onlyWrites,
+  gate,
+  waitForOwnerLock,
+} from './helpers/replanning-acceptance.js';
 type JsonInput = Parameters<
   ManagedPrismaClient['client']['routePreview']['create']
 >[0]['data']['previewPayload'];
@@ -3320,6 +3325,85 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     });
   });
 
+  it('RWS-02 external: elapsed fixed departure during Provider I/O cannot save a snapshot', async () => {
+    const f = await externalPreviewFixture(); // 10:29, fixed RAIL 10:30.
+    const version = await readVersion(f.tripId);
+    const before = await externalDurableState(f.tripId);
+    providerHook = async () => {
+      currentNow = new Date('2030-10-01T10:31:00Z');
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+      headers: bearer(userA),
+      payload: { basisVersion: version, toNodeId: f.D.id },
+    });
+    expect(response.statusCode, response.body).toBe(404);
+    expect(response.json().error.code).toBe('NO_MATCHING_CANDIDATE');
+    expect(await externalDurableState(f.tripId)).toEqual(before);
+  });
+  it.each(['query', 'preview', 'adopt'] as const)(
+    'RWS-02 external: %s rechecks fixed departure after the owner lock',
+    async (phase) => {
+      const f = await externalPreviewFixture();
+      const previewResponse = await previewFromExternalFixture(f);
+      expect(previewResponse.statusCode, previewResponse.body).toBe(201);
+      const preview = previewResponse.json<RoutePreviewView>();
+      expect(preview.expiresAt).toBe('2030-10-01T10:39:00.000Z');
+      const before = await externalDurableState(f.tripId);
+      const locked = gate(),
+        release = gate();
+      const holder = managed.client.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT true AS locked FROM pg_advisory_xact_lock(hashtextextended(${userA.actor.userId}, 2))`;
+          locked.release();
+          await release.pending;
+        },
+        { timeout: 15000 },
+      );
+      await locked.pending;
+      const request =
+        phase === 'query'
+          ? app.inject({
+              method: 'POST',
+              url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+              headers: bearer(userA),
+              payload: { basisVersion: preview.basisVersion, toNodeId: f.D.id },
+            })
+          : phase === 'preview'
+            ? previewFromExternalFixture(f)
+            : adopt(
+                userA,
+                { ...f.first.trip, version: preview.basisVersion },
+                preview.previewId,
+                randomUUID(),
+              );
+      try {
+        await waitForOwnerLock(managed, 1);
+        currentNow = new Date('2030-10-01T10:31:00Z');
+        release.release();
+        const response = await request;
+        expect(response.statusCode, response.body).toBe(
+          phase === 'query' ? 404 : 409,
+        );
+        expect(response.json().error.code).toBe(
+          phase === 'query' ? 'NO_MATCHING_CANDIDATE' : 'PREVIEW_STALE',
+        );
+        const read = await app.inject({
+          method: 'GET',
+          url: `/trips/${f.tripId}/previews/${preview.previewId}`,
+          headers: bearer(userA),
+        });
+        expect(read.statusCode, read.body).toBe(409);
+        expect(read.json().error.code).toBe('PREVIEW_STALE');
+        expect(await externalDurableState(f.tripId)).toEqual(before);
+      } finally {
+        release.release();
+        await holder;
+        await request;
+      }
+    },
+  );
   it('P5E2 5B2A: destination minimum dwell and downstream hard departure are revalidated', async () => {
     const f = await externalPreviewFixture();
     await managed.client.userTimeIntent.create({
@@ -11616,6 +11700,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     'P5E2 repair A/B: suffix Undo at %s protects deletion by full/earlier suffix replacement',
     async (origin) => {
       const f = await repairRestoredFixture(origin);
+      // Historical correction after the Trip period; original route/fact clocks remain intact.
+      currentNow = new Date('2030-10-02T00:00:00Z');
       providerResult = suffixFoundationCandidate(
         true,
         origin === 'B' ? '2030-10-01T10:00:00Z' : '2030-10-01T10:30:00Z',
@@ -11682,6 +11768,8 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
   it('P5E2 repair C: referenced generated anchor can be reused with its original ID', async () => {
     const f = await repairRestoredFixture();
+    // Historical correction after the Trip period; original route/fact clocks remain intact.
+    currentNow = new Date('2030-10-02T00:00:00Z');
     const source = suffixFoundationCandidate(false).candidates[0]!;
     const first = source.legs[0]!;
     const last = source.legs.at(-1)!;
@@ -11733,6 +11821,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
 
   it('P5E2 repair D: unadopted suffix Query/Preview does not permanently protect nodes', async () => {
     const f = await suffixFixture(false);
+    // Create both temporary and replacement evidence in one historical-edit window.
+    // The temporary Preview stays unexpired, preserving the original protection test.
+    currentNow = new Date('2030-10-02T00:00:00Z');
     const temporary = await createPreview(userA, f.first.trip, f.B.id, f.D.id, {
       type: 'DEPART_AT',
       instant: '2030-10-01T10:30:00Z',
@@ -11771,6 +11862,9 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     'P5E2 repair E: locked Adopt rechecks new persistent %s reference after Preview',
     async (reference) => {
       const f = await suffixFixture(false);
+      // Create both temporary and replacement evidence in one historical-edit window.
+      // The temporary Preview stays unexpired, preserving the original protection test.
+      currentNow = new Date('2030-10-02T00:00:00Z');
       const temporary = await createPreview(
         userA,
         f.first.trip,

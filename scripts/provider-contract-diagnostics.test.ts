@@ -184,3 +184,49 @@ it('SYNTHETIC Baidu business code cannot override an HTTP transport failure', as
   expect(report.capabilities[0]!.status).toBe('PROVIDER_ERROR');
   expect(report.capabilities[0]!.httpStatus).toBe(500);
 });
+
+it.each(['shape', 'coordinate', 'binding'] as const)(
+  'SYNTHETIC Doctor propagates Baidu %s stages without leaking response fields',
+  async (kind) => {
+    const from = { lat: 39.915, lng: 116.404 },
+      to = { lat: 39.925, lng: 116.414 };
+    const b = {
+      status: 0,
+      message: keys.BAIDU_SERVER_API_KEY,
+      result: {
+        origin: { originPt: from },
+        destination: { destinationPt: to },
+        routes: [{ duration: 600 }],
+      },
+    };
+    // Doctor's trusted Beijing fixture remains unchanged. Only the failure fixture
+    // uses alternate coordinates; no synthetic success is mislabeled as live.
+    if (kind === 'shape')
+      Object.assign(b.result, {
+        routes: { private: keys.GOOGLE_SERVER_API_KEY },
+      });
+    if (kind === 'coordinate')
+      Object.assign(from, { lat: keys.BAIDU_SERVER_API_KEY });
+    const report = await providerDoctor(keys, {
+      live: true,
+      only: ['baidu-walking'],
+      now: () => now,
+      fetcher: async () => new Response(JSON.stringify(b)),
+    });
+    const c = report.capabilities[0]!;
+    expect(report.requestCount).toBe(1);
+    expect(c.businessStatus).toBe(0);
+    const end = c.diagnostics.at(-1)!;
+    // All unbound endpoints must stop before downstream Domain validation.
+    expect(c.status).toBe('CONTRACT_MISMATCH');
+    expect(end.stage).toBe(
+      kind === 'shape'
+        ? 'RESPONSE_SHAPE'
+        : kind === 'coordinate'
+          ? 'COORDINATE_PARSE'
+          : 'ENDPOINT_BINDING',
+    );
+    for (const privateValue of [...Object.values(keys), '39.915', '116.404'])
+      expect(JSON.stringify(report)).not.toContain(privateValue);
+  },
+);

@@ -78,7 +78,11 @@ export type SaveRouteCandidateSnapshotsResult =
       readonly snapshots: readonly RouteCandidateSnapshotRecord[];
     }
   | {
-      readonly status: 'NOT_FOUND' | 'VERSION_CONFLICT' | 'NOT_ADJACENT';
+      readonly status:
+        | 'NOT_FOUND'
+        | 'VERSION_CONFLICT'
+        | 'NOT_ADJACENT'
+        | 'NO_MATCHING_CANDIDATE';
     };
 
 export type CreateRoutePreviewResult =

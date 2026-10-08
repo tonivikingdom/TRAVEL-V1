@@ -14,7 +14,7 @@
    | Browser build variable | `VITE_BAIDU_MAPS_BROWSER_KEY`  | 百度 JSAPI 4.0、官方 JS 坐标转换，独立的 Browser AK                                       |
 
 2. **Save，再 Publish/Republish environment**。草稿保存、运行实例与发布版本不是同一件事。
-3. **创建新的 Cloud task，明确选择已发布的 TRAVEL-V1 environment**。本变更合并前，任务使用 `feat/real-provider-bootstrap` 分支；不能假定 main 已合并。按仓库正常安装、迁移、构建步骤准备该分支。
+3. **创建新的 Cloud task，明确选择已发布的 TRAVEL-V1 environment**。本变更合并前，任务使用 `feat/real-provider-bootstrap-cloud` 分支；不能假定 main 已合并。按仓库正常安装、迁移、构建步骤准备该分支。
 4. 在 `/workspace/TRAVEL-V1` 运行 `pnpm provider:doctor`。
 5. 核对配置结果后，显式运行 `pnpm provider:doctor --live`。验收任务使用 `APP_ENV=development` 或 `test`；production/staging 被此工具拒绝。
 

@@ -6,7 +6,7 @@
 
 - 仓库：`tonivikingdom/TRAVEL-V1`。
 - 已 fetch 并确认开始时 `origin/main`：`7ed43747c9da17bc8eec6bd71374ea7321aab147`。
-- 分支：`feat/real-provider-bootstrap`。精确交付 HEAD 见最终交付消息及该分支提交记录。
+- 分支：`feat/real-provider-bootstrap-cloud`。实现提交：`f3b0d43`；精确交付 HEAD 见最终交付消息及分支记录。远程同名原分支已含其他提交，因此本次使用独立新分支，未覆盖它。
 - Draft PR：等待提交、推送后的创建结果；当前 `api.github.com` 被 Cloud 网络代理拒绝，Git 读取已验证可用，API 权限尚未证实。
 - 没有合并、production 部署或 production gate 自动审批；本任务不修改 Cloud Environment 配置。
 

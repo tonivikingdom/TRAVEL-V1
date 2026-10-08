@@ -1,0 +1,67 @@
+{
+  "candidateSnapshotId": "10000000-0000-4000-8000-000000000001",
+  "snapshotExpiresAt": "2026-10-08T04:15:00Z",
+  "candidateId": "SYNTHETIC-CANDIDATE",
+  "provider": "baidu",
+  "providerCandidateRef": null,
+  "observedAt": "2026-10-08T04:00:00Z",
+  "validUntil": null,
+  "queryBasisVersion": 1,
+  "queryTimeCondition": {
+    "hardEarliestDeparture": "2026-10-10T10:00:00.000Z",
+    "hardLatestArrival": null,
+    "earliestDeparture": "2026-10-10T10:00:00.000Z",
+    "latestArrival": null,
+    "preference": {
+      "type": "DEPART_AT",
+      "instant": "2026-10-10T10:00:00.000Z",
+      "timeZone": "Asia/Shanghai"
+    },
+    "hint": {
+      "type": "DEPART_AT",
+      "instant": "2026-10-10T10:00:00.000Z",
+      "timeZone": "Asia/Shanghai"
+    }
+  },
+  "overall": {
+    "departure": {
+      "instant": "2026-10-10T10:00:00.000Z",
+      "timeZone": "Asia/Shanghai"
+    },
+    "arrival": {
+      "instant": "2026-10-10T10:30:00.000Z",
+      "timeZone": "Asia/Shanghai"
+    },
+    "durationSeconds": 1800
+  },
+  "legs": [
+    {
+      "mode": "TRANSIT",
+      "from": {
+        "name": "SYNTHETIC 前一地点 · 长地点名称和地址用于旅行场景验收",
+        "latitude": 39.907255,
+        "longitude": 116.391386,
+        "providerPlaceRef": null
+      },
+      "to": {
+        "name": "SYNTHETIC 高铁站 · 长地点名称和地址用于旅行场景验收",
+        "latitude": 39.917278,
+        "longitude": 116.401381,
+        "providerPlaceRef": null
+      },
+      "departure": {
+        "instant": "2026-10-10T10:00:00.000Z",
+        "timeZone": "Asia/Shanghai"
+      },
+      "arrival": {
+        "instant": "2026-10-10T10:30:00.000Z",
+        "timeZone": "Asia/Shanghai"
+      },
+      "durationSeconds": 1800,
+      "fixedService": false,
+      "serviceLabel": null,
+      "providerRef": "endpoint-evidence:v1:{\"provider\":\"BAIDU\",\"coordinateSystem\":\"BD09\",\"requestedOrigin\":{\"latitude\":39.907255,\"longitude\":116.391386},\"requestedDestination\":{\"latitude\":39.917278,\"longitude\":116.401381},\"rawStart\":{\"latitude\":39.915,\"longitude\":116.404},\"rawEnd\":{\"latitude\":39.925,\"longitude\":116.414},\"normalizedStart\":{\"latitude\":39.907255,\"longitude\":116.391386},\"normalizedEnd\":{\"latitude\":39.917278,\"longitude\":116.401381},\"originOffsetMeters\":0,\"destinationOffsetMeters\":0}"
+    }
+  ],
+  "fare": null
+}

@@ -46,9 +46,13 @@ export function impactPresentation(
     description: '未发现已有事实与要求的冲突；不代表实时运行保证。',
   };
 }
-export function impactSummary(trip: TripView, impact: TripImpactView | null) {
+export function impactSummary(
+  trip: TripView,
+  impact: TripImpactView | null,
+  compact = false,
+) {
   const p = impactPresentation(trip, impact);
-  return `<section class="trip-impact impact-${p.tone}" aria-label="后续影响"><div><strong>${esc(p.title)}</strong><p>${esc(p.description)}</p></div><button data-action="view-impact"><span class="control-content">查看影响</span></button></section>`;
+  return `<section class="trip-impact impact-${p.tone}${compact ? ' impact-compact' : ''}" aria-label="后续影响"><div><strong>${esc(p.title)}</strong>${compact ? '' : `<p>${esc(p.description)}</p>`}</div><button data-action="view-impact"><span class="control-content">查看影响</span></button></section>`;
 }
 export function impactDetails(trip: TripView, impact: TripImpactView | null) {
   const p = impactPresentation(trip, impact),

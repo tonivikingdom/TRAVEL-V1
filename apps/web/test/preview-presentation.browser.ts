@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { previewCases } from './preview-fixture.js';
-import { browserHarness } from './helpers/replanning-acceptance.js';
+import {
+  browserHarness,
+  chooseFixtureQueryMode,
+} from './helpers/replanning-acceptance.js';
 const assets = 'docs/status/assets/p6c-2-preview';
 test.use({ viewport: { width: 390, height: 844 } });
 test('SYNTHETIC search-only draft refuses route/Preview replacement and retains exact draft', async ({
@@ -281,6 +284,7 @@ for (const blocked of [false, true]) {
     await page.goto('/');
     await page.locator('[data-trip]').click();
     await page.locator('.connection').click();
+    await chooseFixtureQueryMode(page);
     await page.getByRole('button', { name: '搜索路线' }).click();
     await page.locator('.candidate').click();
     await expect(page.locator('.preview-presentation')).toBeVisible();

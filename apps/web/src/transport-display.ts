@@ -1,7 +1,13 @@
-import type { TemporalValueView } from '@travel/contracts';
+import type { TemporalValueView, TransportMode } from '@travel/contracts';
 import { formatTime } from './model.js';
 
 type ClockValue = Pick<TemporalValueView, 'instant' | 'timeZone'>;
+/** Presentation qualifier only: do not rewrite saved layers or Provider evidence. */
+export function isAggregateTransit(
+  transport?: { mode: TransportMode; fixedService: boolean } | null,
+) {
+  return transport?.mode === 'TRANSIT' && !transport.fixedService;
+}
 const zoneNames: Readonly<Record<string, string>> = {
   'Asia/Tokyo': '东京',
   'Asia/Shanghai': '上海',

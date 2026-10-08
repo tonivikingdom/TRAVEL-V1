@@ -4,7 +4,10 @@ import type {
   RouteTimePointView,
 } from '@travel/contracts';
 import { duration, esc, modeLabel } from './model.js';
-import { transportClockParts } from './transport-display.js';
+import {
+  isAggregateTransit,
+  transportClockParts,
+} from './transport-display.js';
 
 export interface PreviewPresentation {
   readonly scope: string;
@@ -160,9 +163,15 @@ export function previewPresentation(
     const parts = transportClockParts(t);
     return parts ? `${parts.date} ${parts.clock} · ${parts.zone}` : '待定';
   };
+  const departureQualifier = isAggregateTransit(p.candidate.legs[0])
+    ? '预计'
+    : '计划';
+  const arrivalQualifier = isAggregateTransit(p.candidate.legs.at(-1))
+    ? '预计'
+    : '计划';
   const times = [
-    `新方案计划出发 ${time(p.candidate.overall.departure)}`,
-    `新方案计划到达 ${time(p.candidate.overall.arrival)}`,
+    `新方案${departureQualifier}出发 ${time(p.candidate.overall.departure)}`,
+    `新方案${arrivalQualifier}到达 ${time(p.candidate.overall.arrival)}`,
   ];
   const impact = s.downstreamImpact;
   if (impact) {
@@ -192,7 +201,7 @@ export function previewPresentation(
     order: segment.legIndex ?? index,
     service: segment.serviceLabel?.trim() || modeLabel[segment.mode] || '交通',
     endpoints: `${refLabel(segment.fromRef)} → ${refLabel(segment.toRef)}`,
-    time: `计划 ${time(segment.departure)} → ${time(segment.arrival)}`,
+    time: `${isAggregateTransit(segment) ? '预计' : '计划'} ${time(segment.departure)} → ${time(segment.arrival)}`,
   }));
   const internal = (s.internalTransferDetails ?? []).map((transfer) => ({
     order: transfer.legIndex,
@@ -208,7 +217,7 @@ export function previewPresentation(
         ? p.candidate.legs.map((leg) => ({
             service: leg.serviceLabel?.trim() || modeLabel[leg.mode] || '交通',
             endpoints: `${leg.from.name?.trim() || '起点待定'} → ${leg.to.name?.trim() || '终点待定'}`,
-            time: `计划 ${time(leg.departure)} → ${time(leg.arrival)}`,
+            time: `${isAggregateTransit(leg) ? '预计' : '计划'} ${time(leg.departure)} → ${time(leg.arrival)}`,
           }))
         : orderedSegments;
   if (

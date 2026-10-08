@@ -1,3 +1,4 @@
+import { chooseFixtureQueryMode } from './helpers/replanning-acceptance.js';
 import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { expect, test, type Page } from '@playwright/test';
 import {
@@ -55,6 +56,7 @@ async function enter(page: Page) {
 }
 async function route(page: Page) {
   await page.locator('.connection').click();
+  await chooseFixtureQueryMode(page);
   await page.getByRole('button', { name: '搜索路线' }).click();
   await expect(page.locator('.candidate')).toBeVisible();
 }
@@ -367,6 +369,7 @@ test('query edit invalidates delayed responses and chosen preview', async ({
   await enter(page);
   await page.locator('.connection').click();
   delayQuery = true;
+  await chooseFixtureQueryMode(page);
   await page.getByRole('button', { name: '搜索路线' }).click();
   await page.locator('#route-search input[name=when]').fill('2030-10-01T16:00');
   await page.waitForTimeout(800);
@@ -379,6 +382,7 @@ test('provider failure is distinct from empty routes and preserves external exit
   await enter(page);
   await page.locator('.connection').click();
   failQuery = true;
+  await chooseFixtureQueryMode(page);
   await page.getByRole('button', { name: '搜索路线' }).click();
   await expect(page.locator('#save-status')).toContainText('服务暂时不可用');
   await expect(page.getByRole('link', { name: '查看起终点' })).toBeVisible();
@@ -634,6 +638,7 @@ test('ARRIVE_BY submits explicit date and timezone without becoming DEPART_AT', 
     'Asia/Tokyo',
   );
   const request = page.waitForRequest((r) => r.url().endsWith('/routes/query'));
+  await chooseFixtureQueryMode(page);
   await page.getByRole('button', { name: '搜索路线' }).click();
   expect((await request).postDataJSON()).toMatchObject({
     basisVersion: 1,
@@ -1013,6 +1018,7 @@ test('R2 abandoning recovery draft ends its context before unrelated route searc
   await page.getByRole('button', { name: '重新载入' }).click();
   await page.getByRole('button', { name: '东京慢旅行' }).click();
   await page.locator('.connection').click();
+  await chooseFixtureQueryMode(page);
   await page.getByRole('button', { name: '搜索路线' }).click();
   await expect(page.locator('.candidate')).toBeVisible();
   expect(calls.filter((p) => p.endsWith('/routes/query'))).toHaveLength(1);

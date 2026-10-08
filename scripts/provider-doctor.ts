@@ -15,6 +15,11 @@ import {
   safeDiagnostic,
   type ProviderDiagnostic,
 } from '../packages/providers/src/contract-diagnostics.js';
+import {
+  providerResponseEvidence,
+  safeResponseEvidence,
+  type ProviderResponseEvidence,
+} from './provider-response-diagnostics.js';
 
 export const CAPABILITY_IDS = [
   'google-places',
@@ -118,6 +123,7 @@ export interface DoctorCapability {
   requestCount: number;
   httpStatus?: number;
   diagnostics: ProviderDiagnostic[];
+  responseEvidence?: ProviderResponseEvidence;
   businessStatus?: number;
   businessDiagnosis?: BaiduBusinessDiagnosis;
   commercialAuthorization?: 'REVIEW_REQUIRED' | 'NOT_INDICATED' | 'UNKNOWN';
@@ -302,6 +308,15 @@ export async function providerDoctor(
           code: response.ok ? 'PASSED' : 'REQUEST_REJECTED',
         });
         const text = await response.clone().text();
+        const evidence = safeResponseEvidence(
+          providerResponseEvidence(
+            check.provider,
+            url instanceof Request ? url.url : String(url),
+            response,
+            text,
+          ),
+        );
+        if (evidence) entry.responseEvidence = evidence;
         if (
           response.status === 403 &&
           /domain forbidden|connect tunnel failed/iu.test(text)

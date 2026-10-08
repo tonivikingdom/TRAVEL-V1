@@ -1,5 +1,6 @@
 import { readTripAggregateRecord } from './prisma-trip-repository.js';
 import { executeExternalRouteAdoption } from './prisma-external-route-adoption.js';
+import { hasExpiredAdoptionEvidence } from './route-adoption-evidence.js';
 import {
   generatedNodeDeletionProtectionReasons,
   hasMissedFixedDeparture,
@@ -175,14 +176,16 @@ async function executeAdoption(
     return { status: 'VERSION_CONFLICT' };
   }
   if (preview === null) return { status: 'NOT_FOUND' };
+  // Request time may precede a lock wait. Replay and version priority above
+  // are unchanged; new adoption must use the fresh, trusted injected clock.
+  const eligibilityNow = new Date(
+    Math.max(input.now.getTime(), clock.now().getTime()),
+  );
   if (
     preview.candidateSnapshot.fromNodeId === null ||
     preview.candidateSnapshot.originKind !== 'ITINERARY_NODE' ||
     preview.policyVersion !== 'route-adoption-preview-v3' ||
-    preview.expiresAt <= input.now ||
-    preview.candidateSnapshot.expiresAt <= input.now ||
-    (preview.candidateSnapshot.providerValidUntil !== null &&
-      preview.candidateSnapshot.providerValidUntil <= input.now) ||
+    hasExpiredAdoptionEvidence(preview, eligibilityNow) ||
     preview.basisVersion !== input.baseTripVersion ||
     preview.candidateHash !== preview.candidateSnapshot.candidateHash
   ) {
@@ -226,9 +229,6 @@ async function executeAdoption(
   } catch {
     return { status: 'PREVIEW_STALE' };
   }
-  const eligibilityNow = new Date(
-    Math.max(input.now.getTime(), clock.now().getTime()),
-  );
   if (
     hasMissedFixedDeparture(
       departureTrip,
@@ -639,14 +639,18 @@ async function executeAdoption(
       createdAt: input.now,
     },
   });
-  // If a departure crosses while writes run, abort rolls back version, edges,
-  // dates, receipts and outbox together. No synthetic access time is inserted.
+  // If evidence or departure expires while writes run, abort rolls back every
+  // provisional write. No TTL renewal or synthetic access time is inserted.
+  const commitNow = new Date(
+    Math.max(eligibilityNow.getTime(), clock.now().getTime()),
+  );
   if (
+    hasExpiredAdoptionEvidence(preview, commitNow) ||
     hasMissedFixedDeparture(
       departureTrip,
       preview.candidateSnapshot.fromNodeId,
       departureCandidate,
-      new Date(Math.max(eligibilityNow.getTime(), clock.now().getTime())),
+      commitNow,
     )
   )
     throw new AdoptionAbort('PREVIEW_STALE');

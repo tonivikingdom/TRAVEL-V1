@@ -7,7 +7,7 @@
 - 仓库：`tonivikingdom/TRAVEL-V1`。
 - 已 fetch 并确认开始时 `origin/main`：`7ed43747c9da17bc8eec6bd71374ea7321aab147`。
 - 分支：`feat/real-provider-bootstrap-cloud`。实现提交：`f3b0d43`；精确交付 HEAD 见最终交付消息及分支记录。远程同名原分支已含其他提交，因此本次使用独立新分支，未覆盖它。
-- Draft PR：等待提交、推送后的创建结果；当前 `api.github.com` 被 Cloud 网络代理拒绝，Git 读取已验证可用，API 权限尚未证实。
+- 远程分支已推送：`origin/feat/real-provider-bootstrap-cloud`。Draft PR：**BLOCKED / 未创建**。实际 `gh pr create --draft --base main --head feat/real-provider-bootstrap-cloud` 返回 `Post https://api.github.com/graphql: Forbidden`；Git HTTPS 推送成功不代表 API 可用。需要在 Cloud Environment 网络设置中放行 `api.github.com` 后继续，不能请求或提取 GitHub token。
 - 没有合并、production 部署或 production gate 自动审批；本任务不修改 Cloud Environment 配置。
 
 ## 实现与能力边界
@@ -49,7 +49,7 @@ Mainland China 仍统一 Baidu；Japan TRANSIT 保留 Google Consumer Transit si
 | `pnpm provider:doctor --live`，四项缺失                | 如预期退出 1：SECRET_UNSET、0 请求；没有真实 API 验收                                                                       |
 | `pnpm format:check` / `git diff --check`               | PASS；新增环境文档另经显式 Prettier 检查                                                                                    |
 
-验证在 dev/test 隔离数据库进行，Provider fixtures 明示 SYNTHETIC。测试生成截图保存在 checkout 外，仓库历史 PNG 已恢复，不把本地截图刷新混入本次变更。PG 驱动对既有并发 query 输出 deprecation warning，不影响断言结果。WebKit 和远程 CI 未运行；不能将本地 Chromium 或 mock SDK 等同真实跨浏览器 / Provider 验收。
+验证在 dev/test 隔离数据库进行，Provider fixtures 明示 SYNTHETIC。测试生成截图保存在 checkout 外，仓库历史 PNG 已恢复，不把本地截图刷新混入本次变更。PG 驱动对既有并发 query 输出 deprecation warning，不影响断言结果。本地 WebKit 未运行，远程 CI 因 API 受限未查询确认；不能将本地 Chromium 或 mock SDK 等同真实跨浏览器 / Provider 验收。
 
 ## 修改文件
 
@@ -72,4 +72,4 @@ Mainland China 仍统一 Baidu；Japan TRANSIT 保留 Google Consumer Transit si
 4. `pnpm provider:doctor`。
 5. `pnpm provider:doctor --live`。
 
-完成上述步骤后仍需单独做真实 Browser map / 坐标准确性与许可证审核；所有 production gates 保持 false，直到逐项审核。Draft PR 需要 Cloud 网络放行 `api.github.com`，然后继续创建并等待 CI；不需要用户提供 GitHub token。
+完成上述步骤后仍需单独做真实 Browser map / 坐标准确性与许可证审核；所有 production gates 保持 false，直到逐项审核。停止点：Draft PR 尚未创建，远程 CI 未确认。需要 Cloud 网络放行 `api.github.com`，然后继续创建 Draft PR 并等待 CI；不需要用户提供 GitHub token。

@@ -76,6 +76,24 @@ export class DetailDrawer {
       this.element.style.removeProperty('--sheet-viewport-bottom');
     }
     const head = this.element.querySelector<HTMLElement>('.sheet-head');
+    const active = document.activeElement;
+    const input =
+      active instanceof HTMLElement &&
+      this.element.contains(active) &&
+      active.matches('input,textarea,select')
+        ? active
+        : null;
+    // A long sticky title must not consume the input's entire visible scroll area.
+    // Keep the same scroll container and handle; let the header scroll when needed.
+    this.element.dataset.focusScroll = String(
+      matchMedia('(max-width: 760px)').matches &&
+        !!head &&
+        !!input &&
+        head.getBoundingClientRect().height +
+          input.getBoundingClientRect().height +
+          32 >
+          this.element.clientHeight,
+    );
     if (head)
       this.element.style.setProperty(
         '--sheet-head-height',
@@ -119,6 +137,7 @@ export class DetailDrawer {
     this.element.close();
     this.element.style.removeProperty('--sheet-viewport-height');
     this.element.style.removeProperty('--sheet-viewport-bottom');
+    delete this.element.dataset.focusScroll;
     document.body.style.overflow = this.priorOverflow;
     this.closed();
     const target = this.opener?.isConnected

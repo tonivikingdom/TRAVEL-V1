@@ -1,0 +1,29 @@
+{
+  "synthetic": true,
+  "viewport": {
+    "width": 375,
+    "height": 380,
+    "offsetTop": 20
+  },
+  "detail": {
+    "top": 50,
+    "bottom": 400,
+    "height": 350
+  },
+  "header": {
+    "top": -823,
+    "bottom": -622.125,
+    "height": 200.875
+  },
+  "body": {
+    "top": -622.125,
+    "bottom": 533.625,
+    "height": 1155.75
+  },
+  "focusedInput": {
+    "top": 242.734375,
+    "bottom": 376.296875,
+    "height": 133.5625
+  },
+  "rootFontSize": "24px"
+}

@@ -1,0 +1,197 @@
+{
+  "synthetic": true,
+  "baselineBranch": "feat/real-provider-bootstrap-cloud",
+  "baselineHead": "4a2a5dfc0b2cabf5e1d2750b53043b0ca464bde8",
+  "qaBranch": "qa/v1-travel-scenarios",
+  "migration": {
+    "total": 27,
+    "delta": 0
+  },
+  "productionCodeDelta": 0,
+  "validation": {
+    "frozenInstall": "PASS",
+    "prismaGenerate": "PASS",
+    "prismaValidate": "PASS",
+    "cleanMigrationDeploy": "PASS (27)",
+    "lint": "PASS",
+    "typecheck": "PASS",
+    "build": "PASS",
+    "format": "PASS"
+  },
+  "unit": {
+    "pass": 1071,
+    "fail": 0,
+    "newCases": 10
+  },
+  "postgresql": {
+    "pass": 692,
+    "fail": 2,
+    "baselinePass": 683,
+    "newPass": 9,
+    "newFail": 2,
+    "failedInvariants": [
+      "RWS-02: Query rejects already-departed service",
+      "RWS-02: Adopt rechecks current departure eligibility"
+    ]
+  },
+  "browserFullRunBeforeFinalNewViewportRegression": {
+    "tests": 680,
+    "pass": 670,
+    "fail": 10,
+    "baselinePassPerEngine": 327,
+    "newPassPerEngine": 8,
+    "newFailPerEngine": 5
+  },
+  "finalFocusedBrowserAcceptance": {
+    "chromium": {
+      "pass": 8,
+      "fail": 6,
+      "cases": [
+        {
+          "title": "future Shanghai 18:00 Web request retains Oct10 absolute date, never Oct8/NOW",
+          "status": "PASS"
+        },
+        {
+          "title": "ordinary DRIVING search passes mode to the regional Provider (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "ordinary TRANSIT search passes mode to the regional Provider (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "duration-only TRANSIT candidate visibly qualifies calculated clock times as estimates",
+          "status": "FAIL"
+        },
+        {
+          "title": "18:00 origin constraint disables an already-departed 17:55 candidate without Preview or writes",
+          "status": "PASS"
+        },
+        {
+          "title": "already-departed 18:00 option is disabled at 18:05 while still at origin (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "internal scrolling leaves sheet open; short handle drag rebounds and long drag closes without writes",
+          "status": "PASS"
+        },
+        {
+          "title": "Today/Next keeps one next-step, omits full timeline and is zero-write",
+          "status": "PASS"
+        },
+        {
+          "title": "Today/Next important conflict remains discoverable in the first viewport with long notes (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "320px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "FAIL"
+        },
+        {
+          "title": "375px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "PASS"
+        },
+        {
+          "title": "390px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "PASS"
+        },
+        {
+          "title": "430px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "PASS"
+        },
+        {
+          "title": "map capability failure is local: note/time controls and route search remain available",
+          "status": "PASS"
+        }
+      ]
+    },
+    "webkit": {
+      "pass": 8,
+      "fail": 6,
+      "cases": [
+        {
+          "title": "future Shanghai 18:00 Web request retains Oct10 absolute date, never Oct8/NOW",
+          "status": "PASS"
+        },
+        {
+          "title": "ordinary DRIVING search passes mode to the regional Provider (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "ordinary TRANSIT search passes mode to the regional Provider (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "duration-only TRANSIT candidate visibly qualifies calculated clock times as estimates",
+          "status": "FAIL"
+        },
+        {
+          "title": "18:00 origin constraint disables an already-departed 17:55 candidate without Preview or writes",
+          "status": "PASS"
+        },
+        {
+          "title": "already-departed 18:00 option is disabled at 18:05 while still at origin (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "internal scrolling leaves sheet open; short handle drag rebounds and long drag closes without writes",
+          "status": "PASS"
+        },
+        {
+          "title": "Today/Next keeps one next-step, omits full timeline and is zero-write",
+          "status": "PASS"
+        },
+        {
+          "title": "Today/Next important conflict remains discoverable in the first viewport with long notes (acceptance regression)",
+          "status": "FAIL"
+        },
+        {
+          "title": "320px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "FAIL"
+        },
+        {
+          "title": "375px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "PASS"
+        },
+        {
+          "title": "390px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "PASS"
+        },
+        {
+          "title": "430px long names, enlarged font, keyboard simulation, scroll and dirty handle guard",
+          "status": "PASS"
+        },
+        {
+          "title": "map capability failure is local: note/time controls and route search remain available",
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "combinedUniqueBrowserCasesPerEngine": {
+    "baselinePass": 327,
+    "newPass": 8,
+    "newFail": 6,
+    "total": 341,
+    "pass": 335,
+    "fail": 6,
+    "note": "Full unchanged-baseline regression plus final focused QA run; not a single final full-suite invocation."
+  },
+  "failureIds": [
+    "RWS-01 missing Web travelMode",
+    "RWS-02 departed service remains adoptable",
+    "RWS-03 aggregate clock lacks estimated label",
+    "RWS-04 320px enlarged keyboard input clipped",
+    "RWS-05 Today important conflict below first viewport"
+  ],
+  "blocked": [
+    "Real paid Provider acceptance prohibited by task",
+    "Physical iPhone Safari/keyboard/native handoff unavailable"
+  ],
+  "ci": {
+    "status": "NOT_RUN",
+    "reason": "No PR requested; repository workflow triggers on PR or main push only."
+  },
+  "compose": "NOT_RUN (not requested in this QA scope)",
+  "p5b": "NOT_RUN (not requested in this QA scope)"
+}

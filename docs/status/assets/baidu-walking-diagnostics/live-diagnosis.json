@@ -1,0 +1,19 @@
+{
+  "mode": "LIVE",
+  "productionAuthorization": "NOT_REVIEWED",
+  "requestCount": 1,
+  "capabilities": [
+    {
+      "name": "Baidu Walking",
+      "status": "NETWORK_BLOCKED",
+      "requestCount": 1,
+      "diagnostics": [
+        {
+          "stage": "HTTP_STATUS",
+          "field": "response",
+          "code": "NETWORK_BLOCKED"
+        }
+      ]
+    }
+  ]
+}

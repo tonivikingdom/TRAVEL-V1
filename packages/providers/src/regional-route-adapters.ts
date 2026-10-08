@@ -5,10 +5,12 @@ import type {
   RouteProviderResult,
 } from '@travel/application';
 import type { NormalizedRouteCandidate } from '@travel/domain';
+import { baiduToWgs84 } from './baidu-coordinates.js';
 import { bindProviderEndpoints } from './endpoint-binding.js';
 import { coordinate, json, record } from './regional-http.js';
 import {
   contractStep,
+  ProviderContractError,
   type DiagnosticObserver,
 } from './contract-diagnostics.js';
 function knownZones(input: RouteProviderQueryInput): boolean {
@@ -252,6 +254,7 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
     private readonly fetcher: typeof fetch = fetch,
     private readonly now: () => Date = () => new Date(),
     private readonly futureDrivingApproved = false,
+    private readonly diagnostics?: DiagnosticObserver,
   ) {}
   async queryRoutes(
     input: RouteProviderQueryInput,
@@ -349,11 +352,17 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
         return { status: 'UNSUPPORTED_QUERY' };
       if (body.status === 7 || (mode === 'TRANSIT' && body.status === 1001))
         return { status: 'NO_MATCHING_CANDIDATE' };
-      if (
-        body.status !== 0 ||
-        !Array.isArray(result.routes) ||
-        result.routes.length > 5
-      )
+      if (body.status !== 0) throw new Error('INVALID_PROVIDER_RESPONSE');
+      contractStep(
+        this.diagnostics,
+        'RESPONSE_SHAPE',
+        'response.result.routes',
+        () => {
+          if (!Array.isArray(result.routes) || result.routes.length > 5)
+            throw new Error('INVALID_PROVIDER_RESPONSE');
+        },
+      );
+      if (!Array.isArray(result.routes))
         throw new Error('INVALID_PROVIDER_RESPONSE');
       if (result.routes.length === 0)
         return { status: 'NO_MATCHING_CANDIDATE' };
@@ -367,34 +376,114 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
         )
           return { status: 'UNSUPPORTED_QUERY' }; // Cross-city contracts require separate acceptance.
       }
-      const binding = bindProviderEndpoints(
-        'BAIDU',
-        input.origin,
-        input.destination,
-        mode === 'TRANSIT'
-          ? from.location
-          : mode === 'DRIVING'
-            ? from
-            : from.originPt,
-        mode === 'TRANSIT'
-          ? to.location
-          : mode === 'DRIVING'
-            ? to
-            : to.destinationPt,
+      // No coordinate-system assertion is present in the response schema. The
+      // existing request explicitly asks for BD09; parsing does not prove that
+      // the upstream honored it. Strict binding remains the independent fence.
+      const endpointField =
+        mode === 'WALKING' || mode === 'CYCLING'
+          ? ('response.result.origin.originPt/destination.destinationPt' as const)
+          : ('response.result.origin/destination' as const);
+      const endpoints = contractStep(
+        this.diagnostics,
+        'RESPONSE_SHAPE',
+        'response.result.origin/destination',
+        () => {
+          const start =
+            mode === 'TRANSIT'
+              ? from.location
+              : mode === 'DRIVING'
+                ? result.origin
+                : from.originPt;
+          const end =
+            mode === 'TRANSIT'
+              ? to.location
+              : mode === 'DRIVING'
+                ? result.destination
+                : to.destinationPt;
+          for (const point of [start, end]) {
+            if (!point || typeof point !== 'object' || Array.isArray(point))
+              throw new Error('INVALID_PROVIDER_RESPONSE');
+          }
+          return { start, end };
+        },
+      );
+      contractStep(
+        this.diagnostics,
+        'COORDINATE_PARSE',
+        endpointField,
+        () => {
+          for (const point of [endpoints.start, endpoints.end]) {
+            const parsed = coordinate(point);
+            // Use the same existing inverse as binding, without changing precision
+            // or introducing an accuracy/equivalence claim.
+            coordinate(baiduToWgs84(parsed.latitude, parsed.longitude));
+          }
+        },
+        'INVALID_COORDINATES',
+      );
+      const binding = contractStep(
+        this.diagnostics,
+        'ENDPOINT_BINDING',
+        endpointField,
+        () => {
+          try {
+            return bindProviderEndpoints(
+              'BAIDU',
+              input.origin,
+              input.destination,
+              endpoints.start,
+              endpoints.end,
+            );
+          } catch (error) {
+            // Remap only the fixed diagnostic field; preserve every guard and code.
+            if (error instanceof ProviderContractError)
+              throw new ProviderContractError({
+                ...error.diagnostic,
+                field: endpointField,
+              });
+            throw error;
+          }
+        },
       );
       const plannedAt = at;
       return {
         status: 'SUCCESS',
-        candidates: result.routes.map((raw) =>
-          candidate(
-            'baidu',
-            input,
-            plannedAt,
-            record(raw).duration as number,
-            observedAt,
-            binding,
-          ),
-        ),
+        candidates: result.routes.map((raw) => {
+          const seconds = contractStep(
+            this.diagnostics,
+            'RESPONSE_SHAPE',
+            'response.result.routes[].duration',
+            () => {
+              const duration = record(raw).duration;
+              // The same limits already enforced by candidate(), now separately
+              // observable rather than mislabeled as a generic route failure.
+              if (
+                typeof duration !== 'number' ||
+                !Number.isSafeInteger(duration) ||
+                duration <= 0 ||
+                duration > 604800
+              )
+                throw new Error('INVALID_PROVIDER_RESPONSE');
+              return duration;
+            },
+            'INVALID_DURATION',
+          );
+          return contractStep(
+            this.diagnostics,
+            'DOMAIN_VALIDATION',
+            'candidate',
+            () =>
+              candidate(
+                'baidu',
+                input,
+                plannedAt,
+                seconds,
+                observedAt,
+                binding,
+              ),
+            'DOMAIN_VALIDATION_FAILED',
+          );
+        }),
       };
       // TRANSIT is an aggregate estimated journey, not fabricated BUS/RAIL legs,
       // station identities, timetable facts or monitoring capability.

@@ -1,0 +1,87 @@
+{
+  "synthetic": true,
+  "repository": "tonivikingdom/TRAVEL-V1",
+  "base_branch": "fix/pr53-review-findings",
+  "base_sha": "9d32c0b23198d35b6f2873d7d9016365f934d635",
+  "qa_source_sha": "67c7fdc5fc2b5d89f58f7fc8532529af6bbf59cb",
+  "branch": "fix/v1-travel-web-acceptance",
+  "scope": ["RWS-01", "RWS-03", "RWS-04", "RWS-05"],
+  "before_browser": {
+    "chromium": {
+      "passed": 8,
+      "failed": 5
+    },
+    "webkit": {
+      "passed": 8,
+      "failed": 5
+    },
+    "skipped": 0,
+    "flaky": 0
+  },
+  "after_browser_focused": {
+    "chromium": {
+      "passed": 24,
+      "failed": 0
+    },
+    "webkit": {
+      "passed": 24,
+      "failed": 0
+    },
+    "skipped": 0,
+    "flaky": 0
+  },
+  "after_browser_full": {
+    "chromium": {
+      "passed": 351,
+      "failed": 0
+    },
+    "webkit": {
+      "passed": 351,
+      "failed": 0
+    },
+    "skipped": 0,
+    "flaky": 0
+  },
+  "unit": {
+    "passed": 1096,
+    "failed": 0
+  },
+  "postgresql": {
+    "passed": 687,
+    "failed": 0,
+    "persistence": 106,
+    "api": 581
+  },
+  "checks": {
+    "frozen_install": "PASS",
+    "prisma_generate": "PASS",
+    "prisma_validate": "PASS",
+    "clean_migration_deploy": "PASS",
+    "format": "PASS",
+    "lint": "PASS",
+    "typecheck": "PASS",
+    "build": "PASS"
+  },
+  "local_compose": "NOT_RUN; exact-HEAD PR CI required",
+  "local_p5b": "NOT_RUN; exact-HEAD PR CI required",
+  "deltas": {
+    "api": 0,
+    "contract": 0,
+    "schema": 0,
+    "migration": 0
+  },
+  "migration_total": 27,
+  "evidence": {
+    "before": "exact base source + selectively transplanted browser regressions",
+    "after": "final repaired Web source",
+    "widths": [320, 375, 390, 430],
+    "keyboard": "VisualViewport 380px height / 20px offsetTop / root font 24px",
+    "real_provider_requests": false
+  },
+  "limitations": {
+    "RWS-02": "OPEN / B owned; execution and Adopt Domain unchanged",
+    "physical_iphone_ios_safari_keyboard": "UNVERIFIED",
+    "real_provider": "NOT_TESTED; no real keys or paid requests"
+  },
+  "ci_evidence": "Exact-HEAD run URL and verify / Compose / P5B results recorded in Draft PR and final report after completion"
+}

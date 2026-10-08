@@ -1,0 +1,72 @@
+$ vitest run --config vitest.integration.config.ts test/i59-adoption-ttl-race.integration.test.ts
+
+ RUN  v5.0.1 /workspace/TRAVEL-V1-audit-59/apps/api
+
+(node:123252) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ test/i59-adoption-ttl-race.integration.test.ts (8 tests | 4 failed) 4243ms
+   ❯ Independent AUDIT59 — SYNTHETIC + real PostgreSQL (8)
+     × AUDIT59 aggregate TRANSIT expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt 572ms
+     × AUDIT59 aggregate TRANSIT Provider/Preview TTL crossing during tentative writes must roll back new Adopt 480ms
+     × AUDIT59 fixed BUS expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt 436ms
+     × AUDIT59 fixed BUS Provider/Preview TTL crossing during tentative writes must roll back new Adopt 458ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/i59-adoption-ttl-race.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 aggregate TRANSIT expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt
+ FAIL  test/i59-adoption-ttl-race.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 fixed BUS expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt
+AssertionError: expected { httpStatus: 200, …(1) } to deeply equal { httpStatus: 409, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "footprintUnchanged": true,
+-   "httpStatus": 409,
++   "footprintUnchanged": false,
++   "httpStatus": 200,
+  }
+
+ ❯ test/i59-adoption-ttl-race.integration.test.ts:346:12
+    344|           httpStatus: outcome.status,
+    345|           footprintUnchanged: outcome.footprintUnchanged,
+    346|         }).toEqual({ httpStatus: 409, footprintUnchanged: true });
+       |            ^
+    347|       } finally {
+    348|         release.release();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/i59-adoption-ttl-race.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 aggregate TRANSIT Provider/Preview TTL crossing during tentative writes must roll back new Adopt
+ FAIL  test/i59-adoption-ttl-race.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 fixed BUS Provider/Preview TTL crossing during tentative writes must roll back new Adopt
+AssertionError: expected { status: 'SUCCESS', …(1) } to deeply equal { status: 'PREVIEW_STALE', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "footprintUnchanged": true,
+-   "status": "PREVIEW_STALE",
++   "footprintUnchanged": false,
++   "status": "SUCCESS",
+  }
+
+ ❯ test/i59-adoption-ttl-race.integration.test.ts:389:10
+    387|         status: outcome.status,
+    388|         footprintUnchanged: outcome.footprintUnchanged,
+    389|       }).toEqual({ status: 'PREVIEW_STALE', footprintUnchanged: true }…
+       |          ^
+    390|     });
+    391|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 4 passed (8)
+   Start at  15:42:30
+   Duration  5.69s (tests 76%, transform 19%, import 5%)
+
+/workspace/TRAVEL-V1-audit-59/apps/api:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @travel/api@0.0.0 test:integration: `vitest run --config vitest.integration.config.ts test/i59-adoption-ttl-race.integration.test.ts`
+Exit status 1

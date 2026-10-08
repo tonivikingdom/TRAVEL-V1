@@ -1,0 +1,19 @@
+{
+  "synthetic": true,
+  "baselineHead": "9a477ee4998424e45363be998c1e4e807f0490dd",
+  "source": "/workspace/scratch/v1-integration-audit-59/independent.integration.test.ts",
+  "preserved": "apps/api/test/i59-adoption-ttl-race.integration.test.ts",
+  "sourceSha256": "c252f42b8beef0342ec215566de5ed8a4a1a99d3cde84946e14d2e2e37681c88",
+  "preservedSha256": "8d766b86fb855387e55bc889c96799625236e3366f2e66faf6d2ec1b154a339d",
+  "assertionAstEqual": true,
+  "testTitleAstEqual": true,
+  "assertionAstSha256": "683d32e2d7857a3f6cd063c95f600170920cb8c02bcee69079f082ddc771bbd6",
+  "assertionAstNodes": 36,
+  "parameterizedTestDeclarations": 4,
+  "iterations": [
+    "aggregate TRANSIT",
+    "fixed BUS"
+  ],
+  "cases": 8,
+  "skipped": 0
+}

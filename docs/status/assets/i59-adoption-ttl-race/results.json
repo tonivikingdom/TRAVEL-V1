@@ -1,0 +1,125 @@
+{
+  "synthetic": true,
+  "baselineHead": "9a477ee4998424e45363be998c1e4e807f0490dd",
+  "postgresql": "17-bookworm; fresh isolated i59_qa database",
+  "command": "TEST_DATABASE_URL=<isolated PostgreSQL URL> pnpm --filter @travel/api test:integration test/i59-adoption-ttl-race.integration.test.ts",
+  "exitCode": 1,
+  "tests": 8,
+  "passed": 4,
+  "failed": 4,
+  "skipped": 0,
+  "failureExpected": true,
+  "cases": [
+    {
+      "fixture": "aggregate TRANSIT (non-fixed)",
+      "case": "TTL already expired before request",
+      "result": "PASS",
+      "expected": "HTTP 409 PREVIEW_STALE; full-row footprint unchanged"
+    },
+    {
+      "fixture": "aggregate TRANSIT (non-fixed)",
+      "case": "Completed receipt replay after TTL expiration",
+      "result": "PASS",
+      "expected": "HTTP 200; same receipt; full-row footprint unchanged"
+    },
+    {
+      "fixture": "aggregate TRANSIT (non-fixed)",
+      "case": "TTL expires during lock",
+      "result": "FAIL",
+      "expected": {
+        "status": 409,
+        "footprintUnchanged": true
+      },
+      "actual": {
+        "status": 200,
+        "footprintUnchanged": false
+      },
+      "evidence": "rerun/adopt-expired-during-lock-aggregate.json",
+      "originalAndRerunByteIdentical": true,
+      "evidenceSha256": "b1e76791379091b48a172a7653b2d97b5f5f1eb4308977c06792742d9e87179b"
+    },
+    {
+      "fixture": "aggregate TRANSIT (non-fixed)",
+      "case": "TTL expires during writes",
+      "result": "FAIL",
+      "expected": {
+        "status": "PREVIEW_STALE",
+        "footprintUnchanged": true
+      },
+      "actual": {
+        "status": "SUCCESS",
+        "footprintUnchanged": false
+      },
+      "evidence": "rerun/adopt-expired-during-writes-aggregate.json",
+      "originalAndRerunByteIdentical": true,
+      "evidenceSha256": "0659206d67f305e8aef9f7833772dd1d0b78350cf3cf50ff9ceea3428589e49e"
+    },
+    {
+      "fixture": "fixed BUS",
+      "case": "TTL already expired before request",
+      "result": "PASS",
+      "expected": "HTTP 409 PREVIEW_STALE; full-row footprint unchanged"
+    },
+    {
+      "fixture": "fixed BUS",
+      "case": "Completed receipt replay after TTL expiration",
+      "result": "PASS",
+      "expected": "HTTP 200; same receipt; full-row footprint unchanged"
+    },
+    {
+      "fixture": "fixed BUS",
+      "case": "TTL expires during lock",
+      "result": "FAIL",
+      "expected": {
+        "status": 409,
+        "footprintUnchanged": true
+      },
+      "actual": {
+        "status": 200,
+        "footprintUnchanged": false
+      },
+      "evidence": "rerun/adopt-expired-during-lock-fixed.json",
+      "originalAndRerunByteIdentical": true,
+      "evidenceSha256": "b1e76791379091b48a172a7653b2d97b5f5f1eb4308977c06792742d9e87179b"
+    },
+    {
+      "fixture": "fixed BUS",
+      "case": "TTL expires during writes",
+      "result": "FAIL",
+      "expected": {
+        "status": "PREVIEW_STALE",
+        "footprintUnchanged": true
+      },
+      "actual": {
+        "status": "SUCCESS",
+        "footprintUnchanged": false
+      },
+      "evidence": "rerun/adopt-expired-during-writes-fixed.json",
+      "originalAndRerunByteIdentical": true,
+      "evidenceSha256": "0659206d67f305e8aef9f7833772dd1d0b78350cf3cf50ff9ceea3428589e49e"
+    }
+  ],
+  "zeroWriteScope": [
+    "Trip (all fields, including version)",
+    "ItineraryNode",
+    "TransportEdge",
+    "AdoptedRoute",
+    "RouteCandidateSnapshot",
+    "RoutePreview",
+    "OperationReceipt",
+    "OutboxEvent",
+    "ExecutionEvent",
+    "TripStaticBackup",
+    "TripAuthoringReceipt",
+    "DayOccurrence",
+    "DateOwnership",
+    "TemporalValue",
+    "UserTimeIntent"
+  ],
+  "fullRowComparison": true,
+  "rowCountsAreDisplaySummaryOnly": true,
+  "productionDelta": 0,
+  "schemaDelta": 0,
+  "migrationDelta": 0,
+  "migrationTotal": 27
+}

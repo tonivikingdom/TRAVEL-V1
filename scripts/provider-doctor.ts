@@ -416,6 +416,7 @@ export async function providerDoctor(
                 fetcher,
                 clock,
                 Boolean(check.future),
+                diagnostics,
               )
         ).queryRoutes(input);
         entry.status =

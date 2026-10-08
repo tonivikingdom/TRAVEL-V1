@@ -9,53 +9,64 @@ import { runProviderProbe } from './runner.js';
 import { japanCoreScenarios } from './scenarios/japan-core.js';
 import type { ProviderProbeAdapter } from './types.js';
 
-const options = parseArgs(process.argv.slice(2));
-const adapters = registry({
-  tripgo: process.env.TRIPGO_API_KEY,
-  google: process.env.GOOGLE_MAPS_SERVER_KEY,
-});
-const requestedProviders = options.providers.map((id) => {
-  const adapter = adapters.get(id);
-  if (!adapter) {
-    throw new Error(`Unknown provider adapter: ${id}`);
+async function main(): Promise<void> {
+  const options = parseArgs(process.argv.slice(2));
+  const adapters = registry({
+    tripgo: process.env.TRIPGO_API_KEY,
+    google: process.env.GOOGLE_SERVER_API_KEY,
+  });
+  const requestedProviders = options.providers.map((id) => {
+    const adapter = adapters.get(id);
+    if (!adapter) {
+      throw new Error(`Unknown provider adapter: ${id}`);
+    }
+    return adapter;
+  });
+  const scenarios = japanCoreScenarios.filter(
+    (scenario) =>
+      options.scenario === null ||
+      scenario.suiteId === options.scenario ||
+      scenario.id === options.scenario,
+  );
+  if (scenarios.length === 0) {
+    throw new Error(`Unknown scenario or suite: ${options.scenario}`);
   }
-  return adapter;
-});
-const scenarios = japanCoreScenarios.filter(
-  (scenario) =>
-    options.scenario === null ||
-    scenario.suiteId === options.scenario ||
-    scenario.id === options.scenario,
-);
-if (scenarios.length === 0) {
-  throw new Error(`Unknown scenario or suite: ${options.scenario}`);
+
+  let failed = false;
+  for (const adapter of requestedProviders) {
+    const run = await runProviderProbe(adapter, {
+      mode: options.mode,
+      scenarios,
+    });
+    const secrets = [
+      process.env.TRIPGO_API_KEY ?? '',
+      process.env.GOOGLE_SERVER_API_KEY ?? '',
+    ];
+    const sanitized = sanitizeEvidence(run, secrets);
+    if (options.json) {
+      console.log(JSON.stringify(sanitized, null, 2));
+    } else {
+      printHumanReport(sanitized as typeof run);
+    }
+    if (options.output !== null) {
+      const directory = await writeProbeArtifacts(run, options.output, secrets);
+      if (!options.json) console.log(`Artifacts: ${directory}`);
+    }
+    failed ||=
+      run.health.status !== 'PASS' ||
+      run.results.some((result) => result.providerStatus !== 'SUCCESS');
+  }
+  process.exitCode = failed ? 1 : 0;
 }
 
-let failed = false;
-for (const adapter of requestedProviders) {
-  const run = await runProviderProbe(adapter, {
-    mode: options.mode,
-    scenarios,
-  });
-  const secrets = [
-    process.env.TRIPGO_API_KEY ?? '',
-    process.env.GOOGLE_MAPS_SERVER_KEY ?? '',
-  ];
-  const sanitized = sanitizeEvidence(run, secrets);
-  if (options.json) {
-    console.log(JSON.stringify(sanitized, null, 2));
-  } else {
-    printHumanReport(sanitized as typeof run);
-  }
-  if (options.output !== null) {
-    const directory = await writeProbeArtifacts(run, options.output, secrets);
-    if (!options.json) console.log(`Artifacts: ${directory}`);
-  }
-  failed ||=
-    run.health.status !== 'PASS' ||
-    run.results.some((result) => result.providerStatus !== 'SUCCESS');
+try {
+  await main();
+} catch {
+  process.stderr.write(
+    'Provider probe failed; diagnostic details suppressed.\n',
+  );
+  process.exitCode = 1;
 }
-process.exitCode = failed ? 1 : 0;
 
 function registry(keys: {
   readonly tripgo: string | undefined;

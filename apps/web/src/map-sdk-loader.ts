@@ -25,9 +25,8 @@ export class MapSdkLoader {
             : 'https://api.map.baidu.com/api',
         );
         url.searchParams.set(provider === 'GOOGLE' ? 'key' : 'ak', key);
-        url.searchParams.set('v', provider === 'GOOGLE' ? 'weekly' : '1.0');
+        url.searchParams.set('v', provider === 'GOOGLE' ? 'weekly' : '4.0');
         if (provider === 'GOOGLE') url.searchParams.set('loading', 'async');
-        else url.searchParams.set('type', 'webgl');
         url.searchParams.set('callback', callback);
         const finish = (ok: boolean) => {
           clearTimeout(timer);

@@ -52,7 +52,7 @@ export class GoogleRoutesProbeAdapter implements ProviderProbeAdapter {
       : {
           status: 'NOT_CONFIGURED',
           httpStatus: null,
-          message: 'GOOGLE_MAPS_SERVER_KEY is not configured',
+          message: 'GOOGLE_SERVER_API_KEY is not configured',
         };
   }
 
@@ -63,7 +63,7 @@ export class GoogleRoutesProbeAdapter implements ProviderProbeAdapter {
       capabilities: googleCapabilities(),
       notes: this.apiKey
         ? ['Capabilities reflect the official Routes API transit contract']
-        : ['GOOGLE_MAPS_SERVER_KEY is not configured'],
+        : ['GOOGLE_SERVER_API_KEY is not configured'],
       regions: [],
     };
   }
@@ -80,7 +80,7 @@ export class GoogleRoutesProbeAdapter implements ProviderProbeAdapter {
         capabilities,
         'AUTH_OR_SERVICE_CONFIGURATION_ERROR',
         null,
-        ['GOOGLE_MAPS_SERVER_KEY is not configured'],
+        ['GOOGLE_SERVER_API_KEY is not configured'],
       );
     }
     const response = await this.fetchImpl(ENDPOINT, {

@@ -46,3 +46,14 @@ Debug Web 默认运行在 `http://127.0.0.1:5173`，通过 Vite `/api` proxy 连
 Magic Link landing 也指向 `/login/magic`。它不使用 Service Worker、IndexedDB 或离线 Trip cache。
 
 容器启动与验证命令见 [`infra/compose/README.md`](infra/compose/README.md)。
+
+## Real Provider 验收
+
+统一配置形状见 `.env.provider.example`，安全 Cloud 配置与验收边界见 [Provider 环境说明](docs/provider-environment-setup.md)。
+
+```bash
+pnpm provider:doctor         # 仅配置，零外部请求
+pnpm provider:doctor --live  # 显式 dev/test 验收，每个服务端能力最多一次请求
+```
+
+真实 Key 仅通过环境变量注入，不写入文件或对话；HTTP/契约通过不会自动打开任何生产审批 gate。

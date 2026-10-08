@@ -151,7 +151,30 @@ const mapSlots = providerMapAdapters(
           VITE_GOOGLE_MAPS_STORAGE_APPROVED: 'true',
           VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED: 'true',
         }
-      : import.meta.env,
+      : {
+          VITE_GOOGLE_MAPS_BROWSER_KEY: import.meta.env
+            .VITE_GOOGLE_MAPS_BROWSER_KEY,
+          VITE_GOOGLE_MAPS_EMBED_ENABLED: import.meta.env
+            .VITE_GOOGLE_MAPS_EMBED_ENABLED,
+          VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED: import.meta.env
+            .VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED,
+          VITE_GOOGLE_MAPS_STORAGE_APPROVED: import.meta.env
+            .VITE_GOOGLE_MAPS_STORAGE_APPROVED,
+          VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED: import.meta.env
+            .VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED,
+          VITE_BAIDU_MAPS_BROWSER_KEY: import.meta.env
+            .VITE_BAIDU_MAPS_BROWSER_KEY,
+          VITE_BAIDU_MAPS_EMBED_ENABLED: import.meta.env
+            .VITE_BAIDU_MAPS_EMBED_ENABLED,
+          VITE_BAIDU_MAPS_ENTITLEMENT_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_ENTITLEMENT_APPROVED,
+          VITE_BAIDU_MAPS_STORAGE_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_STORAGE_APPROVED,
+          VITE_BAIDU_MAPS_ATTRIBUTION_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_ATTRIBUTION_APPROVED,
+          VITE_BAIDU_MAPS_COORDINATES_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_COORDINATES_APPROVED,
+        },
   ),
   new MapSdkLoader(document, window as unknown as Record<string, unknown>),
   window as unknown as Record<string, unknown>,

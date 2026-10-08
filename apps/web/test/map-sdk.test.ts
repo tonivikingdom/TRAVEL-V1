@@ -54,8 +54,8 @@ it.each(['GOOGLE', 'BAIDU'] as const)(
     expect(url.searchParams.get(provider === 'GOOGLE' ? 'key' : 'ak')).toBe(
       'SYNTHETIC_BROWSER_ONLY',
     );
-    if (provider === 'BAIDU')
-      expect(url.searchParams.get('type')).toBe('webgl');
+    if (provider === 'BAIDU') expect(url.searchParams.get('v')).toBe('4.0');
+    if (provider === 'BAIDU') expect(url.searchParams.has('type')).toBe(false);
     ready();
     await Promise.all([a, b]);
   },
@@ -209,7 +209,7 @@ it('Baidu mount accepts only an explicitly supplied BD09LL coordinate capability
     clear = vi.fn(),
     destroy = vi.fn();
   const globals = {
-    BMapGL: {
+    BMap: {
       Map: class {
         centerAndZoom = vi.fn();
         setViewport = vi.fn();

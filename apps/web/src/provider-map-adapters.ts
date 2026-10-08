@@ -8,6 +8,7 @@ import {
   type MapNavigationOptions,
 } from './map-adapter.js';
 import type { MapSdkLoader } from './map-sdk-loader.js';
+import { BaiduBrowserCoordinates } from './baidu-browser-coordinates.js';
 type GooglePosition = { lat: number; lng: number };
 interface GoogleMap {
   fitBounds(bounds: unknown): void;
@@ -34,7 +35,7 @@ interface BaiduMap {
   destroy(): void;
 }
 interface BaiduSdk {
-  Map: new (host: HTMLElement) => BaiduMap;
+  Map: new (host: HTMLElement, options?: Record<string, unknown>) => BaiduMap;
   Point: new (longitude: number, latitude: number) => unknown;
   Marker: new (point: unknown) => unknown;
 }
@@ -246,13 +247,14 @@ export class BaiduMapAdapter implements MapAdapter {
       throw new Error('Baidu coordinate capability unavailable');
     await this.loader.load('BAIDU', this.config.key!, signal);
     if (signal.aborted) throw new Error('Map request cancelled');
-    const sdk = this.globals.BMapGL as BaiduSdk | undefined;
+    const sdk = this.globals.BMap as BaiduSdk | undefined;
     if (!sdk?.Map || !sdk.Point || !sdk.Marker)
       throw new Error('Map SDK unavailable');
     const points = converted.map((p) => new sdk.Point(p.longitude, p.latitude));
-    const map = new sdk.Map(host);
-    map.enableDragging();
-    map.enableScrollWheelZoom();
+    const map = new sdk.Map(host, {
+      enableDragging: true,
+      enableWheelZoom: true,
+    });
     const reset = () =>
       points.length > 1
         ? map.setViewport(points)
@@ -285,6 +287,11 @@ export function providerMapAdapters(
 ): Record<'GOOGLE' | 'BAIDU', MapAdapter> {
   return {
     GOOGLE: new GoogleMapAdapter(config.google, loader, globals),
-    BAIDU: new BaiduMapAdapter(config.baidu, loader, globals, conversion),
+    BAIDU: new BaiduMapAdapter(
+      config.baidu,
+      loader,
+      globals,
+      conversion ?? new BaiduBrowserCoordinates(config.baidu, loader, globals),
+    ),
   };
 }

@@ -5,9 +5,8 @@ import type {
   RouteProviderResult,
 } from '@travel/application';
 import type { NormalizedRouteCandidate } from '@travel/domain';
-import { matchesTrustedRouteEndpoint } from '@travel/domain';
-import { json, record, coordinate } from './regional-http.js';
-import { baiduToWgs84 } from './baidu-coordinates.js';
+import { bindProviderEndpoints } from './endpoint-binding.js';
+import { json, record } from './regional-http.js';
 function knownZones(input: RouteProviderQueryInput): boolean {
   try {
     if (!input.origin.timeZone || !input.destination.timeZone) return false;
@@ -17,30 +16,6 @@ function knownZones(input: RouteProviderQueryInput): boolean {
   } catch {
     return false;
   }
-}
-function bindEndpoints(
-  input: RouteProviderQueryInput,
-  from: unknown,
-  to: unknown,
-  baidu = false,
-) {
-  const normalize = (p: unknown) => {
-    const c = coordinate(p);
-    return baidu ? baiduToWgs84(c.latitude, c.longitude) : c;
-  };
-  const a = normalize(from),
-    b = normalize(to);
-  if (
-    !matchesTrustedRouteEndpoint(
-      { name: input.origin.name, ...a, providerPlaceRef: null },
-      { ...input.origin, providerPlaceRef: null },
-    ) ||
-    !matchesTrustedRouteEndpoint(
-      { name: input.destination.name, ...b, providerPlaceRef: null },
-      { ...input.destination, providerPlaceRef: null },
-    )
-  )
-    throw new Error('INVALID_PROVIDER_ENDPOINTS');
 }
 function departure(input: RouteProviderQueryInput, now: Date): Date | null {
   if (input.preference.type === 'ARRIVE_BY') return null;
@@ -98,7 +73,7 @@ function candidate(
     durationSeconds: seconds,
     legs: [
       {
-        mode: input.travelMode === 'DRIVING' ? 'DRIVING' : 'WALKING',
+        mode: input.travelMode ?? 'WALKING',
         from: location(input.origin),
         to: location(input.destination),
         departure: start,
@@ -171,8 +146,10 @@ export class GoogleOrdinaryRouteProvider implements RouteProvider {
         if (!Array.isArray(r.legs) || r.legs.length !== 1)
           throw new Error('INVALID_PROVIDER_RESPONSE');
         const leg = record(r.legs[0]);
-        bindEndpoints(
-          input,
+        bindProviderEndpoints(
+          'GOOGLE',
+          input.origin,
+          input.destination,
           record(leg.startLocation).latLng,
           record(leg.endLocation).latLng,
         );
@@ -201,36 +178,102 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
     private readonly key: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly now: () => Date = () => new Date(),
+    private readonly futureDrivingApproved = false,
   ) {}
   async queryRoutes(
     input: RouteProviderQueryInput,
   ): Promise<RouteProviderResult> {
-    const observedAt = this.now(),
-      at = departure(input, observedAt);
+    const observedAt = this.now();
+    let at = departure(input, observedAt);
+    const mode = input.travelMode;
     if (
       !at ||
       !knownZones(input) ||
-      !['WALKING', 'DRIVING'].includes(input.travelMode ?? '')
+      !mode ||
+      !['WALKING', 'DRIVING', 'CYCLING', 'TRANSIT'].includes(mode)
     )
       return { status: 'UNSUPPORTED_QUERY' };
-    // Direction Lite has no verified future-driving/arrive-by contract.
+    if (mode === 'TRANSIT') {
+      if (input.preference.type === 'DEPART_AT' && at.getTime() % 60000 !== 0)
+        return { status: 'UNSUPPORTED_QUERY' };
+      if (input.preference.type === 'NONE')
+        at = new Date(Math.ceil(at.getTime() / 60000) * 60000);
+    }
     if (
-      input.travelMode === 'DRIVING' &&
-      at.getTime() > observedAt.getTime() + 30000
+      mode === 'DRIVING' &&
+      at.getTime() > observedAt.getTime() &&
+      at.getTime() % 1000 !== 0
+    )
+      return { status: 'UNSUPPORTED_QUERY' };
+    const future = at.getTime() > observedAt.getTime();
+    // Past/over-seven-day dates must never silently become current traffic.
+    if (
+      input.preference.type === 'DEPART_AT' &&
+      input.preference.instant.getTime() < observedAt.getTime()
+    )
+      return { status: 'UNSUPPORTED_QUERY' };
+    if (
+      mode === 'DRIVING' &&
+      future &&
+      (!this.futureDrivingApproved ||
+        at.getTime() > observedAt.getTime() + 7 * 86400000)
+    )
+      return { status: 'UNSUPPORTED_QUERY' };
+    // Transit service timezone/date semantics are confined to the verified V1 scope.
+    if (
+      mode === 'TRANSIT' &&
+      (input.origin.timeZone !== 'Asia/Shanghai' ||
+        input.destination.timeZone !== 'Asia/Shanghai')
     )
       return { status: 'UNSUPPORTED_QUERY' };
     try {
-      const url = new URL(
-        `https://api.map.baidu.com/directionlite/v1/${input.travelMode === 'DRIVING' ? 'driving' : 'walking'}`,
-      );
-      url.search = new URLSearchParams({
+      const endpoint = {
+        WALKING: 'walking',
+        DRIVING: 'driving',
+        CYCLING: 'riding',
+        TRANSIT: 'transit',
+      }[mode];
+      const url = new URL(`https://api.map.baidu.com/direction/v2/${endpoint}`);
+      const params = new URLSearchParams({
         origin: `${input.origin.latitude},${input.origin.longitude}`,
         destination: `${input.destination.latitude},${input.destination.longitude}`,
         coord_type: 'wgs84',
+        ret_coordtype: 'bd09ll',
+        output: 'json',
         ak: this.key,
-      }).toString();
+      });
+      if (mode === 'DRIVING') {
+        params.set('alternatives', '0');
+        if (future)
+          params.set('departure_time', String(Math.floor(at.getTime() / 1000)));
+      }
+      if (mode === 'CYCLING') params.set('riding_type', '0');
+      if (mode === 'TRANSIT') {
+        const parts = Object.fromEntries(
+          new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hourCycle: 'h23',
+          })
+            .formatToParts(at)
+            .map((p) => [p.type, p.value]),
+        );
+        params.set(
+          'departure_date',
+          `${parts.year}-${parts.month}-${parts.day}`,
+        );
+        params.set('departure_time', `${parts.hour}:${parts.minute}`);
+        params.set('page_size', '1');
+      }
+      url.search = params.toString();
       const body = await json(this.fetcher, url),
         result = record(body.result);
+      if (body.status === 7 || (mode === 'TRANSIT' && body.status === 1001))
+        return { status: 'NO_MATCHING_CANDIDATE' };
       if (
         body.status !== 0 ||
         !Array.isArray(result.routes) ||
@@ -239,20 +282,47 @@ export class BaiduOrdinaryRouteProvider implements RouteProvider {
         throw new Error('INVALID_PROVIDER_RESPONSE');
       if (result.routes.length === 0)
         return { status: 'NO_MATCHING_CANDIDATE' };
-      bindEndpoints(input, result.origin, result.destination, true);
+      const from = record(result.origin),
+        to = record(result.destination);
+      if (mode === 'TRANSIT') {
+        if (
+          typeof from.city_id !== 'string' ||
+          !from.city_id ||
+          from.city_id !== to.city_id
+        )
+          return { status: 'UNSUPPORTED_QUERY' }; // Cross-city contracts require separate acceptance.
+      }
+      bindProviderEndpoints(
+        'BAIDU',
+        input.origin,
+        input.destination,
+        mode === 'TRANSIT'
+          ? from.location
+          : mode === 'DRIVING'
+            ? from
+            : from.originPt,
+        mode === 'TRANSIT'
+          ? to.location
+          : mode === 'DRIVING'
+            ? to
+            : to.destinationPt,
+      );
+      const plannedAt = at;
       return {
         status: 'SUCCESS',
         candidates: result.routes.map((raw) =>
           candidate(
             'baidu',
             input,
-            at,
-            Number(record(raw).duration),
+            plannedAt,
+            record(raw).duration as number,
             observedAt,
             null,
           ),
         ),
       };
+      // TRANSIT is an aggregate estimated journey, not fabricated BUS/RAIL legs,
+      // station identities, timetable facts or monitoring capability.
     } catch {
       return { status: 'PROVIDER_UNAVAILABLE', reason: 'UPSTREAM_UNAVAILABLE' };
     }

@@ -10339,6 +10339,80 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
     ).toBe(0);
   });
 
+  it.each(['CYCLING', 'TRANSIT'] as const)(
+    'provider bootstrap %s survives Query, immutable snapshot, Preview and adopted PostgreSQL facts',
+    async (mode) => {
+      const trip = await tripWithVisits(userA, [
+        'SYNTHETIC origin',
+        'SYNTHETIC destination',
+      ]);
+      const [from, to] = trip.days.flatMap((d) => d.nodes);
+      if (providerResult.status !== 'SUCCESS')
+        throw new Error('Synthetic provider missing');
+      const c = providerResult.candidates[0]!;
+      providerResult = {
+        status: 'SUCCESS',
+        candidates: [
+          {
+            ...c,
+            legs: c.legs.map((leg) => ({
+              ...leg,
+              mode,
+              fixedService: false,
+              serviceLabel: null,
+            })),
+          },
+        ],
+      };
+      const before = await footprint(managed, trip.id);
+      const queried = await app.inject({
+        method: 'POST',
+        url: `/trips/${trip.id}/routes/query`,
+        headers: bearer(userA),
+        payload: {
+          basisVersion: trip.version,
+          fromNodeId: from!.id,
+          toNodeId: to!.id,
+          travelMode: mode,
+          hint: {
+            type: 'DEPART_AT',
+            instant: '2030-10-01T10:00:00Z',
+            timeZone: 'Asia/Tokyo',
+          },
+        },
+      });
+      expect(queried.statusCode, queried.body).toBe(200);
+      expect(providerInputs[0]!.travelMode).toBe(mode);
+      onlyWrites(before, await footprint(managed, trip.id), ['snapshots']);
+      const route = queried.json<RouteQueryResponse>();
+      expect(route.candidates[0]!.legs[0]!.mode).toBe(mode);
+      const preview = await previewFromSnapshot(
+        userA,
+        trip,
+        route.candidates[0]!.candidateSnapshotId,
+      );
+      expect(preview.adoptable).toBe(true);
+      const adopted = await adoptSuccessfully(
+        userA,
+        trip,
+        preview.previewId,
+        `SYNTHETIC_PROVIDER_MODE_${mode}`,
+      );
+      const edges = await managed.client.transportEdge.findMany({
+        where: { tripId: trip.id, source: 'ADOPTED_ROUTE' },
+      });
+      expect(edges.length).toBeGreaterThan(0);
+      expect(edges.every((edge) => edge.mode === mode)).toBe(true);
+      expect(adopted.trip.version).toBe(trip.version + 1);
+      const foreign = await app.inject({
+        method: 'GET',
+        url: `/trips/${trip.id}`,
+        headers: bearer(userB),
+      });
+      expect(foreign.statusCode).toBe(404);
+    },
+  );
+
   it('regional route intent reaches Japan Transit slot without ordinary fallback; only snapshots are written', async () => {
     const trip = await tripWithVisits(userA, [
       'SYNTHETIC origin',
@@ -10498,8 +10572,10 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
                 : {
                     status: 0,
                     result: {
-                      origin: { lat: 39.915, lng: 116.404 },
-                      destination: { lat: 39.916, lng: 116.405 },
+                      origin: { originPt: { lat: 39.915, lng: 116.404 } },
+                      destination: {
+                        destinationPt: { lat: 39.916, lng: 116.405 },
+                      },
                       routes: [{ duration: 600 }],
                     },
                   },

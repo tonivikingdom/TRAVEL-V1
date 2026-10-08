@@ -1,5 +1,7 @@
 export type RouteMode =
   | 'WALKING'
+  | 'CYCLING'
+  | 'TRANSIT'
   | 'DRIVING'
   | 'TAXI'
   | 'RAIL'

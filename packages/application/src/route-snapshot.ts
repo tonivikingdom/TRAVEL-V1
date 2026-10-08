@@ -224,6 +224,8 @@ function isFare(value: unknown): value is RouteCandidatePayload['fare'] {
 function isMode(value: unknown): value is RouteCandidateLeg['mode'] {
   return (
     value === 'WALKING' ||
+    value === 'CYCLING' ||
+    value === 'TRANSIT' ||
     value === 'DRIVING' ||
     value === 'TAXI' ||
     value === 'RAIL' ||

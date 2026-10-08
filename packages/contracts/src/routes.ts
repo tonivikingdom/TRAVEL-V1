@@ -13,7 +13,7 @@ export type RouteQueryHint =
     };
 
 export interface ExternalOriginRouteQueryRequest {
-  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT';
+  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT' | 'CYCLING';
   readonly basisVersion: number;
   readonly toNodeId: string;
   readonly hint?: RouteQueryHint | null;
@@ -49,7 +49,7 @@ export interface ExternalRouteOriginSnapshot {
 }
 
 export interface RouteQueryRequest {
-  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT';
+  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT' | 'CYCLING';
   readonly basisVersion: number;
   readonly fromNodeId: string;
   readonly toNodeId: string;

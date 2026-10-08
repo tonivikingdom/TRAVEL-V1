@@ -456,7 +456,7 @@ export class RouteQueryService {
   }) {
     if (
       travelMode !== undefined &&
-      !['WALKING', 'DRIVING', 'TRANSIT'].includes(travelMode)
+      !['WALKING', 'DRIVING', 'TRANSIT', 'CYCLING'].includes(travelMode)
     )
       throw new ApplicationError('VALIDATION_ERROR', '交通方式不受支持。', 400);
     const providerResult = await this.provider.queryRoutes({

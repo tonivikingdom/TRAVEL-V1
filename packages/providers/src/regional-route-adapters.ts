@@ -6,7 +6,11 @@ import type {
 } from '@travel/application';
 import type { NormalizedRouteCandidate } from '@travel/domain';
 import { bindProviderEndpoints } from './endpoint-binding.js';
-import { json, record } from './regional-http.js';
+import { coordinate, json, record } from './regional-http.js';
+import {
+  contractStep,
+  type DiagnosticObserver,
+} from './contract-diagnostics.js';
 function knownZones(input: RouteProviderQueryInput): boolean {
   try {
     if (!input.origin.timeZone || !input.destination.timeZone) return false;
@@ -19,10 +23,32 @@ function knownZones(input: RouteProviderQueryInput): boolean {
 }
 function departure(input: RouteProviderQueryInput, now: Date): Date | null {
   if (input.preference.type === 'ARRIVE_BY') return null;
-  const at =
-    input.preference.type === 'DEPART_AT'
-      ? input.preference.instant
-      : (input.earliestDeparture ?? now);
+  if (
+    ![
+      now,
+      input.earliestDeparture,
+      input.latestArrival,
+      input.preference.type === 'DEPART_AT' ? input.preference.instant : null,
+    ].every(
+      (d) => d === null || (d instanceof Date && Number.isFinite(d.getTime())),
+    )
+  )
+    return null;
+  if (input.preference.type === 'DEPART_AT') {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: input.preference.timeZone });
+    } catch {
+      return null;
+    }
+    if (
+      input.preference.instant.getTime() < now.getTime() ||
+      input.preference.instant.getTime() <
+        (input.earliestDeparture?.getTime() ?? -Infinity)
+    )
+      return null;
+    return input.preference.instant;
+  }
+  const at = input.earliestDeparture ?? now;
   return new Date(
     Math.max(
       at.getTime(),
@@ -92,6 +118,7 @@ export class GoogleOrdinaryRouteProvider implements RouteProvider {
     private readonly key: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly now: () => Date = () => new Date(),
+    private readonly diagnostics?: DiagnosticObserver,
   ) {}
   async queryRoutes(
     input: RouteProviderQueryInput,
@@ -125,7 +152,10 @@ export class GoogleOrdinaryRouteProvider implements RouteProvider {
             travelMode: input.travelMode === 'DRIVING' ? 'DRIVE' : 'WALK',
             ...(input.travelMode === 'DRIVING'
               ? {
-                  departureTime: at.toISOString(),
+                  ...(input.preference.type === 'DEPART_AT' ||
+                  at.getTime() > observedAt.getTime()
+                    ? { departureTime: at.toISOString() }
+                    : {}),
                   routingPreference: 'TRAFFIC_AWARE',
                 }
               : {}),
@@ -139,32 +169,75 @@ export class GoogleOrdinaryRouteProvider implements RouteProvider {
         (Array.isArray(body.routes) && body.routes.length === 0)
       )
         return { status: 'NO_MATCHING_CANDIDATE' };
-      if (!Array.isArray(body.routes) || body.routes.length > 5)
+      contractStep(
+        this.diagnostics,
+        'RESPONSE_SHAPE',
+        'response.routes',
+        () => {
+          if (!Array.isArray(body.routes) || body.routes.length > 5)
+            throw new Error('INVALID_PROVIDER_RESPONSE');
+        },
+      );
+      if (!Array.isArray(body.routes))
         throw new Error('INVALID_PROVIDER_RESPONSE');
       const candidates = body.routes.map((raw) => {
         const r = record(raw);
-        if (!Array.isArray(r.legs) || r.legs.length !== 1)
+        contractStep(
+          this.diagnostics,
+          'RESPONSE_SHAPE',
+          'response.routes[].legs',
+          () => {
+            if (!Array.isArray(r.legs) || r.legs.length !== 1)
+              throw new Error('INVALID_PROVIDER_RESPONSE');
+          },
+        );
+        if (!Array.isArray(r.legs))
           throw new Error('INVALID_PROVIDER_RESPONSE');
         const leg = record(r.legs[0]);
-        const binding = bindProviderEndpoints(
-          'GOOGLE',
-          input.origin,
-          input.destination,
-          record(leg.startLocation).latLng,
-          record(leg.endLocation).latLng,
+        const from = contractStep(
+          this.diagnostics,
+          'COORDINATE_PARSE',
+          'response.routes[].legs.startLocation/endLocation',
+          () => {
+            const a = record(leg.startLocation).latLng;
+            const b = record(leg.endLocation).latLng;
+            return { a: coordinate(a), b: coordinate(b) };
+          },
+          'INVALID_COORDINATES',
         );
-        if (
-          typeof r.duration !== 'string' ||
-          !/^\d+(\.\d{1,9})?s$/.test(r.duration)
-        )
-          throw new Error('INVALID_PROVIDER_RESPONSE');
-        return candidate(
-          'google',
-          input,
-          at,
-          Math.ceil(Number(r.duration.slice(0, -1))),
-          observedAt,
-          binding,
+        const binding = contractStep(
+          this.diagnostics,
+          'ENDPOINT_BINDING',
+          'response.routes[].legs.startLocation/endLocation',
+          () =>
+            bindProviderEndpoints(
+              'GOOGLE',
+              input.origin,
+              input.destination,
+              from.a,
+              from.b,
+            ),
+        );
+        const seconds = contractStep(
+          this.diagnostics,
+          'RESPONSE_SHAPE',
+          'response.routes[].duration',
+          () => {
+            if (
+              typeof r.duration !== 'string' ||
+              !/^\d+(\.\d{1,9})?s$/.test(r.duration)
+            )
+              throw new Error('INVALID_PROVIDER_RESPONSE');
+            return Math.ceil(Number(r.duration.slice(0, -1)));
+          },
+          'INVALID_DURATION',
+        );
+        return contractStep(
+          this.diagnostics,
+          'DOMAIN_VALIDATION',
+          'candidate',
+          () => candidate('google', input, at, seconds, observedAt, binding),
+          'DOMAIN_VALIDATION_FAILED',
         );
       });
       return { status: 'SUCCESS', candidates };

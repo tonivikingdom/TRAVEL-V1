@@ -1,0 +1,203 @@
+{
+  "mode": "LIVE",
+  "productionAuthorization": "NOT_REVIEWED",
+  "keys": {
+    "GOOGLE_SERVER_API_KEY": "SET",
+    "VITE_GOOGLE_MAPS_BROWSER_KEY": "SET",
+    "BAIDU_SERVER_API_KEY": "SET",
+    "VITE_BAIDU_MAPS_BROWSER_KEY": "SET"
+  },
+  "gates": {
+    "GOOGLE_LIVE_API_ENABLED": "FALSE",
+    "GOOGLE_ENTITLEMENT_APPROVED": "FALSE",
+    "GOOGLE_STORAGE_APPROVED": "FALSE",
+    "GOOGLE_ATTRIBUTION_APPROVED": "FALSE",
+    "BAIDU_LIVE_API_ENABLED": "FALSE",
+    "BAIDU_ENTITLEMENT_APPROVED": "FALSE",
+    "BAIDU_STORAGE_APPROVED": "FALSE",
+    "BAIDU_ATTRIBUTION_APPROVED": "FALSE",
+    "BAIDU_COORDINATES_APPROVED": "FALSE",
+    "BAIDU_FUTURE_DRIVING_APPROVED": "FALSE",
+    "VITE_GOOGLE_MAPS_EMBED_ENABLED": "FALSE",
+    "VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED": "FALSE",
+    "VITE_GOOGLE_MAPS_STORAGE_APPROVED": "FALSE",
+    "VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED": "FALSE",
+    "VITE_BAIDU_MAPS_EMBED_ENABLED": "FALSE",
+    "VITE_BAIDU_MAPS_ENTITLEMENT_APPROVED": "FALSE",
+    "VITE_BAIDU_MAPS_STORAGE_APPROVED": "FALSE",
+    "VITE_BAIDU_MAPS_ATTRIBUTION_APPROVED": "FALSE",
+    "VITE_BAIDU_MAPS_COORDINATES_APPROVED": "FALSE"
+  },
+  "requiredHosts": [
+    "places.googleapis.com",
+    "routes.googleapis.com",
+    "api.map.baidu.com",
+    "maps.googleapis.com",
+    "*.gstatic.com",
+    "*.bdimg.com",
+    "*.bdstatic.com"
+  ],
+  "network": "REQUIRED_HOSTS_ONLY_NOT_PROBED",
+  "browser": {
+    "google": "WIRED_BROWSER_ACCEPTANCE_REQUIRED",
+    "baidu": "WIRED_BROWSER_ACCEPTANCE_REQUIRED",
+    "baiduCoordinates": "WIRED_OFFICIAL_JSAPI4_WGS84_TO_BD09",
+    "browserRequests": 0
+  },
+  "capabilities": [
+    {
+      "name": "Google Places",
+      "status": "LIVE_CONTRACT_PASS",
+      "requestCount": 1,
+      "diagnostics": [
+        {
+          "stage": "HTTP_STATUS",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.places",
+          "code": "PASSED"
+        },
+        {
+          "stage": "COORDINATE_PARSE",
+          "field": "response.place.location",
+          "code": "PASSED"
+        },
+        {
+          "stage": "COORDINATE_PARSE",
+          "field": "response.place.region",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.place.identity",
+          "code": "PASSED"
+        },
+        {
+          "stage": "COORDINATE_PARSE",
+          "field": "response.place.location",
+          "code": "PASSED"
+        },
+        {
+          "stage": "COORDINATE_PARSE",
+          "field": "response.place.region",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.place.identity",
+          "code": "PASSED"
+        }
+      ],
+      "httpStatus": 200
+    },
+    {
+      "name": "Google Walking",
+      "status": "CONTRACT_MISMATCH",
+      "requestCount": 1,
+      "diagnostics": [
+        {
+          "stage": "HTTP_STATUS",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.routes",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.routes[].legs",
+          "code": "PASSED"
+        },
+        {
+          "stage": "COORDINATE_PARSE",
+          "field": "response.routes[].legs.startLocation/endLocation",
+          "code": "PASSED"
+        },
+        {
+          "stage": "ENDPOINT_BINDING",
+          "field": "response.routes[].legs.startLocation/endLocation",
+          "code": "OFFSET_LIMIT_EXCEEDED"
+        }
+      ],
+      "httpStatus": 200
+    },
+    {
+      "name": "Google Driving",
+      "status": "CONTRACT_MISMATCH",
+      "requestCount": 1,
+      "diagnostics": [
+        {
+          "stage": "HTTP_STATUS",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.routes",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response.routes[].legs",
+          "code": "PASSED"
+        },
+        {
+          "stage": "COORDINATE_PARSE",
+          "field": "response.routes[].legs.startLocation/endLocation",
+          "code": "PASSED"
+        },
+        {
+          "stage": "ENDPOINT_BINDING",
+          "field": "response.routes[].legs.startLocation/endLocation",
+          "code": "OFFSET_LIMIT_EXCEEDED"
+        }
+      ],
+      "httpStatus": 200
+    },
+    {
+      "name": "Baidu Place",
+      "status": "CONTRACT_MISMATCH",
+      "requestCount": 1,
+      "diagnostics": [
+        {
+          "stage": "HTTP_STATUS",
+          "field": "response",
+          "code": "PASSED"
+        },
+        {
+          "stage": "RESPONSE_SHAPE",
+          "field": "response",
+          "code": "INVALID_SHAPE"
+        }
+      ],
+      "httpStatus": 200
+    }
+  ],
+  "requestCount": 4,
+  "notes": [
+    "Request count counts dispatched fetch attempts; blocked requests may never reach Provider.",
+    "No retry. No browser SDK load. No approvals changed. Contract PASS does not prove billing, entitlement, retention, attribution or production approval.",
+    "Baidu future driving uses a specified departure 24 hours ahead; advanced account entitlement requires separate review.",
+    "Baidu TRANSIT is same-city aggregate duration; cross-city and ARRIVE_BY are unsupported. BD09 inverse is approximate/non-authoritative."
+  ]
+}

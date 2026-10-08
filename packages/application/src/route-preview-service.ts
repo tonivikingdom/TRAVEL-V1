@@ -11,7 +11,14 @@ import {
   type RoutePlanningRepository,
   type StoredRoutePreviewPayload,
 } from './route-planning-ports.js';
-import { hashRoutePreviewPayload } from './route-snapshot.js';
+import {
+  hasMissedFixedDeparture,
+  hasElapsedFixedDeparture,
+} from './route-departure-eligibility.js';
+import {
+  restoreNormalizedCandidate,
+  hashRoutePreviewPayload,
+} from './route-snapshot.js';
 import { evaluateRouteReplacementSchedule } from './schedule-evaluation.js';
 import type { TripAggregateRecord, TripRepository } from './trip-ports.js';
 import type { ExternalExecutionOriginRepository } from './external-execution-origin-ports.js';
@@ -127,6 +134,8 @@ export class RoutePreviewService {
     const now = (this.options.clock ?? systemClock).now();
     assertSnapshotFresh(snapshot, now);
     const candidate = validateSnapshot(snapshot);
+    if (hasMissedFixedDeparture(trip, snapshot.fromNodeId, candidate, now))
+      throw stalePreview();
     const corridor = requireCurrentCorridor(trip, snapshot);
     const { fromNode, toNode } = corridor;
     const schedule = evaluateRouteReplacementSchedule(
@@ -256,7 +265,22 @@ export class RoutePreviewService {
       previewId,
     });
     if (preview === null) throw notFound();
-    return toPreviewView(preview, (this.options.clock ?? systemClock).now());
+    const trip = await this.requireTrip(actor.userId, tripId);
+    const now = (this.options.clock ?? systemClock).now();
+    const fromNodeId = preview.previewPayload.currentConnection.fromNodeId;
+    let candidate;
+    try {
+      candidate = restoreNormalizedCandidate(preview.previewPayload.candidate);
+    } catch {
+      throw stalePreview();
+    }
+    if (
+      fromNodeId === null
+        ? hasElapsedFixedDeparture(candidate, now)
+        : hasMissedFixedDeparture(trip, fromNodeId, candidate, now)
+    )
+      throw stalePreview();
+    return toPreviewView(preview, now);
   }
 
   private async requireTrip(

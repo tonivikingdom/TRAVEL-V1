@@ -1,0 +1,42 @@
+{
+  "synthetic": true,
+  "clock": "2026-10-10T10:05:00Z",
+  "serviceDeparture": "2026-10-10T10:00:00.000Z",
+  "execution": "AT_NODE, confirmed manual arrival; no departure",
+  "httpStatus": 404,
+  "candidateDeparture": null,
+  "before": {
+    "tripVersion": 10,
+    "nodes": 2,
+    "edges": 0,
+    "routes": 0,
+    "snapshots": 0,
+    "previews": 0,
+    "receipts": 0,
+    "outbox": 0,
+    "execution": 1,
+    "backups": 0,
+    "authoring": 0,
+    "days": 1,
+    "ownership": 1,
+    "times": 5,
+    "intents": 2
+  },
+  "after": {
+    "tripVersion": 10,
+    "nodes": 2,
+    "edges": 0,
+    "routes": 0,
+    "snapshots": 0,
+    "previews": 0,
+    "receipts": 0,
+    "outbox": 0,
+    "execution": 1,
+    "backups": 0,
+    "authoring": 0,
+    "days": 1,
+    "ownership": 1,
+    "times": 5,
+    "intents": 2
+  }
+}

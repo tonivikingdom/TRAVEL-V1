@@ -239,3 +239,8 @@ export {
   ControlledAlternativeSearchService,
   handoffPlanningIdentity,
 } from './controlled-alternative-search-service.js';
+
+export {
+  hasMissedFixedDeparture,
+  hasElapsedFixedDeparture,
+} from './route-departure-eligibility.js';

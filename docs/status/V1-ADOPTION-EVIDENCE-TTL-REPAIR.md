@@ -83,3 +83,7 @@ Sanitized reproduction: [Query](assets/i59-01/audit/query.json), [Preview and re
 ## P5E2 follow-up on this repair branch
 
 The failed Compose acceptance at starting HEAD `c6acff57ca4a70a0e4b73675148bcffbf265124d` was independently reproduced as an execution-calendar provenance defect: event-linked ACTUAL values serialize UTC, which was incorrectly preferred as the origin's local calendar. The separately authorized [P5E2 UTC/Tokyo repair](P5E2-DEPARTURE-CALENDAR-REPAIR.md) excludes those linked values from calendar timezone selection while preserving their execution facts. The canonical fixture and original Compose negative assertion remain unchanged. I59-01 TTL transactions and all existing RWS-02 checks remain intact. Query/Preview draft TTL races above remain the next task; the P5E2 repair does not implement them. Final combined HEAD verification is recorded in Draft PR #61.
+
+## Authorized Query / Preview continuation
+
+The controller subsequently authorized the previously separate draft-evidence follow-up on starting HEAD `c0178a57203d66d4579886061b0abaa368d9203d`. The [Query / Preview draft TTL repair](V1-DRAFT-EVIDENCE-TTL-REPAIR.md) adds fresh post-lock and post-insert evidence checks for both origin kinds, while preserving this Adopt repair and the P5E2 calendar guard. The historical audit above remains the original Adopt-only evidence; its two draft races are addressed by the continuation, not retroactively claimed as repaired in I59-01. Final combined verification belongs to the continuation's final HEAD in Draft PR #61.

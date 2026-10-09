@@ -30,6 +30,10 @@ import { adoptRoutePreview } from './prisma-route-adoption.js';
 import { undoRouteAdoption } from './prisma-route-undo.js';
 import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
 import { resolveLockedConfirmedRouteExecutionOrigin } from './prisma-confirmed-route-execution-origin.js';
+import {
+  hasExpiredPreviewEvidence,
+  hasExpiredSnapshotEvidence,
+} from './route-draft-evidence.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -56,7 +60,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly toNodeId: string;
     readonly snapshots: readonly RouteCandidateSnapshotDraft[];
   }): Promise<SaveRouteCandidateSnapshotsResult> {
-    return withDepartureRollback<SaveRouteCandidateSnapshotsResult>(
+    return withDraftRollback<SaveRouteCandidateSnapshotsResult>(
       () =>
         this.client.$transaction(async (transaction) => {
           await lockOwner(transaction, input.ownerUserId);
@@ -75,6 +79,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
           );
           const eligible = input.snapshots.filter(
             (draft) =>
+              !hasExpiredSnapshotEvidence(draft, now) &&
               !hasMissedFixedDeparture(
                 trip,
                 input.fromNodeId,
@@ -109,16 +114,18 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
             Math.max(now.getTime(), this.clock.now().getTime()),
           );
           if (
-            eligible.some((draft) =>
-              hasMissedFixedDeparture(
-                trip,
-                input.fromNodeId,
-                restoreNormalizedCandidate(draft.candidatePayload),
-                commitNow,
-              ),
+            eligible.some(
+              (draft) =>
+                hasExpiredSnapshotEvidence(draft, commitNow) ||
+                hasMissedFixedDeparture(
+                  trip,
+                  input.fromNodeId,
+                  restoreNormalizedCandidate(draft.candidatePayload),
+                  commitNow,
+                ),
             )
           )
-            throw new DepartureEligibilityAbort();
+            throw new DraftEvidenceAbort();
           return { status: 'SUCCESS', snapshots };
         }),
       { status: 'NO_MATCHING_CANDIDATE' },
@@ -132,7 +139,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       >
     >[0],
   ): Promise<SaveRouteCandidateSnapshotsResult> {
-    return withDepartureRollback<SaveRouteCandidateSnapshotsResult>(
+    return withDraftRollback<SaveRouteCandidateSnapshotsResult>(
       () =>
         this.client.$transaction(async (transaction) => {
           await lockOwner(transaction, input.ownerUserId);
@@ -159,6 +166,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
           );
           const eligible = input.snapshots.filter(
             (draft) =>
+              !hasExpiredSnapshotEvidence(draft, now) &&
               !hasElapsedFixedDeparture(
                 restoreNormalizedCandidate(draft.candidatePayload),
                 now,
@@ -194,14 +202,16 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
             Math.max(now.getTime(), this.clock.now().getTime()),
           );
           if (
-            eligible.some((draft) =>
-              hasElapsedFixedDeparture(
-                restoreNormalizedCandidate(draft.candidatePayload),
-                commitNow,
-              ),
+            eligible.some(
+              (draft) =>
+                hasExpiredSnapshotEvidence(draft, commitNow) ||
+                hasElapsedFixedDeparture(
+                  restoreNormalizedCandidate(draft.candidatePayload),
+                  commitNow,
+                ),
             )
           )
-            throw new DepartureEligibilityAbort();
+            throw new DraftEvidenceAbort();
           return { status: 'SUCCESS', snapshots };
         }),
       { status: 'NO_MATCHING_CANDIDATE' },
@@ -238,7 +248,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly createdAt: Date;
     readonly expiresAt: Date;
   }): Promise<CreateRoutePreviewResult> {
-    return withDepartureRollback<CreateRoutePreviewResult>(
+    return withDraftRollback<CreateRoutePreviewResult>(
       () =>
         this.client.$transaction(async (transaction) => {
           await lockOwner(transaction, input.ownerUserId);
@@ -258,10 +268,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
             snapshot.basisVersion !== input.basisVersion ||
             snapshot.candidateHash !== input.expectedCandidateHash ||
             snapshot.fromNodeId !== input.fromNodeId ||
-            snapshot.toNodeId !== input.toNodeId ||
-            snapshot.expiresAt <= input.now ||
-            (snapshot.providerValidUntil !== null &&
-              snapshot.providerValidUntil <= input.now)
+            snapshot.toNodeId !== input.toNodeId
           ) {
             return { status: 'PREVIEW_STALE' };
           }
@@ -277,6 +284,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
             Math.max(input.now.getTime(), this.clock.now().getTime()),
           );
           if (
+            hasExpiredPreviewEvidence(input, snapshot, eligibilityNow) ||
             hasMissedFixedDeparture(
               trip,
               input.fromNodeId,
@@ -299,17 +307,19 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
               expiresAt: input.expiresAt,
             },
           });
+          const commitNow = new Date(
+            Math.max(eligibilityNow.getTime(), this.clock.now().getTime()),
+          );
           if (
+            hasExpiredPreviewEvidence(preview, snapshot, commitNow) ||
             hasMissedFixedDeparture(
               trip,
               input.fromNodeId,
               candidate,
-              new Date(
-                Math.max(eligibilityNow.getTime(), this.clock.now().getTime()),
-              ),
+              commitNow,
             )
           )
-            throw new DepartureEligibilityAbort();
+            throw new DraftEvidenceAbort();
           return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
         }),
       { status: 'PREVIEW_STALE' },
@@ -321,7 +331,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       NonNullable<RoutePlanningRepository['createExternalOriginPreview']>
     >[0],
   ): Promise<CreateRoutePreviewResult> {
-    return withDepartureRollback<CreateRoutePreviewResult>(
+    return withDraftRollback<CreateRoutePreviewResult>(
       () =>
         this.client.$transaction(
           async (transaction) => {
@@ -347,7 +357,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
               input.policyVersion !== EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION ||
               snapshot.basisVersion !== input.basisVersion ||
               snapshot.candidateHash !== input.expectedCandidateHash ||
-              input.expiresAt <= now ||
+              hasExpiredPreviewEvidence(input, snapshot, now) ||
               input.expiresAt > snapshot.expiresAt ||
               hashRoutePreviewPayload(input.previewPayload) !==
                 input.previewHash
@@ -391,13 +401,17 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
                 expiresAt: input.expiresAt,
               },
             });
+            const commitNow = new Date(
+              Math.max(now.getTime(), this.clock.now().getTime()),
+            );
             if (
+              hasExpiredPreviewEvidence(preview, snapshot, commitNow) ||
               hasElapsedFixedDeparture(
                 restoreNormalizedCandidate(snapshot.candidatePayload),
-                new Date(Math.max(now.getTime(), this.clock.now().getTime())),
+                commitNow,
               )
             )
-              throw new DepartureEligibilityAbort();
+              throw new DraftEvidenceAbort();
             return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
@@ -587,15 +601,15 @@ function toJson(value: unknown): Prisma.InputJsonValue {
 }
 
 // Throw after tentative inserts so a clock boundary rolls the whole draft transaction back.
-class DepartureEligibilityAbort extends Error {}
-async function withDepartureRollback<T>(
+class DraftEvidenceAbort extends Error {}
+async function withDraftRollback<T>(
   run: () => Promise<T>,
   rejected: T,
 ): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof DepartureEligibilityAbort) return rejected;
+    if (error instanceof DraftEvidenceAbort) return rejected;
     throw error;
   }
 }

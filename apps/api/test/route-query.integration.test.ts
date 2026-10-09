@@ -94,6 +94,12 @@ import {
   ttlEvidence,
   waitForAdoptionLock,
 } from './helpers/adoption-evidence-ttl.js';
+import {
+  draftEvidence,
+  draftPlanningApi,
+  withHeldDraftLock,
+} from './helpers/draft-evidence-ttl.js';
+
 type JsonInput = Parameters<
   ManagedPrismaClient['client']['routePreview']['create']
 >[0]['data']['previewPayload'];
@@ -3329,6 +3335,427 @@ describe('P4A1 provider-neutral route query with PostgreSQL 17', () => {
           materializedOrigin: { nodeId: null, action: 'CREATE' },
         },
       },
+    });
+  });
+
+  describe('Draft TTL EXTERNAL_EXECUTION_ORIGIN', () => {
+    const requestAt = new Date('2030-10-01T10:29:01Z');
+    const expiry = new Date('2030-10-01T10:29:02Z');
+    const expired = new Date('2030-10-01T10:29:03Z');
+    for (const phase of ['query', 'preview'] as const) {
+      const kinds =
+        phase === 'query'
+          ? (['snapshot', 'provider'] as const)
+          : (['snapshot', 'provider', 'preview'] as const);
+      for (const timing of ['owner', 'Trip', 'insert'] as const) {
+        it.each(kinds)(
+          `${phase} ${timing} crossing %s TTL preserves the complete database footprint`,
+          async (kind) => {
+            const f = await externalPreviewFixture();
+            if (phase === 'preview' && kind !== 'preview')
+              await setSyntheticSnapshotExpiry(
+                managed,
+                f.snapshotId,
+                expiry,
+                kind === 'provider' ? expiry : null,
+              );
+            if (providerResult.status !== 'SUCCESS')
+              throw new Error('SYNTHETIC fixture must be successful');
+            providerResult = {
+              ...providerResult,
+              candidates: providerResult.candidates.map((candidate) => ({
+                ...candidate,
+                validUntil: kind === 'provider' ? expiry : null,
+              })),
+            };
+            currentNow = requestAt;
+            let advance = false;
+            const draftApp = draftPlanningApi(
+              managed,
+              () => currentNow,
+              new SyntheticRouteProvider(async (input) =>
+                externalProviderResult(input),
+              ),
+              {
+                snapshotTtlSeconds:
+                  phase === 'query' && kind === 'snapshot' ? 1 : 900,
+                previewTtlSeconds: kind === 'preview' ? 1 : 600,
+                afterSnapshot: () => {
+                  if (advance && phase === 'query') currentNow = expired;
+                },
+                afterPreview: () => {
+                  if (advance && phase === 'preview') currentNow = expired;
+                },
+              },
+            );
+            try {
+              const version = await readVersion(f.tripId);
+              const before = await adoptionFootprint(
+                managed,
+                f.tripId,
+                userA.actor.userId,
+              );
+              const request = () =>
+                draftApp.inject({
+                  method: 'POST',
+                  url:
+                    phase === 'query'
+                      ? `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`
+                      : `/trips/${f.tripId}/previews`,
+                  headers: bearer(userA),
+                  payload:
+                    phase === 'query'
+                      ? { basisVersion: version, toNodeId: f.D.id }
+                      : {
+                          basisVersion: version,
+                          candidateSnapshotId: f.snapshotId,
+                        },
+                });
+              advance = timing === 'insert';
+              const response =
+                timing === 'insert'
+                  ? await request()
+                  : await withHeldDraftLock(
+                      managed,
+                      userA.actor.userId,
+                      f.tripId,
+                      timing,
+                      request,
+                      () => {
+                        currentNow = expired;
+                      },
+                    );
+              const after = await adoptionFootprint(
+                managed,
+                f.tripId,
+                userA.actor.userId,
+              );
+              await draftEvidence(
+                `external-${phase}-${timing}-${kind}`,
+                before,
+                after,
+                {
+                  requestAt: requestAt.toISOString(),
+                  expiresAt: expiry.toISOString(),
+                  finalClock: currentNow.toISOString(),
+                  httpStatus: response.statusCode,
+                  errorCode: response.json().error?.code ?? null,
+                },
+              );
+              expect(response.statusCode, response.body).toBe(
+                phase === 'query' ? 404 : 409,
+              );
+              expect(response.json().error.code).toBe(
+                phase === 'query' ? 'NO_MATCHING_CANDIDATE' : 'PREVIEW_STALE',
+              );
+              expect(after).toEqual(before);
+            } finally {
+              await draftApp.close();
+            }
+          },
+        );
+      }
+    }
+    it.each([-1, 0, 1])(
+      'external Preview exact TTL boundary (%s ms), nullable Provider, readonly stale lookup',
+      async (offset) => {
+        const f = await externalPreviewFixture();
+        await setSyntheticSnapshotExpiry(managed, f.snapshotId, expiry, null);
+        currentNow = requestAt;
+        const before = await adoptionFootprint(
+          managed,
+          f.tripId,
+          userA.actor.userId,
+        );
+        const response = await withHeldDraftLock(
+          managed,
+          userA.actor.userId,
+          f.tripId,
+          'owner',
+          () => previewFromExternalFixture(f),
+          () => {
+            currentNow = new Date(expiry.getTime() + offset);
+          },
+        );
+        expect(response.statusCode, response.body).toBe(offset < 0 ? 201 : 409);
+        if (offset >= 0) {
+          expect(
+            await adoptionFootprint(managed, f.tripId, userA.actor.userId),
+          ).toEqual(before);
+        } else {
+          currentNow = expiry;
+          const saved = await adoptionFootprint(
+            managed,
+            f.tripId,
+            userA.actor.userId,
+          );
+          const read = await app.inject({
+            method: 'GET',
+            url: `/trips/${f.tripId}/previews/${response.json().previewId}`,
+            headers: bearer(userA),
+          });
+          expect(read.statusCode, read.body).toBe(200);
+          expect(read.json()).toMatchObject({
+            status: 'EXPIRED',
+            adoptable: false,
+          });
+          expect(
+            await adoptionFootprint(managed, f.tripId, userA.actor.userId),
+          ).toEqual(saved);
+        }
+      },
+    );
+  });
+
+  describe('Draft TTL external Query boundaries and successful chain', () => {
+    const requestAt = new Date('2030-10-01T10:29:01Z');
+    const expiry = new Date('2030-10-01T10:29:02Z');
+    const expired = new Date('2030-10-01T10:29:03Z');
+    it.each([-1, 0, 1])(
+      'external Query null Provider TTL at boundary (%s ms)',
+      async (offset) => {
+        const f = await externalPreviewFixture();
+        if (providerResult.status !== 'SUCCESS')
+          throw new Error('SYNTHETIC fixture must be successful');
+        providerResult = {
+          ...providerResult,
+          candidates: providerResult.candidates.map((candidate) => ({
+            ...candidate,
+            validUntil: null,
+          })),
+        };
+        currentNow = requestAt;
+        const draftApp = draftPlanningApi(
+          managed,
+          () => currentNow,
+          new SyntheticRouteProvider(async (input) =>
+            externalProviderResult(input),
+          ),
+          { snapshotTtlSeconds: 1 },
+        );
+        try {
+          const version = await readVersion(f.tripId);
+          const before = await adoptionFootprint(
+            managed,
+            f.tripId,
+            userA.actor.userId,
+          );
+          const response = await withHeldDraftLock(
+            managed,
+            userA.actor.userId,
+            f.tripId,
+            'Trip',
+            () =>
+              draftApp.inject({
+                method: 'POST',
+                url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+                headers: bearer(userA),
+                payload: { basisVersion: version, toNodeId: f.D.id },
+              }),
+            () => {
+              currentNow = new Date(expiry.getTime() + offset);
+            },
+          );
+          expect(response.statusCode, response.body).toBe(
+            offset < 0 ? 200 : 404,
+          );
+          if (offset >= 0)
+            expect(
+              await adoptionFootprint(managed, f.tripId, userA.actor.userId),
+            ).toEqual(before);
+          else
+            expect(
+              (
+                await managed.client.routeCandidateSnapshot.findUniqueOrThrow({
+                  where: {
+                    id: response.json().candidates[0].candidateSnapshotId,
+                  },
+                })
+              ).providerValidUntil,
+            ).toBeNull();
+        } finally {
+          await draftApp.close();
+        }
+      },
+    );
+    it.each(['owner', 'insert'] as const)(
+      'external mixed Query candidates at %s',
+      async (timing) => {
+        const f = await externalPreviewFixture();
+        if (providerResult.status !== 'SUCCESS')
+          throw new Error('SYNTHETIC fixture must be successful');
+        const base = providerResult.candidates[0]!;
+        providerResult = {
+          status: 'SUCCESS',
+          candidates: [
+            {
+              ...base,
+              candidateId: 'SYNTHETIC:external-short',
+              validUntil: expiry,
+            },
+            {
+              ...base,
+              candidateId: 'SYNTHETIC:external-long',
+              validUntil: new Date('2030-10-01T10:38:00Z'),
+            },
+          ],
+        };
+        currentNow = requestAt;
+        const draftApp = draftPlanningApi(
+          managed,
+          () => currentNow,
+          new SyntheticRouteProvider(async (input) =>
+            externalProviderResult(input),
+          ),
+          {
+            afterSnapshot: () => {
+              if (timing === 'insert') currentNow = expired;
+            },
+          },
+        );
+        try {
+          const version = await readVersion(f.tripId);
+          const before = await adoptionFootprint(
+            managed,
+            f.tripId,
+            userA.actor.userId,
+          );
+          const request = () =>
+            draftApp.inject({
+              method: 'POST',
+              url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+              headers: bearer(userA),
+              payload: { basisVersion: version, toNodeId: f.D.id },
+            });
+          const response =
+            timing === 'insert'
+              ? await request()
+              : await withHeldDraftLock(
+                  managed,
+                  userA.actor.userId,
+                  f.tripId,
+                  'owner',
+                  request,
+                  () => {
+                    currentNow = expired;
+                  },
+                );
+          if (timing === 'insert') {
+            expect(response.statusCode, response.body).toBe(404);
+            expect(
+              await adoptionFootprint(managed, f.tripId, userA.actor.userId),
+            ).toEqual(before);
+          } else {
+            expect(response.statusCode, response.body).toBe(200);
+            expect(response.json().candidates).toHaveLength(1);
+            expect(response.json().candidates[0].candidateId).toBe(
+              'SYNTHETIC:external-long',
+            );
+            const inserted =
+              await managed.client.routeCandidateSnapshot.findMany({
+                where: {
+                  tripId: f.tripId,
+                  fromExternalOriginId: f.origin.id,
+                  id: { not: f.snapshotId },
+                },
+              });
+            expect(inserted).toHaveLength(1);
+            const after = await adoptionFootprint(
+              managed,
+              f.tripId,
+              userA.actor.userId,
+            );
+            expect({ ...after, snapshots: before.snapshots }).toEqual(before);
+            expect(
+              inserted.some(
+                (row) =>
+                  row.id ===
+                    response.json().candidates[0].candidateSnapshotId &&
+                  row.expiresAt > currentNow,
+              ),
+            ).toBe(true);
+          }
+        } finally {
+          await draftApp.close();
+        }
+      },
+    );
+    it('external post-Provider I/O samples a fresh Clock and persists no expired evidence', async () => {
+      const f = await externalPreviewFixture();
+      if (providerResult.status !== 'SUCCESS')
+        throw new Error('SYNTHETIC fixture must be successful');
+      providerResult = {
+        ...providerResult,
+        candidates: providerResult.candidates.map((candidate) => ({
+          ...candidate,
+          validUntil: expiry,
+        })),
+      };
+      currentNow = requestAt;
+      const draftApp = draftPlanningApi(
+        managed,
+        () => currentNow,
+        new SyntheticRouteProvider(async (input) => {
+          currentNow = expired;
+          return externalProviderResult(input);
+        }),
+      );
+      try {
+        const before = await adoptionFootprint(
+          managed,
+          f.tripId,
+          userA.actor.userId,
+        );
+        const response = await draftApp.inject({
+          method: 'POST',
+          url: `/trips/${f.tripId}/execution/external-origins/${f.origin.id}/routes/query`,
+          headers: bearer(userA),
+          payload: {
+            basisVersion: await readVersion(f.tripId),
+            toNodeId: f.D.id,
+          },
+        });
+        expect(response.statusCode, response.body).toBe(404);
+        expect(
+          await adoptionFootprint(managed, f.tripId, userA.actor.userId),
+        ).toEqual(before);
+      } finally {
+        await draftApp.close();
+      }
+    });
+    it('external valid evidence supports fresh Query → Preview → Adopt → expired-evidence receipt replay → Undo', async () => {
+      const f = await externalPreviewFixture();
+      await setSyntheticSnapshotExpiry(managed, f.snapshotId, expiry, expiry);
+      currentNow = requestAt;
+      const previewResponse = await previewFromExternalFixture(f);
+      expect(previewResponse.statusCode, previewResponse.body).toBe(201);
+      const trip = {
+        ...f.first.trip,
+        version: previewResponse.json().basisVersion,
+      };
+      const adopted = await adoptSuccessfully(
+        userA,
+        trip,
+        previewResponse.json().previewId,
+        'SYNTHETIC:external-draft-TTL',
+      );
+      currentNow = expired;
+      const replay = await adopt(
+        userA,
+        trip,
+        previewResponse.json().previewId,
+        'SYNTHETIC:external-draft-TTL',
+      );
+      expect(replay.statusCode, replay.body).toBe(200);
+      expect(replay.json().operationReceipt.id).toBe(
+        adopted.operationReceipt.id,
+      );
+      await undoSuccessfully(
+        userA,
+        adopted.trip,
+        adopted.operationReceipt.id,
+        'SYNTHETIC:external-draft-TTL-undo',
+      );
     });
   });
 

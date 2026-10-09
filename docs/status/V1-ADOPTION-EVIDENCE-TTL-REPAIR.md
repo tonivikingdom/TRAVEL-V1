@@ -79,3 +79,7 @@ Sanitized reproduction: [Query](assets/i59-01/audit/query.json), [Preview and re
 - The two confirmed draft Query/Preview TTL races above are not repaired in this Adopt-only change.
 - All inherited production approval gates remain unchanged: real Provider entitlement and reliability, F-05/F-06, storage/retention/TTL/deletion/attribution/quota/pricing/coverage, Japan staging/production prohibition, map SDK limits, operator timetable/fare/cross-midnight truth and physical iPhone/Safari/keyboard acceptance remain OPEN/PARTIAL as recorded at the base.
 - Draft only. No main merge, deployment, production enablement, PR #59 source change, Provider branch change or next batch.
+
+## P5E2 follow-up on this repair branch
+
+The failed Compose acceptance at starting HEAD `c6acff57ca4a70a0e4b73675148bcffbf265124d` was independently reproduced as an execution-calendar provenance defect: event-linked ACTUAL values serialize UTC, which was incorrectly preferred as the origin's local calendar. The separately authorized [P5E2 UTC/Tokyo repair](P5E2-DEPARTURE-CALENDAR-REPAIR.md) excludes those linked values from calendar timezone selection while preserving their execution facts. The canonical fixture and original Compose negative assertion remain unchanged. I59-01 TTL transactions and all existing RWS-02 checks remain intact. Query/Preview draft TTL races above remain the next task; the P5E2 repair does not implement them. Final combined HEAD verification is recorded in Draft PR #61.

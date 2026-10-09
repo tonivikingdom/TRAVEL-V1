@@ -286,3 +286,190 @@ describe('execution-aware fixed departure rejection (SYNTHETIC)', () => {
     },
   );
 });
+
+describe('P5E2 explicit calendar context vs serialized execution UTC (SYNTHETIC)', () => {
+  function calendar(
+    departureAt: string,
+    nowAt: string,
+    zone: string,
+    planned = true,
+  ) {
+    const depart = new Date(departureAt),
+      now = new Date(nowAt);
+    const arrive = new Date(depart.getTime() + 30 * 60_000);
+    const dayAt = (instant: Date) =>
+      new Date(
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: zone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(instant) + 'T00:00:00Z',
+      );
+    const arrived = event({ occurredAt: new Date(depart.getTime() - 60_000) });
+    const t = trip(zone, [arrived]),
+      day = t.dayOccurrences[0]!,
+      node = day.nodes[0]!;
+    const original = node.timeValues[0]!;
+    const c = candidate();
+    return {
+      now,
+      t: {
+        ...t,
+        effectiveStartDate: dayAt(depart),
+        effectiveEndDate: dayAt(arrive),
+        dayOccurrences: [
+          {
+            ...day,
+            localDate: dayAt(depart),
+            nodes: [
+              {
+                ...node,
+                timeValues: [
+                  {
+                    ...original,
+                    id: 'execution',
+                    layer: 'ACTUAL' as const,
+                    pointKind: 'ARRIVAL' as const,
+                    instant: arrived.occurredAt,
+                    timeZone: 'UTC',
+                    sourceRef: `execution-event:${arrived.id}`,
+                  },
+                  ...(planned
+                    ? [{ ...original, instant: depart, timeZone: zone }]
+                    : []),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      c: {
+        ...c,
+        departure: time(depart, zone),
+        arrival: time(arrive, zone),
+        legs: [
+          {
+            ...c.legs[0]!,
+            departure: time(depart, zone),
+            arrival: time(arrive, zone),
+          },
+        ],
+      },
+    };
+  }
+  it.each([
+    [
+      'Tokyo before midnight',
+      '2030-09-30T14:57:00Z',
+      '2030-09-30T14:59:00Z',
+      'Asia/Tokyo',
+    ],
+    [
+      'Tokyo after midnight',
+      '2030-09-30T14:59:00Z',
+      '2030-09-30T15:01:00Z',
+      'Asia/Tokyo',
+    ],
+    [
+      'Tokyo local date differs UTC',
+      '2030-09-30T15:59:00Z',
+      '2030-09-30T16:01:00Z',
+      'Asia/Tokyo',
+    ],
+    [
+      'UTC before midnight',
+      '2030-09-30T23:57:00Z',
+      '2030-09-30T23:59:00Z',
+      'UTC',
+    ],
+    [
+      'UTC after midnight',
+      '2030-09-30T23:59:00Z',
+      '2030-10-01T00:01:00Z',
+      'UTC',
+    ],
+    [
+      'Tokyo after UTC midnight',
+      '2030-10-01T00:00:00Z',
+      '2030-10-01T00:01:00Z',
+      'Asia/Tokyo',
+    ],
+  ])(
+    '%s protects a manually confirmed open origin',
+    (_name, dep, now, zone) => {
+      for (const planned of [true, false]) {
+        const f = calendar(dep!, now!, zone!, planned);
+        expect(hasMissedFixedDeparture(f.t, 'origin', f.c, f.now)).toBe(true);
+      }
+    },
+  );
+  it('explicit departure clears previous-day carry-over; arrival alone does not', () => {
+    const f = calendar(
+      '2030-09-30T14:59:00Z',
+      '2030-09-30T15:01:00Z',
+      'Asia/Tokyo',
+    );
+    expect(hasMissedFixedDeparture(f.t, 'origin', f.c, f.now)).toBe(true);
+    expect(
+      hasMissedFixedDeparture(
+        {
+          ...f.t,
+          routeExecutionEvents: [
+            ...f.t.routeExecutionEvents!,
+            event({
+              id: 'departed',
+              type: 'DEPARTURE',
+              occurredAt: new Date('2030-09-30T14:59:00Z'),
+            }),
+          ],
+        },
+        'origin',
+        f.c,
+        f.now,
+      ),
+    ).toBe(false);
+  });
+  it('old confirmed facts after the reliable Trip period remain historical editing', () => {
+    const f = calendar(
+      '2030-09-30T15:59:00Z',
+      '2030-10-02T01:00:00Z',
+      'Asia/Tokyo',
+    );
+    expect(hasMissedFixedDeparture(f.t, 'origin', f.c, f.now)).toBe(false);
+  });
+  it('serialized UTC cannot mask an invalid explicit calendar zone', () => {
+    const f = calendar(
+      '2030-09-30T15:59:00Z',
+      '2030-09-30T16:01:00Z',
+      'Asia/Tokyo',
+    );
+    const day = f.t.dayOccurrences[0]!,
+      node = day.nodes[0]!;
+    expect(
+      hasMissedFixedDeparture(
+        {
+          ...f.t,
+          dayOccurrences: [
+            {
+              ...day,
+              nodes: [
+                {
+                  ...node,
+                  timeValues: node.timeValues.map((v) =>
+                    v.layer === 'PLANNED'
+                      ? { ...v, timeZone: 'SYNTHETIC_INVALID_ZONE' }
+                      : v,
+                  ),
+                },
+              ],
+            },
+          ],
+        },
+        'origin',
+        f.c,
+        f.now,
+      ),
+    ).toBe(true);
+  });
+});

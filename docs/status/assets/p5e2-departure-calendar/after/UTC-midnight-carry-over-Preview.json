@@ -1,0 +1,15 @@
+{
+  "synthetic": true,
+  "name": "UTC midnight carry-over",
+  "zone": "UTC",
+  "departure": "2030-09-30T23:59:00Z",
+  "now": "2030-10-01T00:01:00Z",
+  "phase": "Preview",
+  "expectedStatus": 409,
+  "actualStatus": 409,
+  "error": "PREVIEW_STALE",
+  "beforeVersion": 4,
+  "afterVersion": 4,
+  "completeDatabaseFootprintUnchanged": true,
+  "serializedExecutionTimeZone": "UTC"
+}

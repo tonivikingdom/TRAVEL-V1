@@ -1,0 +1,11 @@
+
+ RUN  v5.0.1 /workspace/TRAVEL-CONVERGENCE-QA/apps/api
+
+(node:83888) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  02:58:28
+   Duration  11.93s (tests 80%, transform 16%, import 4%)
+

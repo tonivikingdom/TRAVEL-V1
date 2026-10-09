@@ -1,0 +1,247 @@
+{
+  "base": "3e3de1e30b15ae3ffbf11be36e04df98cf1119b3",
+  "integratedExecutionHead": "a5aabeba8fc5d7d3aa11835383b99c27108f5c71",
+  "uniqueSourceCommits": [
+    {
+      "source": "5060ecea7804b519e9b18d95b742dcf97474f165",
+      "picked": "3ee5c751c2e7cabb91ac186a1bfe169535bcd3c7",
+      "patchId": "4079a34ce02f1166ee658481441c6f1cf316413b",
+      "blobs": [
+        {
+          "path": "docs/status/V1-PROVIDER-ROUTE-ACCESS-DIAGNOSIS.md",
+          "sourceBlob": "0d54ed6646f1f9c6dce3f52ce3b5f38567dce99d",
+          "pickedBlob": "0d54ed6646f1f9c6dce3f52ce3b5f38567dce99d"
+        },
+        {
+          "path": "docs/status/assets/provider-route-access/live-diagnosis.json",
+          "sourceBlob": "6d08ccc935db72fd49ca272ab1c40707f2256ee3",
+          "pickedBlob": "6d08ccc935db72fd49ca272ab1c40707f2256ee3"
+        },
+        {
+          "path": "packages/application/test/google-place-identity-study.test.ts",
+          "sourceBlob": "aabdfe25d1ce7fa0cfa16401dfa28c38fbadfbfb",
+          "pickedBlob": "aabdfe25d1ce7fa0cfa16401dfa28c38fbadfbfb"
+        },
+        {
+          "path": "packages/providers/test/google-route-access-study.test.ts",
+          "sourceBlob": "a46b1fa9f8c65e328b759c37f768845eff85a4da",
+          "pickedBlob": "a46b1fa9f8c65e328b759c37f768845eff85a4da"
+        },
+        {
+          "path": "scripts/provider-doctor.ts",
+          "sourceBlob": "37394e8c4fe6add156288d1553f70cd1b9effbe2",
+          "pickedBlob": "37394e8c4fe6add156288d1553f70cd1b9effbe2"
+        },
+        {
+          "path": "scripts/provider-response-diagnostics.test.ts",
+          "sourceBlob": "7e5e6c0494a727a0b402eb87ce75f947e745c671",
+          "pickedBlob": "7e5e6c0494a727a0b402eb87ce75f947e745c671"
+        },
+        {
+          "path": "scripts/provider-response-diagnostics.ts",
+          "sourceBlob": "75cca34791cb72687b753117632377a359821dad",
+          "pickedBlob": "75cca34791cb72687b753117632377a359821dad"
+        }
+      ]
+    },
+    {
+      "source": "52491b1cc4ef23aa4f422c56a3d064aa5f924026",
+      "picked": "a5aabeba8fc5d7d3aa11835383b99c27108f5c71",
+      "patchId": "5f21140a98f85f7e6c6d5fdb338bca6e240984b2",
+      "blobs": [
+        {
+          "path": "docs/status/V1-BAIDU-WALKING-CONTRACT-DIAGNOSTICS.md",
+          "sourceBlob": "80e414f481bcb21adf1c558e8bb5b9d53165432c",
+          "pickedBlob": "80e414f481bcb21adf1c558e8bb5b9d53165432c"
+        },
+        {
+          "path": "docs/status/assets/baidu-walking-diagnostics/live-diagnosis.json",
+          "sourceBlob": "52e36236648437adc3a1fb03d7b1a074f9d67a00",
+          "pickedBlob": "52e36236648437adc3a1fb03d7b1a074f9d67a00"
+        },
+        {
+          "path": "packages/providers/src/contract-diagnostics.ts",
+          "sourceBlob": "98c704ec31bb56e1dc368f21b7815953b22d4eca",
+          "pickedBlob": "98c704ec31bb56e1dc368f21b7815953b22d4eca"
+        },
+        {
+          "path": "packages/providers/src/regional-route-adapters.ts",
+          "sourceBlob": "25b34388f91dbf4853a7d0a9986d839817c60f18",
+          "pickedBlob": "25b34388f91dbf4853a7d0a9986d839817c60f18"
+        },
+        {
+          "path": "packages/providers/test/baidu-route-diagnostics.test.ts",
+          "sourceBlob": "aacdafbc864d237b308fd42ef32fc3dcace953cc",
+          "pickedBlob": "aacdafbc864d237b308fd42ef32fc3dcace953cc"
+        },
+        {
+          "path": "scripts/provider-contract-diagnostics.test.ts",
+          "sourceBlob": "d945f2e3deaa63781eb7881f265ddbc291096ad8",
+          "pickedBlob": "d945f2e3deaa63781eb7881f265ddbc291096ad8"
+        },
+        {
+          "path": "scripts/provider-doctor.ts",
+          "sourceBlob": "91d08e5a5a5e825c242aa6d5c4a3afe58515bd52",
+          "pickedBlob": "91d08e5a5a5e825c242aa6d5c4a3afe58515bd52"
+        }
+      ]
+    }
+  ],
+  "finalSourceBlobMatches": [
+    {
+      "path": "docs/status/V1-BAIDU-WALKING-CONTRACT-DIAGNOSTICS.md",
+      "source60Blob": "80e414f481bcb21adf1c558e8bb5b9d53165432c",
+      "integrationBlob": "80e414f481bcb21adf1c558e8bb5b9d53165432c"
+    },
+    {
+      "path": "docs/status/V1-PROVIDER-ROUTE-ACCESS-DIAGNOSIS.md",
+      "source60Blob": "0d54ed6646f1f9c6dce3f52ce3b5f38567dce99d",
+      "integrationBlob": "0d54ed6646f1f9c6dce3f52ce3b5f38567dce99d"
+    },
+    {
+      "path": "docs/status/assets/baidu-walking-diagnostics/live-diagnosis.json",
+      "source60Blob": "52e36236648437adc3a1fb03d7b1a074f9d67a00",
+      "integrationBlob": "52e36236648437adc3a1fb03d7b1a074f9d67a00"
+    },
+    {
+      "path": "docs/status/assets/provider-route-access/live-diagnosis.json",
+      "source60Blob": "6d08ccc935db72fd49ca272ab1c40707f2256ee3",
+      "integrationBlob": "6d08ccc935db72fd49ca272ab1c40707f2256ee3"
+    },
+    {
+      "path": "packages/application/test/google-place-identity-study.test.ts",
+      "source60Blob": "aabdfe25d1ce7fa0cfa16401dfa28c38fbadfbfb",
+      "integrationBlob": "aabdfe25d1ce7fa0cfa16401dfa28c38fbadfbfb"
+    },
+    {
+      "path": "packages/providers/src/contract-diagnostics.ts",
+      "source60Blob": "98c704ec31bb56e1dc368f21b7815953b22d4eca",
+      "integrationBlob": "98c704ec31bb56e1dc368f21b7815953b22d4eca"
+    },
+    {
+      "path": "packages/providers/src/regional-route-adapters.ts",
+      "source60Blob": "25b34388f91dbf4853a7d0a9986d839817c60f18",
+      "integrationBlob": "25b34388f91dbf4853a7d0a9986d839817c60f18"
+    },
+    {
+      "path": "packages/providers/test/baidu-route-diagnostics.test.ts",
+      "source60Blob": "aacdafbc864d237b308fd42ef32fc3dcace953cc",
+      "integrationBlob": "aacdafbc864d237b308fd42ef32fc3dcace953cc"
+    },
+    {
+      "path": "packages/providers/test/google-route-access-study.test.ts",
+      "source60Blob": "a46b1fa9f8c65e328b759c37f768845eff85a4da",
+      "integrationBlob": "a46b1fa9f8c65e328b759c37f768845eff85a4da"
+    },
+    {
+      "path": "scripts/provider-contract-diagnostics.test.ts",
+      "source60Blob": "d945f2e3deaa63781eb7881f265ddbc291096ad8",
+      "integrationBlob": "d945f2e3deaa63781eb7881f265ddbc291096ad8"
+    },
+    {
+      "path": "scripts/provider-doctor.ts",
+      "source60Blob": "91d08e5a5a5e825c242aa6d5c4a3afe58515bd52",
+      "integrationBlob": "91d08e5a5a5e825c242aa6d5c4a3afe58515bd52"
+    },
+    {
+      "path": "scripts/provider-response-diagnostics.test.ts",
+      "source60Blob": "7e5e6c0494a727a0b402eb87ce75f947e745c671",
+      "integrationBlob": "7e5e6c0494a727a0b402eb87ce75f947e745c671"
+    },
+    {
+      "path": "scripts/provider-response-diagnostics.ts",
+      "source60Blob": "75cca34791cb72687b753117632377a359821dad",
+      "integrationBlob": "75cca34791cb72687b753117632377a359821dad"
+    }
+  ],
+  "protectedUnchangedBlobs": [
+    {
+      "path": "packages/providers/src/endpoint-binding.ts",
+      "baseBlob": "49d27ac9b525e3b43c9d886bfd867a4345e6b058",
+      "integrationBlob": "49d27ac9b525e3b43c9d886bfd867a4345e6b058"
+    },
+    {
+      "path": "packages/providers/src/baidu-coordinates.ts",
+      "baseBlob": "b37dfde795b9da6f9438bd0df9852d4e54a917c0",
+      "integrationBlob": "b37dfde795b9da6f9438bd0df9852d4e54a917c0"
+    },
+    {
+      "path": "packages/providers/src/regional-http.ts",
+      "baseBlob": "f110e140fc58295dcb3420cc63a05e1d92515e19",
+      "integrationBlob": "f110e140fc58295dcb3420cc63a05e1d92515e19"
+    },
+    {
+      "path": "scripts/provider-doctor-cli.ts",
+      "baseBlob": "bcd52d248575fb81e813c4c301d3085836c14cae",
+      "integrationBlob": "bcd52d248575fb81e813c4c301d3085836c14cae"
+    },
+    {
+      "path": "scripts/provider-doctor-proxy.test.ts",
+      "baseBlob": "ded4964b7bfb87b9ce739fdf806076c9265aec13",
+      "integrationBlob": "ded4964b7bfb87b9ce739fdf806076c9265aec13"
+    },
+    {
+      "path": "package.json",
+      "baseBlob": "90a99329159adbd7ec8bbce67f0422f9e8cff141",
+      "integrationBlob": "90a99329159adbd7ec8bbce67f0422f9e8cff141"
+    },
+    {
+      "path": "packages/application/src/route-departure-eligibility.ts",
+      "baseBlob": "61091be46663d138cbd2598fa5918d161ba200e5",
+      "integrationBlob": "61091be46663d138cbd2598fa5918d161ba200e5"
+    },
+    {
+      "path": "packages/persistence/src/prisma-route-planning-repository.ts",
+      "baseBlob": "c3a9e47058484110a32e9efe11a3a7c97ac79ae1",
+      "integrationBlob": "c3a9e47058484110a32e9efe11a3a7c97ac79ae1"
+    },
+    {
+      "path": "packages/persistence/src/route-draft-evidence.ts",
+      "baseBlob": "cc6266049800b04eb3d495a15e8c575b4efaec85",
+      "integrationBlob": "cc6266049800b04eb3d495a15e8c575b4efaec85"
+    },
+    {
+      "path": "packages/persistence/src/prisma-route-adoption.ts",
+      "baseBlob": "7dde31dde96143eb7847f1cf0bc5c9d3ad2c5e65",
+      "integrationBlob": "7dde31dde96143eb7847f1cf0bc5c9d3ad2c5e65"
+    },
+    {
+      "path": "packages/persistence/src/prisma-external-route-adoption.ts",
+      "baseBlob": "80173bffe7d9385694f74de0086e214aadc29be4",
+      "integrationBlob": "80173bffe7d9385694f74de0086e214aadc29be4"
+    },
+    {
+      "path": "packages/persistence/src/route-adoption-evidence.ts",
+      "baseBlob": "d6dc1388b9e9055fcd086961ffc6f9a947f63a5e",
+      "integrationBlob": "d6dc1388b9e9055fcd086961ffc6f9a947f63a5e"
+    },
+    {
+      "path": "scripts/synthetic-route-day.mjs",
+      "baseBlob": "7b5d2936d33416c988e521be861ce6c2da8fdfcb",
+      "integrationBlob": "7b5d2936d33416c988e521be861ce6c2da8fdfcb"
+    },
+    {
+      "path": "scripts/verify-route-suffix-chain.mjs",
+      "baseBlob": "e13cff0658b79a557dab7dcc1e293d9b20d5a432",
+      "integrationBlob": "e13cff0658b79a557dab7dcc1e293d9b20d5a432"
+    },
+    {
+      "path": "prisma/schema.prisma",
+      "baseBlob": "1461071c042f9d70e8735e239cd9bb2977dd75e3",
+      "integrationBlob": "1461071c042f9d70e8735e239cd9bb2977dd75e3"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "baseBlob": "3db87cdfe45089573ced4d0d0e9442a4f9b8d125",
+      "integrationBlob": "3db87cdfe45089573ced4d0d0e9442a4f9b8d125"
+    }
+  ],
+  "migrationCount": 27,
+  "realProviderRequests": 0,
+  "unchangedCodeSections": {
+    "googleRouteClassSha256": "d6f1b572f9fb1addf99559d5a07f5755b7d85483f6a4f88854bd23f991d08a5b",
+    "baiduRequestTimePolicySha256": "f515ef04f67bc848c19a426d255a3fa72fcdd55f0b948b95da8d1284bf6e6ed7"
+  },
+  "qaSource": "e7d04157532e2d361173d4447252d636bc346cdb",
+  "qaTestBlob": "dd4d1d6c5c1e2c499d60f0d252aa9461fb0ce65a"
+}

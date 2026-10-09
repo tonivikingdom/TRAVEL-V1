@@ -114,6 +114,8 @@ enum ItineraryNodeSource {
 }
 
 enum TransportMode {
+  CYCLING
+  TRANSIT
   WALKING
   DRIVING
   TAXI

@@ -1,0 +1,15 @@
+{
+  "synthetic": true,
+  "name": "Tokyo midnight carry-over",
+  "zone": "Asia/Tokyo",
+  "departure": "2030-09-30T14:59:00Z",
+  "now": "2030-09-30T15:01:00Z",
+  "phase": "Query",
+  "expectedStatus": 404,
+  "actualStatus": 404,
+  "error": "NO_MATCHING_CANDIDATE",
+  "beforeVersion": 4,
+  "afterVersion": 4,
+  "completeDatabaseFootprintUnchanged": true,
+  "serializedExecutionTimeZone": "UTC"
+}

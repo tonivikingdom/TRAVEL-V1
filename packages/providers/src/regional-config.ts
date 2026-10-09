@@ -42,7 +42,14 @@ export function createRegionalProviders(
       ? { baiduPlace: new BaiduPlaceSearchProvider(baidu, fetcher) }
       : {}),
     ...(baidu && env.BAIDU_COORDINATES_APPROVED === 'true'
-      ? { baiduRoute: new BaiduOrdinaryRouteProvider(baidu, fetcher) }
+      ? {
+          baiduRoute: new BaiduOrdinaryRouteProvider(
+            baidu,
+            fetcher,
+            () => new Date(),
+            env.BAIDU_FUTURE_DRIVING_APPROVED === 'true',
+          ),
+        }
       : {}),
     ...(google
       ? {

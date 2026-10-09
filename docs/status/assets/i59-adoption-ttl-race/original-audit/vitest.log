@@ -1,0 +1,68 @@
+
+ RUN  v5.0.1 /workspace/TRAVEL-V1-audit-59
+
+(node:115063) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ ../scratch/v1-integration-audit-59/independent.integration.test.ts (8 tests | 4 failed) 5290ms
+   ❯ Independent AUDIT59 — SYNTHETIC + real PostgreSQL (8)
+     × AUDIT59 aggregate TRANSIT expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt 711ms
+     × AUDIT59 aggregate TRANSIT Provider/Preview TTL crossing during tentative writes must roll back new Adopt 608ms
+     × AUDIT59 fixed BUS expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt 594ms
+     × AUDIT59 fixed BUS Provider/Preview TTL crossing during tentative writes must roll back new Adopt 558ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../scratch/v1-integration-audit-59/independent.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 aggregate TRANSIT expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt
+ FAIL  ../scratch/v1-integration-audit-59/independent.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 fixed BUS expired Provider/Preview evidence during owner lock wait cannot authorize new Adopt
+AssertionError: expected { httpStatus: 200, …(1) } to deeply equal { httpStatus: 409, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "footprintUnchanged": true,
+-   "httpStatus": 409,
++   "footprintUnchanged": false,
++   "httpStatus": 200,
+  }
+
+ ❯ ../scratch/v1-integration-audit-59/independent.integration.test.ts:321:89
+    319|       const response=await request;
+    320|       const outcome=await auditEvidence(`adopt-expired-during-lock-${f…
+    321|       expect({httpStatus:outcome.status,footprintUnchanged:outcome.foo…
+       |                                                                                         ^
+    322|     } finally {release.release();await holder;await request;}
+    323|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  ../scratch/v1-integration-audit-59/independent.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 aggregate TRANSIT Provider/Preview TTL crossing during tentative writes must roll back new Adopt
+ FAIL  ../scratch/v1-integration-audit-59/independent.integration.test.ts > Independent AUDIT59 — SYNTHETIC + real PostgreSQL > AUDIT59 fixed BUS Provider/Preview TTL crossing during tentative writes must roll back new Adopt
+AssertionError: expected { status: 'SUCCESS', …(1) } to deeply equal { status: 'PREVIEW_STALE', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "footprintUnchanged": true,
+-   "status": "PREVIEW_STALE",
++   "footprintUnchanged": false,
++   "status": "SUCCESS",
+  }
+
+ ❯ ../scratch/v1-integration-audit-59/independent.integration.test.ts:332:83
+    330|     const outcome=await auditEvidence(`adopt-expired-during-writes-${f…
+    331|     expect(samples).toBe(2);
+    332|     expect({status:outcome.status,footprintUnchanged:outcome.footprint…
+       |                                                                                   ^
+    333|   });
+    334| }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 4 passed (8)
+   Start at  09:18:18
+   Duration  7.13s (tests 75%, transform 20%, import 5%)
+

@@ -1,6 +1,13 @@
+import { readTripAggregateRecord } from './prisma-trip-repository.js';
 import { executeExternalRouteAdoption } from './prisma-external-route-adoption.js';
+import { hasExpiredAdoptionEvidence } from './route-adoption-evidence.js';
 import {
   generatedNodeDeletionProtectionReasons,
+  hasMissedFixedDeparture,
+  restoreNormalizedCandidate,
+  systemClock,
+  type Clock,
+  type RouteCandidatePayload,
   hashRouteCandidateSnapshot,
   hashRoutePreviewPayload,
   compareCanonicalDwellAdjustments,
@@ -92,10 +99,11 @@ export interface ReceiptDelta {
 export async function adoptRoutePreview(
   client: PrismaClient,
   input: AdoptionInput,
+  clock: Clock = systemClock,
 ): Promise<AdoptRoutePreviewResult> {
   try {
     return await client.$transaction(
-      async (transaction) => executeAdoption(transaction, input),
+      async (transaction) => executeAdoption(transaction, input, clock),
       // The owner advisory lock and Trip row lock are the serialization
       // boundary. READ COMMITTED intentionally takes a fresh snapshot after a
       // waiter acquires that advisory lock, so a second device observes the
@@ -113,6 +121,7 @@ export async function adoptRoutePreview(
 async function executeAdoption(
   transaction: Transaction,
   input: AdoptionInput,
+  clock: Clock,
 ): Promise<AdoptRoutePreviewResult> {
   await lockOwner(transaction, input.ownerUserId);
   const existingReceipt = await transaction.operationReceipt.findFirst({
@@ -160,20 +169,23 @@ async function executeAdoption(
       input,
       lockedTrip,
       preview,
+      clock,
     );
   }
   if (lockedTrip.version !== input.baseTripVersion) {
     return { status: 'VERSION_CONFLICT' };
   }
   if (preview === null) return { status: 'NOT_FOUND' };
+  // Request time may precede a lock wait. Replay and version priority above
+  // are unchanged; new adoption must use the fresh, trusted injected clock.
+  const eligibilityNow = new Date(
+    Math.max(input.now.getTime(), clock.now().getTime()),
+  );
   if (
     preview.candidateSnapshot.fromNodeId === null ||
     preview.candidateSnapshot.originKind !== 'ITINERARY_NODE' ||
     preview.policyVersion !== 'route-adoption-preview-v3' ||
-    preview.expiresAt <= input.now ||
-    preview.candidateSnapshot.expiresAt <= input.now ||
-    (preview.candidateSnapshot.providerValidUntil !== null &&
-      preview.candidateSnapshot.providerValidUntil <= input.now) ||
+    hasExpiredAdoptionEvidence(preview, eligibilityNow) ||
     preview.basisVersion !== input.baseTripVersion ||
     preview.candidateHash !== preview.candidateSnapshot.candidateHash
   ) {
@@ -203,6 +215,29 @@ async function executeAdoption(
   ) {
     return { status: 'PREVIEW_STALE' };
   }
+
+  // Fresh execution facts and server time are read inside the existing locks.
+  // Receipt replay stays above this guard: replay is not a new boarding decision.
+  const departureTrip = await readTripAggregateRecord(transaction, input);
+  if (departureTrip === null) return { status: 'NOT_FOUND' };
+  let departureCandidate;
+  try {
+    departureCandidate = restoreNormalizedCandidate(
+      preview.candidateSnapshot
+        .candidatePayload as unknown as RouteCandidatePayload,
+    );
+  } catch {
+    return { status: 'PREVIEW_STALE' };
+  }
+  if (
+    hasMissedFixedDeparture(
+      departureTrip,
+      preview.candidateSnapshot.fromNodeId,
+      departureCandidate,
+      eligibilityNow,
+    )
+  )
+    return { status: 'PREVIEW_STALE' };
 
   const plan = requireCurrentPlan(payload);
   if (plan.protectedBlockingNodes.length > 0) {
@@ -604,6 +639,21 @@ async function executeAdoption(
       createdAt: input.now,
     },
   });
+  // If evidence or departure expires while writes run, abort rolls back every
+  // provisional write. No TTL renewal or synthetic access time is inserted.
+  const commitNow = new Date(
+    Math.max(eligibilityNow.getTime(), clock.now().getTime()),
+  );
+  if (
+    hasExpiredAdoptionEvidence(preview, commitNow) ||
+    hasMissedFixedDeparture(
+      departureTrip,
+      preview.candidateSnapshot.fromNodeId,
+      departureCandidate,
+      commitNow,
+    )
+  )
+    throw new AdoptionAbort('PREVIEW_STALE');
   return {
     status: 'SUCCESS',
     receipt: toReceiptRecord(finalReceipt),

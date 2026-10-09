@@ -27,6 +27,10 @@ import {
   type RouteLocation,
 } from '@travel/domain';
 
+import {
+  hasMissedFixedDeparture,
+  hasElapsedFixedDeparture,
+} from './route-departure-eligibility.js';
 import { authorize, type Actor } from './authorization.js';
 import { ApplicationError } from './errors.js';
 import type {
@@ -236,6 +240,8 @@ export class RouteQueryService {
       ),
       time,
       basisVersion: trip.version,
+      rejectDeparture: (candidate, now) =>
+        hasMissedFixedDeparture(trip, fromNode.id, candidate, now),
       arrival,
       fromNode,
       hash: (facts) =>
@@ -386,6 +392,7 @@ export class RouteQueryService {
       basisVersion,
       arrival: null,
       fromNode: null,
+      rejectDeparture: hasElapsedFixedDeparture,
       validateEndpoints: (candidate) =>
         validateExternalRouteCandidateEndpoints(
           candidate,
@@ -436,8 +443,13 @@ export class RouteQueryService {
     hash,
     save,
     validateEndpoints,
+    rejectDeparture,
   }: {
     travelMode: RouteQueryRequest['travelMode'];
+    rejectDeparture?: (
+      candidate: NormalizedRouteCandidate,
+      now: Date,
+    ) => boolean;
     validateEndpoints?: (candidate: NormalizedRouteCandidate) => boolean;
     origin: RouteProviderLocationInput;
     destination: RouteProviderLocationInput;
@@ -456,7 +468,7 @@ export class RouteQueryService {
   }) {
     if (
       travelMode !== undefined &&
-      !['WALKING', 'DRIVING', 'TRANSIT'].includes(travelMode)
+      !['WALKING', 'DRIVING', 'TRANSIT', 'CYCLING'].includes(travelMode)
     )
       throw new ApplicationError('VALIDATION_ERROR', '交通方式不受支持。', 400);
     const providerResult = await this.provider.queryRoutes({
@@ -519,6 +531,7 @@ export class RouteQueryService {
       if (candidate.validUntil !== null && candidate.validUntil <= now) {
         continue;
       }
+      if (rejectDeparture?.(candidate, now)) continue;
       accepted.push(candidate);
     }
     if (accepted.length === 0) {
@@ -615,6 +628,7 @@ export class RouteQueryService {
         };
       }),
     );
+    if (saved.status === 'NO_MATCHING_CANDIDATE') throw noMatchingCandidate();
     if (saved.status === 'NOT_FOUND')
       throw new ApplicationError('NOT_FOUND', '行程不存在。', 404);
     if (saved.status !== 'SUCCESS')

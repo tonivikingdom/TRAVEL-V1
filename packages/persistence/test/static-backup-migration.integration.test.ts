@@ -21,11 +21,17 @@ const splitMigrations = new Set([
 ]);
 
 describe('P6B-2 SYNTHETIC additive backup migration', () => {
-  it('deploys 26 clean migrations and enforces owner-trip FK and idempotency', async () => {
+  it('deploys 27 clean migrations and enforces owner-trip FK and idempotency', async () => {
     const names = await migrationNames();
-    expect(names).toHaveLength(26);
+    expect(names).toHaveLength(27);
     await withDatabase('clean', async (client) => {
       for (const name of names) await applyMigration(client, name);
+      const modes = await client.query<{ enumlabel: string }>(
+        `SELECT enumlabel FROM pg_enum WHERE enumtypid='"TransportMode"'::regtype`,
+      );
+      expect(modes.rows.map((row) => row.enumlabel)).toEqual(
+        expect.arrayContaining(['CYCLING', 'TRANSIT']),
+      );
       const owner = randomUUID(),
         stranger = randomUUID(),
         trip = randomUUID();

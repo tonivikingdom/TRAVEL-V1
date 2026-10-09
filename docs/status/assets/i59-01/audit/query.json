@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "status": "CONFIRMED_OUT_OF_SCOPE",
+  "requestAt": "2030-10-01T09:59:01.000Z",
+  "expiresAt": "2030-10-01T09:59:02.000Z",
+  "lockReleasedAt": "2030-10-01T09:59:03.000Z",
+  "httpStatus": 200,
+  "expiredDraftPersisted": true,
+  "newAdoptStatus": null,
+  "formalTripVersionChanged": false
+}

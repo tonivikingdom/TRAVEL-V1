@@ -1760,6 +1760,8 @@ function parseDayOccurrenceTarget(value: unknown): DayOccurrenceTargetInput {
 function parseTransportMode(value: string): TransportMode {
   switch (value) {
     case 'WALKING':
+    case 'CYCLING':
+    case 'TRANSIT':
     case 'DRIVING':
     case 'TAXI':
     case 'RAIL':
@@ -1851,8 +1853,13 @@ function requireExternalOriginService(
 
 function parseRouteTravelMode(
   value: unknown,
-): 'WALKING' | 'DRIVING' | 'TRANSIT' {
-  if (value === 'WALKING' || value === 'DRIVING' || value === 'TRANSIT')
+): 'WALKING' | 'DRIVING' | 'TRANSIT' | 'CYCLING' {
+  if (
+    value === 'WALKING' ||
+    value === 'DRIVING' ||
+    value === 'TRANSIT' ||
+    value === 'CYCLING'
+  )
     return value;
   throw new ApplicationError('VALIDATION_ERROR', '交通方式必须明确选择。', 400);
 }

@@ -296,11 +296,39 @@ export async function verifyRouteSuffixChain({
   const prefixFacts = await sql(
     `SELECT jsonb_build_object('edge',to_jsonb(e),'values',(SELECT jsonb_agg(to_jsonb(v) ORDER BY v."id") FROM "TemporalValue" v WHERE v."transportEdgeId"=e."id"),'leg',(SELECT to_jsonb(l) FROM "GroundTransitLegExecution" l WHERE l."transportEdgeId"=e."id")) FROM "TransportEdge" e WHERE e."id"='${prefix.id}';`,
   );
-  const next = await apiJson(
-    `/trips/${trip.id}/routes/query`,
-    'POST',
-    handoff.query,
+  // The handoff's earliest departure is evidence of the user's earlier B
+  // arrival, not proof that a historical fixed service can still be boarded.
+  // Keep that expired SYNTHETIC service as a negative control, then explicitly
+  // search a later service. Original route/ACTUAL clocks remain unchanged.
+  const rejectedPast = await fetch(
+    `http://127.0.0.1:${apiPort}/trips/${trip.id}/routes/query`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(handoff.query),
+    },
   );
+  const rejectedPastPayload = await rejectedPast.json();
+  assert(
+    rejectedPast.status === 404 &&
+      rejectedPastPayload.error?.code === 'NO_MATCHING_CANDIDATE',
+    'expired fixed suffix service must be rejected',
+  );
+  assert(
+    (await planningFootprint()) === beforeHandoff,
+    'expired fixed suffix Query wrote planning data',
+  );
+  const next = await apiJson(`/trips/${trip.id}/routes/query`, 'POST', {
+    ...handoff.query,
+    hint: {
+      type: 'DEPART_AT',
+      instant: new Date(Date.now() + 4 * 60_000).toISOString(),
+      timeZone: recordedArrival.timeZone,
+    },
+  });
   const preview = await apiJson(`/trips/${trip.id}/previews`, 'POST', {
     basisVersion: trip.version,
     candidateSnapshotId: next.candidates[0].candidateSnapshotId,
@@ -418,6 +446,7 @@ export async function verifyRouteSuffixChain({
     originBasis: handoff.originBasis,
     confirmedUserArrival: true,
     unauthorizedSuffixRejected: true,
+    expiredFixedSuffixRejected: true,
     handoffReadOnly: true,
     automaticQuery: false,
     automaticPreview: false,

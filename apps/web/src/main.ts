@@ -46,7 +46,8 @@ import {
   times,
 } from './model.js';
 import { navigation, placeMap, mapMode, type MapLocation } from './maps.js';
-import { transportClockPair } from './transport-display.js';
+import { isAggregateTransit, transportClockPair } from './transport-display.js';
+import { explicitQueryMode, selectedQueryMode } from './route-query-mode.js';
 import { inTripProjection, type InTripStep } from './in-trip.js';
 import {
   TripAuthoringEditor,
@@ -65,7 +66,7 @@ import {
   localBackups,
   saveLocalBackup,
 } from './essentials.js';
-import { impactSummary, impactDetails } from './impact.js';
+import { impactSummary, impactDetails, impactPresentation } from './impact.js';
 import { alternativeEntry } from './alternatives.js';
 import { previewPresentation, previewMarkup } from './preview-presentation.js';
 import {
@@ -151,7 +152,30 @@ const mapSlots = providerMapAdapters(
           VITE_GOOGLE_MAPS_STORAGE_APPROVED: 'true',
           VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED: 'true',
         }
-      : import.meta.env,
+      : {
+          VITE_GOOGLE_MAPS_BROWSER_KEY: import.meta.env
+            .VITE_GOOGLE_MAPS_BROWSER_KEY,
+          VITE_GOOGLE_MAPS_EMBED_ENABLED: import.meta.env
+            .VITE_GOOGLE_MAPS_EMBED_ENABLED,
+          VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED: import.meta.env
+            .VITE_GOOGLE_MAPS_ENTITLEMENT_APPROVED,
+          VITE_GOOGLE_MAPS_STORAGE_APPROVED: import.meta.env
+            .VITE_GOOGLE_MAPS_STORAGE_APPROVED,
+          VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED: import.meta.env
+            .VITE_GOOGLE_MAPS_ATTRIBUTION_APPROVED,
+          VITE_BAIDU_MAPS_BROWSER_KEY: import.meta.env
+            .VITE_BAIDU_MAPS_BROWSER_KEY,
+          VITE_BAIDU_MAPS_EMBED_ENABLED: import.meta.env
+            .VITE_BAIDU_MAPS_EMBED_ENABLED,
+          VITE_BAIDU_MAPS_ENTITLEMENT_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_ENTITLEMENT_APPROVED,
+          VITE_BAIDU_MAPS_STORAGE_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_STORAGE_APPROVED,
+          VITE_BAIDU_MAPS_ATTRIBUTION_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_ATTRIBUTION_APPROVED,
+          VITE_BAIDU_MAPS_COORDINATES_APPROVED: import.meta.env
+            .VITE_BAIDU_MAPS_COORDINATES_APPROVED,
+        },
   ),
   new MapSdkLoader(document, window as unknown as Record<string, unknown>),
   window as unknown as Record<string, unknown>,
@@ -635,7 +659,7 @@ async function readInTrip(fresh: TripView, request: number) {
 }
 function stepTitle(step: InTripStep) {
   return step.kind === 'node'
-    ? (step.node.place?.name ?? step.node.note ?? '自由行动')
+    ? arrangementName(step.node)
     : `${modeLabel[step.connection.transport!.mode]} · ${step.connection.transport!.serviceLabel ?? '已选交通'}`;
 }
 function stepDetailButton(step: InTripStep, label = '查看完整详情') {
@@ -835,17 +859,19 @@ function renderToday() {
     : '当前日期未知';
   const body = step
     ? step.kind === 'node'
-      ? `<h2>${esc(stepTitle(step))}</h2>${step.node.place ? `<p class="address">${esc(step.node.place.address ?? '地址待定')}</p>` : '<p class="muted">自由行动 · 地点待定</p>'}${timeGrid(step.node)}${requirements(step.node)}${projection(step.node.id)?.status === 'VIOLATED' || projection(step.node.id)?.status === 'CONFLICT' ? '<p class="warning">当前安排与重要时间要求有冲突，请查看详情。</p>' : ''}<p class="action-time">${step.end ? `${temporalLabel(step.end)} ${esc(formatTime(step.end, p.day?.localDate))} 出发` : step.start ? `${temporalLabel(step.start)} ${esc(formatTime(step.start, p.day?.localDate))} 到达` : '时间待定'}<small>暂时无法确定建议出发时间</small></p>${step.node.place ? mapLinks(step.node.place) : ''}${step.node.note ? `<p class="step-note">${esc(step.node.note)}</p>` : ''}${stepDetailButton(step)}`
+      ? `<h2>${esc(stepTitle(step))}</h2>${step.node.place ? (step.node.place.address ? '' : '<p class="muted">地址待定</p>') : '<p class="muted">自由行动 · 地点待定</p>'}${timeGrid(step.node)}${requirements(step.node)}${projection(step.node.id)?.status === 'VIOLATED' || projection(step.node.id)?.status === 'CONFLICT' ? '<p class="warning">当前安排与重要时间要求有冲突，请查看详情。</p>' : ''}<p class="action-time">${step.end ? `${temporalLabel(step.end)} ${esc(formatTime(step.end, p.day?.localDate))} 出发` : step.start ? `${temporalLabel(step.start)} ${esc(formatTime(step.start, p.day?.localDate))} 到达` : '时间待定'}<small>暂时无法确定建议出发时间</small></p>${step.node.place ? mapLinks(step.node.place) : ''}${stepDetailButton(step)}`
       : todayTransport(step) +
         todayFlights(step.connection.transport?.id ?? null)
     : `<div class="empty">${!p.context ? '缺少可靠时间上下文，请查看全部日程。' : p.ambiguous ? '今天有重复日期卡，当前进度未知；请在全部日程中选择日期卡。' : !p.day ? '今天没有这趟旅行的安排。' : '今天还没有安排。'}</div>`;
+  const impactTone = impactPresentation(trip, tripImpact).tone;
+  const urgentImpact = impactTone === 'replan' || impactTone === 'attention';
   const nextTransport = p.following.find((s) => s.kind === 'transport');
   const flightEdge =
     nextTransport?.kind === 'transport' &&
     nextTransport.connection.transport?.mode === 'FLIGHT'
       ? nextTransport.connection.transport.id
       : null;
-  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${impactSummary(trip, tripImpact)}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo"><span class="control-content">撤销刚才的路线修改</span></button></div>' : ''}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
+  root.innerHTML = `<header><button data-action="trips" class="back">‹ 旅行</button><div class="brand">${icon('route')} TRAVEL</div><button data-action="reload">重新载入</button></header>${modeSwitch()}<main class="in-trip"><div class="today-heading"><p class="eyebrow">今天 · ${esc(p.context?.timeZone ?? '时区未知')} · 设备时区</p><h1>${esc(title)}</h1><p>${esc(trip.name)}</p></div>${p.day ? `<div class="authoring-toolbar"><button data-action="add-arrangement" data-authoring-day="${p.day.dayOccurrenceId}" ${p.day.transportProjections.some((v) => v.role === 'OCCUPIED') ? 'disabled' : ''}><span class="control-content">${icon('pin')}添加安排</span></button></div>` : ''}${banner()}<p class="progress-status" role="status">${esc(p.progress)}<small>${p.progress === '当前进度未知' ? '按时间查看计划，不代表你已经到达或出发。' : '基于已有用户记录，不是当前定位。'}</small></p>${inTripReadUnavailable ? '<p class="warning">执行记录与航班资料暂不可用，按计划查看。</p>' : ''}${urgentImpact ? impactSummary(trip, tripImpact, true) : ''}<article class="next-step"><p class="eyebrow">${p.past ? '计划时间已过 · 请核对安排' : step?.kind === 'transport' ? '按计划接下来 · 下一段交通' : '按计划接下来'}</p>${body}</article>${urgentImpact ? '' : impactSummary(trip, tripImpact, true)}${receipt ? '<div class="undo"><span>已使用新的路线</span><button data-action="undo"><span class="control-content">撤销刚才的路线修改</span></button></div>' : ''}${p.following.length ? `<section class="following"><h3>接下来</h3>${p.following.map((s) => `<article><p>${esc(stepTitle(s))}<small>${s.start ? `${temporalLabel(s.start)} ${esc(formatTime(s.start))}` : '时间待定'}</small></p>${stepDetailButton(s, '查看详情')}</article>`).join('')}</section>` : ''}${flightEdge ? todayFlights(flightEdge) : ''}<p class="read-context">${inTripReadAt ? `行程读取于 ${esc(inTripReadAt.replace('T', ' ').replace('Z', ' UTC'))}。` : ''}查看和导航不会改变行程。需要更新时请重新载入。</p><button data-view="itinerary">查看全部日程</button></main>`;
 }
 function render() {
   if (
@@ -1052,7 +1078,12 @@ function transportClock(
     edge ? transportTime(edge.timeValues, 'ARRIVAL') : null,
     leg?.arrival?.timeZone,
   );
-  return clockPairView(departure, arrival, true);
+  return clockPairView(
+    departure,
+    arrival,
+    true,
+    isAggregateTransit(leg ?? edge),
+  );
 }
 function clockPairView(
   departure: Pick<
@@ -1064,6 +1095,7 @@ function clockPairView(
     'instant' | 'timeZone' | 'layer' | 'sourceKind'
   > | null,
   saved: boolean,
+  aggregateEstimate = false,
 ) {
   const pair = transportClockPair(departure, arrival);
   const ends = (
@@ -1074,10 +1106,10 @@ function clockPairView(
   )
     .map(
       ([label, value, parts]) =>
-        `<div class="clock-end"><span>${label} · ${value ? temporalLabel(value) : '未知'}</span><strong>${esc(parts?.clock ?? (value ? '时间不可用' : '待定'))}</strong>${!pair.sharedContext && parts ? `<small title="${esc(parts.timeZone)}">${esc(parts.date)}<br>${esc(parts.zone)}</small>` : ''}</div>`,
+        `<div class="clock-end"><span>${label} · ${value ? (aggregateEstimate && value.layer === 'PLANNED' ? '预计' : temporalLabel(value)) : '未知'}</span><strong>${esc(parts?.clock ?? (value ? '时间不可用' : '待定'))}</strong>${!pair.sharedContext && parts ? `<small title="${esc(parts.timeZone)}">${esc(parts.date)}<br>${esc(parts.zone)}</small>` : ''}</div>`,
     )
     .join('<span class="clock-arrow" aria-hidden="true">→</span>');
-  return `<div class="${saved ? 'current-transport-times' : 'candidate-transport-times'}">${pair.sharedContext ? `<p class="clock-context" title="${esc(pair.from!.timeZone)}">${esc(pair.sharedContext)}</p>` : ''}<div class="clock-pair">${ends}</div>${pair.zoneChange ? '<small class="clock-context">时区切换 · 两端各按当地时间</small>' : ''}</div>${[departure, arrival].some((v) => v?.layer === 'ACTUAL' && v.sourceKind === 'PROVIDER_OBSERVATION') ? '<small class="vehicle-note">车辆实测不表示你本人已经出发或到达。</small>' : ''}`;
+  return `<div class="${saved ? 'current-transport-times' : 'candidate-transport-times'}">${pair.sharedContext ? `<p class="clock-context" title="${esc(pair.from!.timeZone)}">${esc(pair.sharedContext)}</p>` : ''}<div class="clock-pair">${ends}</div>${pair.zoneChange ? '<small class="clock-context">时区切换 · 两端各按当地时间</small>' : ''}</div>${aggregateEstimate ? '<small class="aggregate-estimate">聚合预计时间，不代表具体班次。</small>' : ''}${[departure, arrival].some((v) => v?.layer === 'ACTUAL' && v.sourceKind === 'PROVIDER_OBSERVATION') ? '<small class="vehicle-note">车辆实测不表示你本人已经出发或到达。</small>' : ''}`;
 }
 function legTimes(
   l: RouteCandidateLegView,
@@ -1094,7 +1126,12 @@ function legTimes(
             sourceKind: 'ADOPTED_TRANSPORT_FACT' as const,
           }
         : null;
-    return clockPairView(planned(l.departure), planned(l.arrival), false);
+    return clockPairView(
+      planned(l.departure),
+      planned(l.arrival),
+      false,
+      isAggregateTransit(l),
+    );
   }
   const departure = edge ? transportTime(edge.timeValues, 'DEPARTURE') : null;
   const arrival = edge ? transportTime(edge.timeValues, 'ARRIVAL') : null;
@@ -1118,7 +1155,7 @@ function legTimes(
   return (
     transportClock(edge, l) +
     (historical
-      ? `<div class="original-plan"><span>原方案计划：${esc(originalEnd(original.from))} → ${esc(originalEnd(original.to))}</span>${original.sharedContext && original.sharedContext !== current.sharedContext ? `<small>${esc(original.sharedContext)}</small>` : ''}</div>`
+      ? `<div class="original-plan"><span>原方案${isAggregateTransit(l) ? '预计' : '计划'}：${esc(originalEnd(original.from))} → ${esc(originalEnd(original.to))}</span>${original.sharedContext && original.sharedContext !== current.sharedContext ? `<small>${esc(original.sharedContext)}</small>` : ''}</div>`
       : '') +
     (!edge ? '<small>当前分段时间暂无可靠对应。</small>' : '')
   );
@@ -1205,6 +1242,10 @@ function openRoute(from: string, to: string) {
   const floor = departureFloor(origin, projection(from));
   const chain = routeConnections(trip!, from);
   const connection = chain[0];
+  const queryMode = selectedQueryMode(chain);
+  const modeControl = queryMode
+    ? `<p class="muted">查询方式：${esc(modeLabel[queryMode])} · 沿用当前交通</p>`
+    : `<p class="muted" id="query-mode-help">无法从当前交通确定查询方式，请明确选择。不会自动更改已选交通。</p><label>查询方式<select name="travelMode" required aria-describedby="query-mode-help"><option value="">请选择查询方式</option>${['WALKING', 'DRIVING', 'TRANSIT', 'CYCLING'].map((mode) => `<option value="${mode}">${esc(modeLabel[mode])}</option>`).join('')}</select></label>`;
   drawer.open(
     frame(
       '交通与路线',
@@ -1218,7 +1259,7 @@ function openRoute(from: string, to: string) {
                 chain.map((c) => c.transport?.mode ?? 'OTHER'),
               )
             : '<p>这段交通尚无完整起终点信息，不能查询原路线。</p>'
-      }${miniMapMarkup('transport')}</aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search"><label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
+      }${miniMapMarkup('transport')}</aside><h3>查找新的路线</h3><p class="muted">${floor && zone ? `按到达/停留与独立要求建议从：${esc(formatTime({ instant: floor, timeZone: zone }))}` : '尚无法验证起点的可出发时间，请提供查询条件。'}<br>仅搜索不会更改行程。</p><form id="route-search">${modeControl}<label>查询条件<select name="type"><option value="DEPART_AT">从指定时间出发</option><option value="ARRIVE_BY">在指定时间前到达</option></select></label><label>当地日期与时间<input name="when" type="datetime-local" value="${esc(floor && zone ? localInput(floor, zone) : '')}" required></label>${zoneField(zone, '查询条件所在地')}<button class="primary" ${origin.place && destination.place ? '' : 'disabled'}>搜索路线</button></form><div id="candidates" aria-live="polite"></div><div id="choice"></div><p id="save-status" role="status"></p>`,
     ),
   );
   const boarding = chain.flatMap((c) => {
@@ -1314,7 +1355,7 @@ function showCandidates() {
               c,
               c.queryTimeCondition.hardEarliestDeparture,
             );
-            return `<button class="candidate" data-candidate="${i}" ${warning ? 'disabled' : ''}><span><strong>${esc(formatTime(c.overall.departure))} → ${esc(formatTime(c.overall.arrival))}</strong><small>${c.legs.map((l) => esc(modeLabel[l.mode])).join(' → ')} · ${duration(c.overall.durationSeconds)}</small><small>${c.fare ? `${esc(c.fare.amount)} ${esc(c.fare.currency)}` : '费用未知'}${c.provider === 'SYNTHETIC' ? ' · 合成开发数据' : ''}</small>${warning ? `<small class="warning">${esc(warning)}</small>` : ''}</span><span>›</span></button>`;
+            return `<button class="candidate" data-candidate="${i}" ${warning ? 'disabled' : ''}><span><strong>${isAggregateTransit(c.legs[0]) ? '预计 ' : ''}${esc(formatTime(c.overall.departure))} → ${isAggregateTransit(c.legs.at(-1)) ? '预计 ' : ''}${esc(formatTime(c.overall.arrival))}</strong><small>${c.legs.map((l) => esc(modeLabel[l.mode])).join(' → ')} · ${duration(c.overall.durationSeconds)}</small><small>${c.fare ? `${esc(c.fare.amount)} ${esc(c.fare.currency)}` : '费用未知'}${c.provider === 'SYNTHETIC' ? ' · 合成开发数据' : ''}</small>${warning ? `<small class="warning">${esc(warning)}</small>` : ''}</span><span>›</span></button>`;
           })
           .join('')
       : '<p>没有符合条件的路线。可以调整查询条件或在地图中查询。</p>'
@@ -2150,6 +2191,13 @@ detail.addEventListener('submit', (event) => {
   }
   if (form.id === 'route-search' && selection.type === 'route') {
     const { from, to } = selection;
+    const travelMode =
+      selectedQueryMode(routeConnections(trip!, from)) ??
+      explicitQueryMode(data.get('travelMode'));
+    if (!travelMode) {
+      status('无法确定查询方式，请明确选择；尚未发送路线请求。');
+      return;
+    }
     void act(async () => {
       const request = ++epoch;
       preview = null;
@@ -2163,6 +2211,7 @@ detail.addEventListener('submit', (event) => {
           basisVersion: basis,
           fromNodeId: from,
           toNodeId: to,
+          travelMode,
           hint: {
             type: String(data.get('type')),
             instant: localToInstant(

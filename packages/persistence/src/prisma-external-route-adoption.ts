@@ -3,6 +3,8 @@ import {
   compareCanonicalDwellAdjustments,
   hashRoutePreviewPayload,
   type AdoptRoutePreviewResult,
+  type Clock,
+  restoreNormalizedCandidate,
   type StoredRoutePreviewPayload,
 } from '@travel/application';
 import type {
@@ -28,6 +30,7 @@ import { toSnapshotRecord } from './prisma-route-planning-repository.js';
 import { readTripAggregateRecord } from './prisma-trip-repository.js';
 import { loadExternalOriginPlanningContext } from './prisma-external-execution-origin-repository.js';
 import { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
+import { hasExpiredAdoptionEvidence } from './route-adoption-evidence.js';
 import {
   externalGeneratedNodeFacts,
   externalGroundTransitExecutionFacts,
@@ -46,6 +49,7 @@ export async function executeExternalRouteAdoption(
   input: AdoptionInput,
   lockedTrip: LockedTripRow,
   preview: Preview,
+  clock: Clock,
 ): Promise<AdoptRoutePreviewResult> {
   if (lockedTrip.version !== input.baseTripVersion)
     return { status: 'VERSION_CONFLICT' };
@@ -55,7 +59,6 @@ export async function executeExternalRouteAdoption(
   if (
     snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN' ||
     preview.basisVersion !== input.baseTripVersion ||
-    preview.expiresAt <= input.now ||
     preview.policyVersion !== 'route-external-origin-preview-v2' ||
     payload.policyVersion !== preview.policyVersion ||
     preview.previewHash === null ||
@@ -95,13 +98,20 @@ export async function executeExternalRouteAdoption(
     externalOriginId: snapshot.origin.externalOriginId,
   });
   if (!trip || !context) return { status: 'PREVIEW_STALE' };
+  const eligibilityNow = new Date(
+    Math.max(input.now.getTime(), clock.now().getTime()),
+  );
+  // Include Preview TTL after owner/Trip and external source/fact locks.
+  // The existing builder still independently validates Snapshot evidence.
+  if (hasExpiredAdoptionEvidence(preview, eligibilityNow))
+    return { status: 'PREVIEW_STALE' };
   let locked: StoredRoutePreviewPayload;
   try {
     locked = buildExternalOriginPreviewPayload({
       trip,
       snapshot,
       context,
-      now: input.now,
+      now: eligibilityNow,
       sameHubWalkingLegIndexes: payload.changeSummary.internalTransferDetails
         ?.filter((detail) => detail.evidence === 'USER_CONFIRMED')
         .map((detail) => detail.legIndex),
@@ -551,6 +561,17 @@ export async function executeExternalRouteAdoption(
       createdAt: input.now,
     },
   });
+  // The existing external-origin rule already requires departure >= now.
+  // Recheck evidence and departure after all writes, without altering policy.
+  const commitNow = new Date(
+    Math.max(eligibilityNow.getTime(), clock.now().getTime()),
+  );
+  if (
+    hasExpiredAdoptionEvidence(preview, commitNow) ||
+    restoreNormalizedCandidate(snapshot.candidatePayload).departure.instant <
+      commitNow
+  )
+    throw new AdoptionAbort('PREVIEW_STALE');
   return {
     status: 'SUCCESS',
     receipt: toReceiptRecord(result),

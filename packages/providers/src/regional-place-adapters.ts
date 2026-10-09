@@ -6,10 +6,15 @@ import {
   type RegionalCoordinates,
 } from './region-policy.js';
 import { baiduToWgs84 } from './baidu-coordinates.js';
+import {
+  contractStep,
+  type DiagnosticObserver,
+} from './contract-diagnostics.js';
 export class GooglePlaceSearchProvider implements PlaceSearchProvider {
   constructor(
     private readonly key: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly diagnostics?: DiagnosticObserver,
   ) {}
   async search(
     query: string,
@@ -32,23 +37,60 @@ export class GooglePlaceSearchProvider implements PlaceSearchProvider {
           languageCode: language,
           pageSize: 5,
           ...(context
-            ? { locationBias: { circle: { center: context, radius: 50000 } } }
+            ? {
+                locationBias: {
+                  circle: {
+                    center: {
+                      latitude: context.latitude,
+                      longitude: context.longitude,
+                    },
+                    radius: 50000,
+                  },
+                },
+              }
             : {}),
         }),
       },
     );
     if (body.error) throw new Error('UPSTREAM_UNAVAILABLE');
     if (body.places === undefined) return [];
+    contractStep(this.diagnostics, 'RESPONSE_SHAPE', 'response.places', () => {
+      if (!Array.isArray(body.places))
+        throw new Error('INVALID_PROVIDER_RESPONSE');
+    });
     if (!Array.isArray(body.places))
       throw new Error('INVALID_PROVIDER_RESPONSE');
     return body.places.slice(0, 5).map((value) => {
       const p = record(value),
-        coordinates = coordinate(p.location);
-      if (
-        classifyProviderRegion(coordinates) === 'MAINLAND_CHINA' ||
-        classifyProviderRegion(coordinates) === null
-      )
-        throw new Error('UNSUPPORTED_PLACE_REGION');
+        coordinates = contractStep(
+          this.diagnostics,
+          'COORDINATE_PARSE',
+          'response.place.location',
+          () => coordinate(p.location),
+          'INVALID_COORDINATES',
+        );
+      contractStep(
+        this.diagnostics,
+        'COORDINATE_PARSE',
+        'response.place.region',
+        () => {
+          if (
+            classifyProviderRegion(coordinates) === 'MAINLAND_CHINA' ||
+            classifyProviderRegion(coordinates) === null
+          )
+            throw new Error('UNSUPPORTED_PLACE_REGION');
+        },
+        'OUTSIDE_REGION',
+      );
+      contractStep(
+        this.diagnostics,
+        'RESPONSE_SHAPE',
+        'response.place.identity',
+        () => {
+          string(p.id, 300);
+          string(record(p.displayName).text, 200);
+        },
+      );
       return {
         provider: 'google',
         externalId: string(p.id, 300),
@@ -69,6 +111,7 @@ export class BaiduPlaceSearchProvider implements PlaceSearchProvider {
   constructor(
     private readonly key: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly diagnostics?: DiagnosticObserver,
   ) {}
   async search(
     query: string,
@@ -88,14 +131,46 @@ export class BaiduPlaceSearchProvider implements PlaceSearchProvider {
       ak: this.key,
     }).toString();
     const body = await json(this.fetcher, url);
-    if (body.status !== 0 || !Array.isArray(body.results))
-      throw new Error('UPSTREAM_UNAVAILABLE');
+    contractStep(this.diagnostics, 'RESPONSE_SHAPE', 'response.results', () => {
+      if (body.status !== 0 || !Array.isArray(body.results))
+        throw new Error('UPSTREAM_UNAVAILABLE');
+    });
+    if (!Array.isArray(body.results)) throw new Error('UPSTREAM_UNAVAILABLE');
     return body.results.slice(0, 5).map((value) => {
       const p = record(value),
-        raw = coordinate(p.location),
-        coordinates = baiduToWgs84(raw.latitude, raw.longitude);
-      if (classifyProviderRegion(coordinates) !== 'MAINLAND_CHINA')
-        throw new Error('UNSUPPORTED_PLACE_REGION');
+        raw = contractStep(
+          this.diagnostics,
+          'COORDINATE_PARSE',
+          'response.place.location',
+          () => coordinate(p.location),
+          'INVALID_COORDINATES',
+        ),
+        coordinates = contractStep(
+          this.diagnostics,
+          'COORDINATE_PARSE',
+          'response.place.location',
+          () => baiduToWgs84(raw.latitude, raw.longitude),
+          'INVALID_COORDINATES',
+        );
+      contractStep(
+        this.diagnostics,
+        'COORDINATE_PARSE',
+        'response.place.region',
+        () => {
+          if (classifyProviderRegion(coordinates) !== 'MAINLAND_CHINA')
+            throw new Error('UNSUPPORTED_PLACE_REGION');
+        },
+        'OUTSIDE_REGION',
+      );
+      contractStep(
+        this.diagnostics,
+        'RESPONSE_SHAPE',
+        'response.place.identity',
+        () => {
+          string(p.uid, 300);
+          string(p.name, 200);
+        },
+      );
       return {
         provider: 'baidu',
         externalId: string(p.uid, 300),

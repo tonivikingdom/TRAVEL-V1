@@ -240,8 +240,8 @@ describe('regional policy — SYNTHETIC coordinates/HTTP, no live calls', () => 
           : {
               status: 0,
               result: {
-                origin: { lat: 39.915, lng: 116.404 },
-                destination: { lat: 39.916, lng: 116.405 },
+                origin: { originPt: { lat: 39.915, lng: 116.404 } },
+                destination: { destinationPt: { lat: 39.916, lng: 116.405 } },
                 routes: [{ duration: 600, secretField: 'SYNTHETIC HIDDEN' }],
               },
             },

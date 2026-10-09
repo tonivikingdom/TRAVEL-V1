@@ -1032,6 +1032,8 @@ function validateTransportMode(value: TransportMode): TransportMode {
   if (
     ![
       'WALKING',
+      'CYCLING',
+      'TRANSIT',
       'DRIVING',
       'TAXI',
       'RAIL',

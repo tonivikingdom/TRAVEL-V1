@@ -27,6 +27,7 @@ import {
   createDevelopmentSyntheticRouteProvider,
   SyntheticRouteProvider,
   SyntheticGroundTransitProvider,
+  mapProviderProjection,
 } from '../packages/providers/src/index.js';
 import { buildApi } from '../apps/api/src/app.js';
 const databaseUrl = process.env.DATABASE_URL;
@@ -156,6 +157,7 @@ const provider = new SyntheticRouteProvider(
   },
 );
 const app = buildApi({
+  regionalMapProjection: mapProviderProjection,
   groundTransitService: new GroundTransitService(
     new PrismaGroundTransitRepository(managed.client),
     new SyntheticGroundTransitProvider('FIXED_DELAY'),

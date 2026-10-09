@@ -12,7 +12,7 @@ it('production HTML/JS contains only explicit browser configuration, never serve
   try {
     await writeFile(
       join(directory, '.env'),
-      'GOOGLE_SERVER_API_KEY=SYNTHETIC_REST_GOOGLE_SECRET\nBAIDU_SERVER_API_KEY=SYNTHETIC_REST_BAIDU_SECRET\nVITE_GOOGLE_MAPS_BROWSER_KEY=SYNTHETIC_PUBLIC_GOOGLE_BROWSER\nVITE_BAIDU_MAPS_BROWSER_KEY=SYNTHETIC_PUBLIC_BAIDU_BROWSER\n',
+      'GOOGLE_SERVER_API_KEY=SYNTHETIC_REST_GOOGLE_SECRET\nBAIDU_SERVER_API_KEY=SYNTHETIC_REST_BAIDU_SECRET\nVITE_GOOGLE_MAPS_BROWSER_KEY=SYNTHETIC_PUBLIC_GOOGLE_BROWSER\nVITE_BAIDU_MAPS_BROWSER_KEY=SYNTHETIC_PUBLIC_BAIDU_BROWSER\nVITE_ACCIDENTAL_SERVER_KEY=SYNTHETIC_ACCIDENTAL_SERVER_SECRET\n',
     );
     const out = join(directory, 'output');
     await build({
@@ -20,7 +20,7 @@ it('production HTML/JS contains only explicit browser configuration, never serve
       root: fileURLToPath(new URL('../', import.meta.url)),
       envDir: directory,
       logLevel: 'silent',
-      build: { outDir: out, emptyOutDir: true },
+      build: { outDir: out, emptyOutDir: true, sourcemap: true },
     });
     const html = await readFile(join(out, 'index.html'), 'utf8');
     const assets = await readdir(join(out, 'assets'));
@@ -31,11 +31,19 @@ it('production HTML/JS contains only explicit browser configuration, never serve
           .map((p) => readFile(join(out, 'assets', p), 'utf8')),
       )
     ).join('\n');
+    const sourceMaps = (
+      await Promise.all(
+        assets
+          .filter((p) => p.endsWith('.map'))
+          .map((p) => readFile(join(out, 'assets', p), 'utf8')),
+      )
+    ).join('\n');
     for (const secret of [
       'SYNTHETIC_REST_GOOGLE_SECRET',
       'SYNTHETIC_REST_BAIDU_SECRET',
+      'SYNTHETIC_ACCIDENTAL_SERVER_SECRET',
     ])
-      expect(html + js).not.toContain(secret);
+      expect(html + js + sourceMaps).not.toContain(secret);
     expect(js).toContain('SYNTHETIC_PUBLIC_GOOGLE_BROWSER');
     expect(js).toContain('SYNTHETIC_PUBLIC_BAIDU_BROWSER');
     for (const harness of [

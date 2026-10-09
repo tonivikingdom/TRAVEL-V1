@@ -18,7 +18,7 @@ export type RouteProviderTimePreference =
     };
 
 export interface RouteProviderQueryInput {
-  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT';
+  readonly travelMode?: 'WALKING' | 'DRIVING' | 'TRANSIT' | 'CYCLING';
   readonly origin: RouteProviderLocationInput;
   readonly destination: RouteProviderLocationInput;
   readonly earliestDeparture: Date | null;

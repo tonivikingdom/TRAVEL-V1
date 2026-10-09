@@ -32,6 +32,8 @@ export function transportTime(
 }
 export const modeLabel: Record<string, string> = {
   WALKING: '步行',
+  CYCLING: '骑行',
+  TRANSIT: '公共交通',
   RAIL: '铁路',
   BUS: '公交',
   TAXI: '出租车',

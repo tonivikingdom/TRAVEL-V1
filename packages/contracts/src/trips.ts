@@ -2,6 +2,8 @@ export type ItineraryNodeKind = 'PLACE_VISIT' | 'FREE_ACTION';
 export type ItineraryNodeSource = 'USER_PLANNED' | 'ROUTE_GENERATED';
 export type TransportMode =
   | 'WALKING'
+  | 'CYCLING'
+  | 'TRANSIT'
   | 'DRIVING'
   | 'TAXI'
   | 'RAIL'

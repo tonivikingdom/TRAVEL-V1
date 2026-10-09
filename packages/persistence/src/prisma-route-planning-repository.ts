@@ -3,6 +3,9 @@ import {
   EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION,
   hashRoutePreviewPayload,
   systemClock,
+  hasMissedFixedDeparture,
+  hasElapsedFixedDeparture,
+  restoreNormalizedCandidate,
   type Clock,
   authorizeExternalOriginPlanning,
   externalRouteOriginSnapshot,
@@ -27,6 +30,10 @@ import { adoptRoutePreview } from './prisma-route-adoption.js';
 import { undoRouteAdoption } from './prisma-route-undo.js';
 import { resolveLockedRouteCorridor } from './prisma-route-corridor.js';
 import { resolveLockedConfirmedRouteExecutionOrigin } from './prisma-confirmed-route-execution-origin.js';
+import {
+  hasExpiredPreviewEvidence,
+  hasExpiredSnapshotEvidence,
+} from './route-draft-evidence.js';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -53,37 +60,76 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly toNodeId: string;
     readonly snapshots: readonly RouteCandidateSnapshotDraft[];
   }): Promise<SaveRouteCandidateSnapshotsResult> {
-    return this.client.$transaction(async (transaction) => {
-      await lockOwner(transaction, input.ownerUserId);
-      const tripStatus = await lockTrip(transaction, input);
-      if (tripStatus !== 'SUCCESS') return { status: tripStatus };
-      if (!(await isCurrentRouteCorridor(transaction, input, true))) {
-        return { status: 'NOT_ADJACENT' };
-      }
-      const snapshots: RouteCandidateSnapshotRecord[] = [];
-      for (const draft of input.snapshots) {
-        const created = await transaction.routeCandidateSnapshot.create({
-          data: {
-            ownerUserId: input.ownerUserId,
-            tripId: input.tripId,
-            basisVersion: input.basisVersion,
-            fromNodeId: input.fromNodeId,
-            toNodeId: input.toNodeId,
-            provider: draft.provider,
-            providerCandidateRef: draft.providerCandidateRef,
-            observedAt: draft.observedAt,
-            providerValidUntil: draft.providerValidUntil,
-            candidatePayload: toJson(draft.candidatePayload),
-            candidateHash: draft.candidateHash,
-            queryTimeCondition: toJson(draft.queryTimeCondition),
-            createdAt: draft.createdAt,
-            expiresAt: draft.expiresAt,
-          },
-        });
-        snapshots.push(toSnapshotRecord(created));
-      }
-      return { status: 'SUCCESS', snapshots };
-    });
+    return withDraftRollback<SaveRouteCandidateSnapshotsResult>(
+      () =>
+        this.client.$transaction(async (transaction) => {
+          await lockOwner(transaction, input.ownerUserId);
+          const tripStatus = await lockTrip(transaction, input);
+          if (tripStatus !== 'SUCCESS') return { status: tripStatus };
+          if (!(await isCurrentRouteCorridor(transaction, input, true))) {
+            return { status: 'NOT_ADJACENT' };
+          }
+          const trip = await readTripAggregateRecord(transaction, input);
+          if (trip === null) return { status: 'NOT_FOUND' };
+          const now = new Date(
+            Math.max(
+              this.clock.now().getTime(),
+              ...input.snapshots.map((draft) => draft.createdAt.getTime()),
+            ),
+          );
+          const eligible = input.snapshots.filter(
+            (draft) =>
+              !hasExpiredSnapshotEvidence(draft, now) &&
+              !hasMissedFixedDeparture(
+                trip,
+                input.fromNodeId,
+                restoreNormalizedCandidate(draft.candidatePayload),
+                now,
+              ),
+          );
+          if (eligible.length === 0) return { status: 'NO_MATCHING_CANDIDATE' };
+          const snapshots: RouteCandidateSnapshotRecord[] = [];
+          for (const draft of eligible) {
+            const created = await transaction.routeCandidateSnapshot.create({
+              data: {
+                ownerUserId: input.ownerUserId,
+                tripId: input.tripId,
+                basisVersion: input.basisVersion,
+                fromNodeId: input.fromNodeId,
+                toNodeId: input.toNodeId,
+                provider: draft.provider,
+                providerCandidateRef: draft.providerCandidateRef,
+                observedAt: draft.observedAt,
+                providerValidUntil: draft.providerValidUntil,
+                candidatePayload: toJson(draft.candidatePayload),
+                candidateHash: draft.candidateHash,
+                queryTimeCondition: toJson(draft.queryTimeCondition),
+                createdAt: draft.createdAt,
+                expiresAt: draft.expiresAt,
+              },
+            });
+            snapshots.push(toSnapshotRecord(created));
+          }
+          const commitNow = new Date(
+            Math.max(now.getTime(), this.clock.now().getTime()),
+          );
+          if (
+            eligible.some(
+              (draft) =>
+                hasExpiredSnapshotEvidence(draft, commitNow) ||
+                hasMissedFixedDeparture(
+                  trip,
+                  input.fromNodeId,
+                  restoreNormalizedCandidate(draft.candidatePayload),
+                  commitNow,
+                ),
+            )
+          )
+            throw new DraftEvidenceAbort();
+          return { status: 'SUCCESS', snapshots };
+        }),
+      { status: 'NO_MATCHING_CANDIDATE' },
+    );
   }
 
   async saveExternalOriginCandidateSnapshots(
@@ -93,50 +139,83 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       >
     >[0],
   ): Promise<SaveRouteCandidateSnapshotsResult> {
-    return this.client.$transaction(async (transaction) => {
-      await lockOwner(transaction, input.ownerUserId);
-      const status = await lockTrip(transaction, input);
-      if (status !== 'SUCCESS') return { status };
-      const context = await loadExternalOriginPlanningContext(
-        transaction,
-        input,
-      );
-      if (context === null) return { status: 'NOT_FOUND' };
-      if (
-        context.origin === null ||
-        authorizeExternalOriginPlanning(context, input.toNodeId) !==
-          'AUTHORIZED' ||
-        JSON.stringify(externalRouteOriginSnapshot(context.origin)) !==
-          JSON.stringify(input.originSnapshot)
-      )
-        return { status: 'VERSION_CONFLICT' };
-      const snapshots: RouteCandidateSnapshotRecord[] = [];
-      for (const draft of input.snapshots) {
-        const created = await transaction.routeCandidateSnapshot.create({
-          data: {
-            ownerUserId: input.ownerUserId,
-            tripId: input.tripId,
-            basisVersion: input.basisVersion,
-            originKind: 'EXTERNAL_EXECUTION_ORIGIN',
-            fromNodeId: null,
-            fromExternalOriginId: input.externalOriginId,
-            externalOriginSnapshot: toJson(input.originSnapshot),
-            toNodeId: input.toNodeId,
-            provider: draft.provider,
-            providerCandidateRef: draft.providerCandidateRef,
-            observedAt: draft.observedAt,
-            providerValidUntil: draft.providerValidUntil,
-            candidatePayload: toJson(draft.candidatePayload),
-            candidateHash: draft.candidateHash,
-            queryTimeCondition: toJson(draft.queryTimeCondition),
-            createdAt: draft.createdAt,
-            expiresAt: draft.expiresAt,
-          },
-        });
-        snapshots.push(toSnapshotRecord(created));
-      }
-      return { status: 'SUCCESS', snapshots };
-    });
+    return withDraftRollback<SaveRouteCandidateSnapshotsResult>(
+      () =>
+        this.client.$transaction(async (transaction) => {
+          await lockOwner(transaction, input.ownerUserId);
+          const status = await lockTrip(transaction, input);
+          if (status !== 'SUCCESS') return { status };
+          const context = await loadExternalOriginPlanningContext(
+            transaction,
+            input,
+          );
+          if (context === null) return { status: 'NOT_FOUND' };
+          if (
+            context.origin === null ||
+            authorizeExternalOriginPlanning(context, input.toNodeId) !==
+              'AUTHORIZED' ||
+            JSON.stringify(externalRouteOriginSnapshot(context.origin)) !==
+              JSON.stringify(input.originSnapshot)
+          )
+            return { status: 'VERSION_CONFLICT' };
+          const now = new Date(
+            Math.max(
+              this.clock.now().getTime(),
+              ...input.snapshots.map((draft) => draft.createdAt.getTime()),
+            ),
+          );
+          const eligible = input.snapshots.filter(
+            (draft) =>
+              !hasExpiredSnapshotEvidence(draft, now) &&
+              !hasElapsedFixedDeparture(
+                restoreNormalizedCandidate(draft.candidatePayload),
+                now,
+              ),
+          );
+          if (eligible.length === 0) return { status: 'NO_MATCHING_CANDIDATE' };
+          const snapshots: RouteCandidateSnapshotRecord[] = [];
+          for (const draft of eligible) {
+            const created = await transaction.routeCandidateSnapshot.create({
+              data: {
+                ownerUserId: input.ownerUserId,
+                tripId: input.tripId,
+                basisVersion: input.basisVersion,
+                originKind: 'EXTERNAL_EXECUTION_ORIGIN',
+                fromNodeId: null,
+                fromExternalOriginId: input.externalOriginId,
+                externalOriginSnapshot: toJson(input.originSnapshot),
+                toNodeId: input.toNodeId,
+                provider: draft.provider,
+                providerCandidateRef: draft.providerCandidateRef,
+                observedAt: draft.observedAt,
+                providerValidUntil: draft.providerValidUntil,
+                candidatePayload: toJson(draft.candidatePayload),
+                candidateHash: draft.candidateHash,
+                queryTimeCondition: toJson(draft.queryTimeCondition),
+                createdAt: draft.createdAt,
+                expiresAt: draft.expiresAt,
+              },
+            });
+            snapshots.push(toSnapshotRecord(created));
+          }
+          const commitNow = new Date(
+            Math.max(now.getTime(), this.clock.now().getTime()),
+          );
+          if (
+            eligible.some(
+              (draft) =>
+                hasExpiredSnapshotEvidence(draft, commitNow) ||
+                hasElapsedFixedDeparture(
+                  restoreNormalizedCandidate(draft.candidatePayload),
+                  commitNow,
+                ),
+            )
+          )
+            throw new DraftEvidenceAbort();
+          return { status: 'SUCCESS', snapshots };
+        }),
+      { status: 'NO_MATCHING_CANDIDATE' },
+    );
   }
 
   async findSnapshotOwned(input: {
@@ -169,50 +248,82 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly createdAt: Date;
     readonly expiresAt: Date;
   }): Promise<CreateRoutePreviewResult> {
-    return this.client.$transaction(async (transaction) => {
-      await lockOwner(transaction, input.ownerUserId);
-      const tripStatus = await lockTrip(transaction, input);
-      if (tripStatus !== 'SUCCESS') return { status: tripStatus };
-      const snapshot = await transaction.routeCandidateSnapshot.findFirst({
-        where: {
-          id: input.snapshotId,
-          ownerUserId: input.ownerUserId,
-          tripId: input.tripId,
-        },
-      });
-      if (snapshot === null) return { status: 'NOT_FOUND' };
-      if (snapshot.originKind !== 'ITINERARY_NODE')
-        return { status: 'PREVIEW_UNSUPPORTED' };
-      if (
-        snapshot.basisVersion !== input.basisVersion ||
-        snapshot.candidateHash !== input.expectedCandidateHash ||
-        snapshot.fromNodeId !== input.fromNodeId ||
-        snapshot.toNodeId !== input.toNodeId ||
-        snapshot.expiresAt <= input.now ||
-        (snapshot.providerValidUntil !== null &&
-          snapshot.providerValidUntil <= input.now)
-      ) {
-        return { status: 'PREVIEW_STALE' };
-      }
-      if (!(await isCurrentRouteCorridor(transaction, input))) {
-        return { status: 'NOT_ADJACENT' };
-      }
-      const preview = await transaction.routePreview.create({
-        data: {
-          ownerUserId: input.ownerUserId,
-          tripId: input.tripId,
-          basisVersion: input.basisVersion,
-          candidateSnapshotId: input.snapshotId,
-          candidateHash: input.expectedCandidateHash,
-          policyVersion: input.policyVersion,
-          previewPayload: toJson(input.previewPayload),
-          previewHash: input.previewHash,
-          createdAt: input.createdAt,
-          expiresAt: input.expiresAt,
-        },
-      });
-      return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
-    });
+    return withDraftRollback<CreateRoutePreviewResult>(
+      () =>
+        this.client.$transaction(async (transaction) => {
+          await lockOwner(transaction, input.ownerUserId);
+          const tripStatus = await lockTrip(transaction, input);
+          if (tripStatus !== 'SUCCESS') return { status: tripStatus };
+          const snapshot = await transaction.routeCandidateSnapshot.findFirst({
+            where: {
+              id: input.snapshotId,
+              ownerUserId: input.ownerUserId,
+              tripId: input.tripId,
+            },
+          });
+          if (snapshot === null) return { status: 'NOT_FOUND' };
+          if (snapshot.originKind !== 'ITINERARY_NODE')
+            return { status: 'PREVIEW_UNSUPPORTED' };
+          if (
+            snapshot.basisVersion !== input.basisVersion ||
+            snapshot.candidateHash !== input.expectedCandidateHash ||
+            snapshot.fromNodeId !== input.fromNodeId ||
+            snapshot.toNodeId !== input.toNodeId
+          ) {
+            return { status: 'PREVIEW_STALE' };
+          }
+          if (!(await isCurrentRouteCorridor(transaction, input))) {
+            return { status: 'NOT_ADJACENT' };
+          }
+          const trip = await readTripAggregateRecord(transaction, input);
+          if (trip === null) return { status: 'NOT_FOUND' };
+          const candidate = restoreNormalizedCandidate(
+            toSnapshotRecord(snapshot).candidatePayload,
+          );
+          const eligibilityNow = new Date(
+            Math.max(input.now.getTime(), this.clock.now().getTime()),
+          );
+          if (
+            hasExpiredPreviewEvidence(input, snapshot, eligibilityNow) ||
+            hasMissedFixedDeparture(
+              trip,
+              input.fromNodeId,
+              candidate,
+              eligibilityNow,
+            )
+          )
+            return { status: 'PREVIEW_STALE' };
+          const preview = await transaction.routePreview.create({
+            data: {
+              ownerUserId: input.ownerUserId,
+              tripId: input.tripId,
+              basisVersion: input.basisVersion,
+              candidateSnapshotId: input.snapshotId,
+              candidateHash: input.expectedCandidateHash,
+              policyVersion: input.policyVersion,
+              previewPayload: toJson(input.previewPayload),
+              previewHash: input.previewHash,
+              createdAt: input.createdAt,
+              expiresAt: input.expiresAt,
+            },
+          });
+          const commitNow = new Date(
+            Math.max(eligibilityNow.getTime(), this.clock.now().getTime()),
+          );
+          if (
+            hasExpiredPreviewEvidence(preview, snapshot, commitNow) ||
+            hasMissedFixedDeparture(
+              trip,
+              input.fromNodeId,
+              candidate,
+              commitNow,
+            )
+          )
+            throw new DraftEvidenceAbort();
+          return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
+        }),
+      { status: 'PREVIEW_STALE' },
+    );
   }
 
   async createExternalOriginPreview(
@@ -220,73 +331,92 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
       NonNullable<RoutePlanningRepository['createExternalOriginPreview']>
     >[0],
   ): Promise<CreateRoutePreviewResult> {
-    return this.client.$transaction(
-      async (transaction) => {
-        await lockOwner(transaction, input.ownerUserId);
-        const tripStatus = await lockTrip(transaction, input);
-        if (tripStatus === 'NOT_FOUND') return { status: tripStatus };
-        if (tripStatus !== 'SUCCESS') return { status: 'PREVIEW_STALE' };
-        const row = await transaction.routeCandidateSnapshot.findFirst({
-          where: {
-            id: input.snapshotId,
-            ownerUserId: input.ownerUserId,
-            tripId: input.tripId,
+    return withDraftRollback<CreateRoutePreviewResult>(
+      () =>
+        this.client.$transaction(
+          async (transaction) => {
+            await lockOwner(transaction, input.ownerUserId);
+            const tripStatus = await lockTrip(transaction, input);
+            if (tripStatus === 'NOT_FOUND') return { status: tripStatus };
+            if (tripStatus !== 'SUCCESS') return { status: 'PREVIEW_STALE' };
+            const row = await transaction.routeCandidateSnapshot.findFirst({
+              where: {
+                id: input.snapshotId,
+                ownerUserId: input.ownerUserId,
+                tripId: input.tripId,
+              },
+            });
+            if (row === null) return { status: 'NOT_FOUND' };
+            const snapshot = toSnapshotRecord(row);
+            if (snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN')
+              return { status: 'PREVIEW_UNSUPPORTED' };
+            const now = new Date(
+              Math.max(input.now.getTime(), this.clock.now().getTime()),
+            );
+            if (
+              input.policyVersion !== EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION ||
+              snapshot.basisVersion !== input.basisVersion ||
+              snapshot.candidateHash !== input.expectedCandidateHash ||
+              hasExpiredPreviewEvidence(input, snapshot, now) ||
+              input.expiresAt > snapshot.expiresAt ||
+              hashRoutePreviewPayload(input.previewPayload) !==
+                input.previewHash
+            )
+              return { status: 'PREVIEW_STALE' };
+            const trip = await readTripAggregateRecord(transaction, input);
+            const context = await loadExternalOriginPlanningContext(
+              transaction,
+              {
+                ...input,
+                externalOriginId: snapshot.origin.externalOriginId,
+              },
+            );
+            if (trip === null || context === null)
+              return { status: 'PREVIEW_STALE' };
+            let lockedPayload: StoredRoutePreviewPayload;
+            try {
+              lockedPayload = buildExternalOriginPreviewPayload({
+                trip,
+                snapshot,
+                context,
+                now,
+                sameHubWalkingLegIndexes: input.sameHubWalkingLegIndexes,
+              });
+            } catch {
+              return { status: 'PREVIEW_STALE' };
+            }
+            if (hashRoutePreviewPayload(lockedPayload) !== input.previewHash)
+              return { status: 'PREVIEW_STALE' };
+            const preview = await transaction.routePreview.create({
+              data: {
+                ownerUserId: input.ownerUserId,
+                tripId: input.tripId,
+                basisVersion: input.basisVersion,
+                candidateSnapshotId: input.snapshotId,
+                candidateHash: input.expectedCandidateHash,
+                policyVersion: input.policyVersion,
+                previewPayload: toJson(lockedPayload),
+                previewHash: input.previewHash,
+                createdAt: input.createdAt,
+                expiresAt: input.expiresAt,
+              },
+            });
+            const commitNow = new Date(
+              Math.max(now.getTime(), this.clock.now().getTime()),
+            );
+            if (
+              hasExpiredPreviewEvidence(preview, snapshot, commitNow) ||
+              hasElapsedFixedDeparture(
+                restoreNormalizedCandidate(snapshot.candidatePayload),
+                commitNow,
+              )
+            )
+              throw new DraftEvidenceAbort();
+            return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
           },
-        });
-        if (row === null) return { status: 'NOT_FOUND' };
-        const snapshot = toSnapshotRecord(row);
-        if (snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN')
-          return { status: 'PREVIEW_UNSUPPORTED' };
-        const now = new Date(
-          Math.max(input.now.getTime(), this.clock.now().getTime()),
-        );
-        if (
-          input.policyVersion !== EXTERNAL_ROUTE_PREVIEW_POLICY_VERSION ||
-          snapshot.basisVersion !== input.basisVersion ||
-          snapshot.candidateHash !== input.expectedCandidateHash ||
-          input.expiresAt <= now ||
-          input.expiresAt > snapshot.expiresAt ||
-          hashRoutePreviewPayload(input.previewPayload) !== input.previewHash
-        )
-          return { status: 'PREVIEW_STALE' };
-        const trip = await readTripAggregateRecord(transaction, input);
-        const context = await loadExternalOriginPlanningContext(transaction, {
-          ...input,
-          externalOriginId: snapshot.origin.externalOriginId,
-        });
-        if (trip === null || context === null)
-          return { status: 'PREVIEW_STALE' };
-        let lockedPayload: StoredRoutePreviewPayload;
-        try {
-          lockedPayload = buildExternalOriginPreviewPayload({
-            trip,
-            snapshot,
-            context,
-            now,
-            sameHubWalkingLegIndexes: input.sameHubWalkingLegIndexes,
-          });
-        } catch {
-          return { status: 'PREVIEW_STALE' };
-        }
-        if (hashRoutePreviewPayload(lockedPayload) !== input.previewHash)
-          return { status: 'PREVIEW_STALE' };
-        const preview = await transaction.routePreview.create({
-          data: {
-            ownerUserId: input.ownerUserId,
-            tripId: input.tripId,
-            basisVersion: input.basisVersion,
-            candidateSnapshotId: input.snapshotId,
-            candidateHash: input.expectedCandidateHash,
-            policyVersion: input.policyVersion,
-            previewPayload: toJson(lockedPayload),
-            previewHash: input.previewHash,
-            createdAt: input.createdAt,
-            expiresAt: input.expiresAt,
-          },
-        });
-        return { status: 'SUCCESS', preview: toPreviewRecord(preview) };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+          { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+        ),
+      { status: 'PREVIEW_STALE' },
     );
   }
 
@@ -321,7 +451,7 @@ export class PrismaRoutePlanningRepository implements RoutePlanningRepository {
     readonly now: Date;
     readonly undoExpiresAt: Date;
   }): Promise<AdoptRoutePreviewResult> {
-    return adoptRoutePreview(this.client, input);
+    return adoptRoutePreview(this.client, input, this.clock);
   }
 
   async undoAdoption(input: {
@@ -468,4 +598,18 @@ function toPreviewRecord(preview: {
 
 function toJson(value: unknown): Prisma.InputJsonValue {
   return value as Prisma.InputJsonValue;
+}
+
+// Throw after tentative inserts so a clock boundary rolls the whole draft transaction back.
+class DraftEvidenceAbort extends Error {}
+async function withDraftRollback<T>(
+  run: () => Promise<T>,
+  rejected: T,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof DraftEvidenceAbort) return rejected;
+    throw error;
+  }
 }

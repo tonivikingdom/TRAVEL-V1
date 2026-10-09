@@ -39,7 +39,15 @@ export function hasMissedFixedDeparture(
   const zone =
     ['ACTUAL', 'ESTIMATED', 'PLANNED'].flatMap((layer) =>
       origin.timeValues
-        .filter((value) => value.layer === layer)
+        .filter(
+          (value) =>
+            value.layer === layer &&
+            // Execution events store their linked ACTUAL instant in UTC. That
+            // is serialization provenance, not the origin's local calendar.
+            // Keep the event as execution evidence above, but obtain calendar
+            // context from explicit node values/intents or candidate clocks.
+            !value.sourceRef?.startsWith('execution-event:'),
+        )
         .map((value) => value.timeZone),
     )[0] ??
     origin.timeIntents.find((intent) => intent.timeZone)?.timeZone ??

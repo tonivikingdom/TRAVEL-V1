@@ -30,6 +30,7 @@ import { toSnapshotRecord } from './prisma-route-planning-repository.js';
 import { readTripAggregateRecord } from './prisma-trip-repository.js';
 import { loadExternalOriginPlanningContext } from './prisma-external-execution-origin-repository.js';
 import { hashPreservedRoutePrefix } from './prisma-route-prefix.js';
+import { hasExpiredAdoptionEvidence } from './route-adoption-evidence.js';
 import {
   externalGeneratedNodeFacts,
   externalGroundTransitExecutionFacts,
@@ -58,7 +59,6 @@ export async function executeExternalRouteAdoption(
   if (
     snapshot.origin.type !== 'EXTERNAL_EXECUTION_ORIGIN' ||
     preview.basisVersion !== input.baseTripVersion ||
-    preview.expiresAt <= input.now ||
     preview.policyVersion !== 'route-external-origin-preview-v2' ||
     payload.policyVersion !== preview.policyVersion ||
     preview.previewHash === null ||
@@ -101,6 +101,10 @@ export async function executeExternalRouteAdoption(
   const eligibilityNow = new Date(
     Math.max(input.now.getTime(), clock.now().getTime()),
   );
+  // Include Preview TTL after owner/Trip and external source/fact locks.
+  // The existing builder still independently validates Snapshot evidence.
+  if (hasExpiredAdoptionEvidence(preview, eligibilityNow))
+    return { status: 'PREVIEW_STALE' };
   let locked: StoredRoutePreviewPayload;
   try {
     locked = buildExternalOriginPreviewPayload({
@@ -558,10 +562,14 @@ export async function executeExternalRouteAdoption(
     },
   });
   // The existing external-origin rule already requires departure >= now.
-  // Recheck with a fresh clock before commit, without altering its time policy.
+  // Recheck evidence and departure after all writes, without altering policy.
+  const commitNow = new Date(
+    Math.max(eligibilityNow.getTime(), clock.now().getTime()),
+  );
   if (
+    hasExpiredAdoptionEvidence(preview, commitNow) ||
     restoreNormalizedCandidate(snapshot.candidatePayload).departure.instant <
-    new Date(Math.max(eligibilityNow.getTime(), clock.now().getTime()))
+      commitNow
   )
     throw new AdoptionAbort('PREVIEW_STALE');
   return {

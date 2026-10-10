@@ -10,6 +10,7 @@ import type {
 import { PlaceSearchPicker } from './place-search.js';
 import { TravelApi, WebError } from './api.js';
 import { esc, orderedNodes } from './model.js';
+import { validateForm, confirmAction } from './interactions.js';
 
 export interface EditorDay {
   key: string;
@@ -103,6 +104,7 @@ interface Hooks {
   load(tripId: string): Promise<void>;
   dirty(value: boolean): void;
   message(text: string): void;
+  created(): Promise<void>;
 }
 /** One authoring draft bound to one owner/Trip. Existing place editors remain independent. */
 export class TripAuthoringEditor {
@@ -171,9 +173,13 @@ export class TripAuthoringEditor {
   }
   openAdd(day: EditorDay) {
     this.begin('add', day.key);
+    if (!day.occupied) {
+      void this.chooseKind('place');
+      return;
+    }
     this.h.open(
       '添加安排',
-      `<p class="authoring-date">${esc(day.label)}</p>${day.occupied ? '<p class="warning">这张日期卡已被跨日交通占用，不能添加普通安排。</p>' : `<p>想在这一天安排什么？</p><div class="authoring-types"><button data-authoring-kind="place">${content('地点')}</button><button data-authoring-kind="activity">${content('自由行动')}</button></div><p class="muted">时间可稍后设置，未指定时保持待定。</p>`}<p id="save-status" role="status"></p>`,
+      '<p class="warning">这张日期卡已被跨日交通占用，不能添加普通安排。</p><p id="save-status" role="status"></p>',
     );
     this.baselineForm();
   }
@@ -190,7 +196,7 @@ export class TripAuthoringEditor {
     this.begin('create');
     this.h.open(
       '新建旅行',
-      `<p>先确定旅行名称和规划开始日期，安排可以逐步补充。</p><form id="authoring-create" data-authoring><label>旅行名称<input name="name" maxlength="200" required autocomplete="off"></label><label>规划开始日期<input name="date" type="date" required></label><label>人数<input name="people" type="number" min="1" step="1" value="1" required></label><button class="primary">${content('创建旅行')}</button></form><p class="muted">空旅行不占用日期；添加第一个安排后才建立正式范围。</p><p id="save-status" role="status"></p>`,
+      `<p class="muted">先起个名字，安排可以慢慢添加。</p><form id="authoring-create" data-authoring><label>旅行名称<input name="name" maxlength="200" required autocomplete="off"></label><label>开始日期<input name="date" type="date" required></label><label>人数<input name="people" type="number" min="1" step="1" value="1" required></label><div class="dialog-actions"><button type="button" data-close>${content('取消')}</button><button class="primary">${content('创建旅行')}</button></div></form><p id="save-status" role="status"></p>`,
     );
     this.baselineForm();
   }
@@ -223,14 +229,22 @@ export class TripAuthoringEditor {
     ].join('');
     input.value = String(Math.min(selected ?? nodes.length, nodes.length));
   }
-  chooseKind(kind: string) {
+  async chooseKind(kind: string) {
     if (!this.context || this.context.mode !== 'add') return;
+    const current = this.h.detail.open ? this.form() : null;
+    if (current?.dataset.kind === kind) return;
+    if (
+      current &&
+      (value(current) !== this.baseline || this.placeSearch.dirty) &&
+      !(await confirmAction('切换安排类型会放弃当前未保存的内容。'))
+    )
+      return;
     const day = this.h.days().find((d) => d.key === this.context!.dayKey);
     if (!day) return;
     const place = kind === 'place';
     this.h.open(
       place ? '添加地点' : '添加自由行动',
-      `<p class="authoring-date">${esc(day.label)}</p><form id="authoring-add" data-authoring data-kind="${place ? 'place' : 'activity'}">${place ? '<p class="muted">搜索新地点，或从本人已保存的地点选择。</p><label>已保存的地点<select name="place" required><option value="">正在读取地点…</option></select></label><label>备注（可选）<textarea name="note" maxlength="2000" rows="3"></textarea></label>' : '<label>活动名称<input name="title" maxlength="200" required autocomplete="off" placeholder="例如：附近散步、休息"></label>'}<button class="primary">${content(place ? '添加地点' : '添加自由行动')}</button></form>${place ? '<p data-place-availability role="status"></p>' : ''}<p class="muted">到达、出发和停留可稍后设置，不自动填时间。</p><p id="save-status" role="status"></p>`,
+      `<p class="authoring-date">${esc(day.label)}</p><div class="authoring-types" aria-label="安排类型"><button type="button" data-authoring-kind="place" aria-pressed="${place}">${content('地点')}</button><button type="button" data-authoring-kind="activity" aria-pressed="${!place}">${content('自由行动')}</button></div><form id="authoring-add" data-authoring data-kind="${place ? 'place' : 'activity'}">${place ? '<label>已保存的地点<select name="place" required><option value="">正在读取地点…</option></select></label><label>备注（可选）<textarea name="note" maxlength="2000" rows="3"></textarea></label>' : '<label>活动名称<input name="title" maxlength="200" required autocomplete="off" placeholder="例如：附近散步、休息"></label>'}<button class="primary">${content(place ? '添加地点' : '添加自由行动')}</button></form>${place ? '<p data-place-availability role="status"></p>' : ''}<p class="muted">到达、出发和停留可稍后设置，不自动填时间。</p><p id="save-status" role="status"></p>`,
     );
     this.baselineForm();
     if (place) {
@@ -483,7 +497,7 @@ export class TripAuthoringEditor {
     this.input();
   }
   submit(form: HTMLFormElement) {
-    if (!this.context) return;
+    if (!this.context || !validateForm(form)) return;
     if (this.recoveryRequired) {
       this.h.message('请先重新读取并核对草稿，再提交。');
       return;
@@ -592,6 +606,8 @@ export class TripAuthoringEditor {
       this.h.message(
         `本次提交已保存。${value(form) !== this.baseline || this.placeSearch.dirty ? ' 新修改仍未保存。' : ''}`,
       );
+      if (context.mode === 'create' && value(form) === this.baseline)
+        await this.h.created();
     });
   }
 }

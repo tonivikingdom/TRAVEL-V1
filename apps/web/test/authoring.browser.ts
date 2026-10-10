@@ -1,3 +1,4 @@
+import { chooseSavedPlace } from './helpers/replanning-acceptance.js';
 import { expect, test, type Page } from '@playwright/test';
 import type { TripView, ItineraryNodeView } from '@travel/contracts';
 import { fixtureTrip, fixtureSchedule, tripId, visit } from './fixture.js';
@@ -184,10 +185,7 @@ test('place note edited while adding is retained after the accepted request', as
 }) => {
   await enter(page);
   await page.locator('[data-action=add-arrangement]').click();
-  await page.getByRole('button', { name: '地点', exact: true }).click();
-  await page
-    .locator('[name=place]')
-    .selectOption(trip.days[0]!.nodes[0]!.place!.id);
+  await chooseSavedPlace(page, trip.days[0]!.nodes[0]!.place!.id);
   await page.locator('[name=note]').fill('SYNTHETIC A');
   hold = true;
   await page.getByRole('button', { name: '添加地点', exact: true }).click();
@@ -226,18 +224,15 @@ test('place catalog outage recovery keeps notes and restores a reachable reliabl
   page,
 }) => {
   await enter(page);
-  await page.locator('[data-action=add-arrangement]').click();
   catalogFails = true;
-  await page.getByRole('button', { name: '地点', exact: true }).click();
+  await page.locator('[data-action=add-arrangement]').click();
   await expect(page.locator('[data-authoring-recover]')).toBeVisible();
   await page.locator('[name=note]').fill('SYNTHETIC 保留新备注');
   catalogFails = false;
   await page.locator('[data-authoring-recover]').click();
   await page.locator('[data-authoring-ack]').click();
   await expect(page.locator('[name=note]')).toHaveValue('SYNTHETIC 保留新备注');
-  await page
-    .locator('[name=place]')
-    .selectOption(trip.days[0]!.nodes[0]!.place!.id);
+  await chooseSavedPlace(page, trip.days[0]!.nodes[0]!.place!.id);
   await page.getByRole('button', { name: '添加地点', exact: true }).click();
   await expect(page.locator('#save-status')).toContainText('本次提交已保存');
   expect(trip.days[0]!.nodes.at(-1)!.note).toBe('SYNTHETIC 保留新备注');

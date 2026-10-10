@@ -1,16 +1,30 @@
+import { closeCalendar, enhanceInteractions } from './interactions.js';
+
 export class DetailDrawer {
+  private launcher: HTMLElement | null = null;
   private opener: HTMLElement | null = null;
   private openerKey: { attribute: string; value: string } | null = null;
   private pointer: { id: number; y: number } | null = null;
   private priorOverflow = '';
+  private closing: Promise<boolean> | null = null;
   constructor(
     readonly element: HTMLDialogElement,
-    private readonly mayClose: () => boolean,
+    private readonly mayClose: () => boolean | Promise<boolean>,
     private readonly closed: () => void,
   ) {
+    document.addEventListener(
+      'click',
+      (event) => {
+        const control = (event.target as HTMLElement).closest<HTMLElement>(
+          'button,a',
+        );
+        if (control && !control.closest('dialog')) this.launcher = control;
+      },
+      true,
+    );
     element.addEventListener('cancel', (event) => {
       event.preventDefault();
-      this.close();
+      if (!closeCalendar()) void this.close();
     });
     element.addEventListener('pointerdown', (event) => {
       if (
@@ -37,7 +51,7 @@ export class DetailDrawer {
       const distance = event.clientY - this.pointer.y;
       this.pointer = null;
       element.style.transform = '';
-      if (distance >= 110) this.close();
+      if (distance >= 110) void this.close();
     };
     element.addEventListener('pointerup', end);
     element.addEventListener('pointercancel', () => this.resetDrag());
@@ -49,7 +63,8 @@ export class DetailDrawer {
     window.addEventListener('resize', () => this.fitViewport());
     element.addEventListener('focusin', () => this.fitViewport());
     element.addEventListener('click', (event) => {
-      if ((event.target as HTMLElement).closest('[data-close]')) this.close();
+      if ((event.target as HTMLElement).closest('[data-close]'))
+        void this.close();
     });
   }
   private resetDrag() {
@@ -111,10 +126,14 @@ export class DetailDrawer {
         active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
   }
-  open(html: string) {
+  open(html: string, variant: 'drawer' | 'modal' = 'drawer') {
+    closeCalendar();
+    this.element.dataset.variant = variant;
     delete this.element.dataset.unavailable;
     if (!this.element.open) {
-      this.opener = document.activeElement as HTMLElement;
+      // Safari pointer activation does not always focus the button. Preserve the
+      // explicit launcher before asynchronous draft checks yield to the browser.
+      this.opener = this.launcher ?? (document.activeElement as HTMLElement);
       this.openerKey =
         ['data-node', 'data-route-from'].flatMap((attribute) => {
           const value = this.opener?.getAttribute(attribute);
@@ -125,14 +144,24 @@ export class DetailDrawer {
       this.element.innerHTML = html;
       this.element.showModal();
     } else this.element.innerHTML = html;
+    enhanceInteractions();
     this.resetDrag();
     this.fitViewport();
     this.element
       .querySelector<HTMLElement>('[data-close]')
       ?.focus({ preventScroll: true });
   }
-  close() {
-    if (!this.mayClose()) return;
+  close(): Promise<boolean> {
+    if (this.closing) return this.closing;
+    this.closing = this.performClose().finally(() => {
+      this.closing = null;
+    });
+    return this.closing;
+  }
+  private async performClose(): Promise<boolean> {
+    if (!this.element.open) return true;
+    if (closeCalendar()) return false;
+    if (!(await this.mayClose())) return false;
     this.resetDrag();
     this.element.close();
     this.element.style.removeProperty('--sheet-viewport-height');
@@ -153,5 +182,6 @@ export class DetailDrawer {
         '#app [data-action=reload], #app #login input',
       )
     )?.focus();
+    return true;
   }
 }

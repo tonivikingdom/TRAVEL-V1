@@ -1,3 +1,4 @@
+import { onceConfirmation } from './helpers/confirmation.js';
 import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { test, expect, type Page } from '@playwright/test';
 import type {
@@ -202,7 +203,7 @@ test('integrated in-trip read failure preserves an authoring draft and its unkno
   ).toBe(503);
   await expect(title).toHaveValue('SYNTHETIC retained authoring draft');
   await expect(page.locator('#save-status')).toContainText('未保存');
-  page.once('dialog', (d) => d.dismiss());
+  await onceConfirmation(page, (d) => d.dismiss());
   await page
     .locator('.view-switch [data-view=itinerary]')
     .evaluate((b: HTMLButtonElement) => b.click());
@@ -278,6 +279,8 @@ test('next selected bus, collapsed transfer, sequence, boarding links and detail
   ).toEqual(['步行', '公交', '铁路', '步行']);
   await capture(page, 'mobile-transfer', true);
   await page.getByRole('button', { name: '查看整段路线' }).click();
+  await expect(page.locator('section[data-route-stage=current]')).toBeVisible();
+  await page.locator('[data-route-search-open]').click();
   await expect(page.getByRole('button', { name: '搜索路线' })).toBeVisible();
   noWrites();
 });
@@ -826,7 +829,7 @@ test('SYNTHETIC Today and transport sheet preserve touch layout after portrait t
   ).toBe(true);
   await page.locator('.in-trip > button').click();
   await page.locator('.connection').first().click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   await page
     .locator('#detail')
     .evaluate((element) => (element.scrollTop = element.scrollHeight));
@@ -842,7 +845,7 @@ test('SYNTHETIC Today and transport sheet preserve touch layout after portrait t
   await page.locator('[data-close]').click();
   await page.setViewportSize({ width: 1280, height: 960 });
   await page.locator('.connection').first().click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   if (process.env.WEB_TEST_SCREENSHOTS === 'true')
     await page.screenshot({
       path: 'docs/status/assets/mobile-hardening/desktop.png',

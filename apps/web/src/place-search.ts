@@ -1,6 +1,7 @@
 import type { PlaceSearchResponse, PlaceSearchResult } from '@travel/contracts';
 import { TravelApi, WebError } from './api.js';
 import { esc } from './model.js';
+import { fieldProblem, showFieldError } from './interactions.js';
 /** Local candidate UI; only the authoring submit performs a formal write. */
 export class PlaceSearchPicker {
   private selected: PlaceSearchResult | null = null;
@@ -14,6 +15,9 @@ export class PlaceSearchPicker {
   clearSelection() {
     this.selected = null;
     this.generation++;
+    this.draft?.query
+      .closest('.place-search')
+      ?.classList.remove('has-selection');
   }
   reset() {
     this.clearSelection();
@@ -50,8 +54,32 @@ export class PlaceSearchPicker {
     const section = document.createElement('section');
     section.className = 'place-search';
     section.innerHTML =
-      '<h3>搜索新地点</h3><label>地点名称或地址<input data-place-query maxlength="200" autocomplete="off" placeholder="例如：东京站"></label><label>结果语言<select data-place-language><option value="ja">日本語</option><option value="zh">中文</option><option value="en">English</option></select></label><button type="button" data-place-search>搜索地点</button><button type="button" data-place-cancel>取消搜索</button><p data-search-status role="status"></p><div data-search-results></div><div data-selected-summary></div><p class="muted">搜索和选择不会保存地点。核对后点击下方“添加地点”才加入旅行。</p>';
+      '<div class="search-controls"><label>地点名称或地址<input data-place-query maxlength="200" autocomplete="off" placeholder="例如：东京站"></label><details class="search-language"><summary>结果语言</summary><label>语言<select data-place-language><option value="ja">日本語</option><option value="zh">中文</option><option value="en">English</option></select></label></details><div class="search-actions"><button type="button" data-place-search>搜索地点</button><button type="button" data-place-cancel>取消搜索</button></div></div><p data-search-status role="status"></p><div data-search-results></div><div data-selected-summary></div><p class="muted">核对地点后，点击“添加地点”加入旅行。</p>';
     form.prepend(section);
+    const sources = document.createElement('div');
+    sources.className = 'place-sources';
+    sources.innerHTML =
+      '<button type="button" data-source="search" aria-pressed="true">搜索新地点</button><button type="button" data-source="saved" aria-pressed="false">已保存地点</button>';
+    form.prepend(sources);
+    const savedLabel = form
+      .querySelector<HTMLSelectElement>('[name=place]')!
+      .closest('label')!;
+    savedLabel.hidden = true;
+    sources.querySelectorAll<HTMLButtonElement>('button').forEach(
+      (button) =>
+        (button.onclick = () => {
+          const saved = button.dataset.source === 'saved';
+          this.generation++;
+          clear();
+          section.hidden = saved;
+          savedLabel.hidden = !saved;
+          sources
+            .querySelectorAll('button')
+            .forEach((b) =>
+              b.setAttribute('aria-pressed', String(b === button)),
+            );
+        }),
+    );
     this.draft = {
       query: section.querySelector<HTMLInputElement>('[data-place-query]')!,
       language: section.querySelector<HTMLSelectElement>(
@@ -70,7 +98,10 @@ export class PlaceSearchPicker {
     section
       .querySelector('[data-place-query]')!
       .addEventListener('keydown', (event) => {
-        if ((event as KeyboardEvent).key === 'Enter') {
+        if (
+          (event as KeyboardEvent).key === 'Enter' &&
+          !(event as KeyboardEvent).isComposing
+        ) {
           event.preventDefault();
           searchButton.click();
         }
@@ -93,6 +124,7 @@ export class PlaceSearchPicker {
       select.querySelector('[data-searched-place]')?.remove();
       results.innerHTML = '';
       section.querySelector('[data-selected-summary]')!.innerHTML = '';
+      section.classList.remove('has-selection');
       changed();
     };
     section
@@ -118,8 +150,14 @@ export class PlaceSearchPicker {
         const query = (
           section.querySelector('[data-place-query]') as HTMLInputElement
         ).value.trim();
-        if (!query) {
-          status.textContent = '请输入地点名称或地址。';
+        const queryInput =
+          section.querySelector<HTMLInputElement>('[data-place-query]')!;
+        const problem = !query
+          ? '请输入地点名称或地址'
+          : fieldProblem(queryInput);
+        showFieldError(queryInput, problem);
+        if (problem) {
+          queryInput.focus();
           return;
         }
         const epoch = ++this.generation;
@@ -143,12 +181,12 @@ export class PlaceSearchPicker {
           );
           if (epoch !== this.generation || !section.isConnected) return;
           status.textContent = response.candidates.length
-            ? '请核对名称、地址和坐标，明确选择一个候选。'
+            ? '请选择一个地点，核对后再添加。'
             : '没有找到可确认的地点，请换个名称或选择已保存地点。';
           results.innerHTML = response.candidates
             .map(
               (c, i) =>
-                `<article class="place-candidate"><strong>${esc(c.name)}</strong><p>${esc(c.formattedAddress ?? '地址待定')}</p><p>${c.coordinates ? `${c.coordinates.latitude}, ${c.coordinates.longitude}` : '可靠坐标不可用，不能用于导航或加入地点'}</p><small>${esc(c.attribution)}</small><button type="button" data-candidate="${i}" ${c.coordinates ? '' : 'disabled'}>选择这个地点</button></article>`,
+                `<article class="place-candidate"><strong>${esc(c.name)}</strong><p>${esc(c.formattedAddress ?? '地址待定')}</p>${c.coordinates ? '' : '<p>可靠位置不可用，无法添加或导航。</p>'}<small>${esc(c.attribution)}</small><button type="button" data-candidate="${i}" ${c.coordinates ? '' : 'disabled'}>选择这个地点</button></article>`,
             )
             .join('');
           results
@@ -168,7 +206,18 @@ export class PlaceSearchPicker {
                 ) as HTMLTextAreaElement | null;
                 if (note) note.maxLength = 1200;
                 section.querySelector('[data-selected-summary]')!.innerHTML =
-                  `<article class="place-candidate"><p>已选择 · 尚未加入旅行</p><p>备注最多 1200 字，地点来源信息将随安排保留。</p><strong>${esc(candidate.name)}</strong><p>${esc(candidate.formattedAddress ?? '地址待定')}</p><p>${candidate.coordinates!.latitude}, ${candidate.coordinates!.longitude}</p><small>${esc(candidate.attribution)}</small></article>`;
+                  `<article class="place-candidate selected-place"><p class="eyebrow">已选择 · 尚未添加</p><strong>${esc(candidate.name)}</strong><p>${esc(candidate.formattedAddress ?? '地址待定')}</p><details><summary>地点来源与位置</summary><p>${candidate.coordinates!.latitude}, ${candidate.coordinates!.longitude}</p><small>${esc(candidate.attribution)}</small></details><button type="button" data-place-change>更换地点</button></article>`;
+                section.classList.add('has-selection');
+                section.querySelector<HTMLButtonElement>(
+                  '[data-place-change]',
+                )!.onclick = () => {
+                  this.generation++;
+                  clear();
+                  status.textContent = '请重新搜索并选择地点。';
+                  section
+                    .querySelector<HTMLInputElement>('[data-place-query]')!
+                    .focus();
+                };
                 select.querySelector('[data-searched-place]')?.remove();
                 const option = new Option(
                   `搜索候选 · ${candidate.name} · ${candidate.formattedAddress ?? '地址待定'}`,
@@ -177,7 +226,7 @@ export class PlaceSearchPicker {
                 option.dataset.searchedPlace = 'true';
                 select.add(option);
                 select.value = option.value;
-                status.textContent = `已选择：${candidate.name}。尚未加入旅行，请核对并点击“添加地点”。`;
+                status.textContent = '尚未加入旅行。';
                 results
                   .querySelectorAll('[data-candidate]')
                   .forEach((v) =>

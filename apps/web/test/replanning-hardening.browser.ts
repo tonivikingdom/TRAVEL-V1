@@ -1,3 +1,4 @@
+import { onConfirmation } from './helpers/confirmation.js';
 import { expect, test } from '@playwright/test';
 import {
   browserHarness,
@@ -46,6 +47,7 @@ test('Provider unavailable is local; retry pending disables repeated tap and nev
   await evidence(page, 'mobile-pending-disabled', info.project.name);
   hold.release();
   await expect(page.locator('.candidate')).toBeVisible();
+  await page.locator('[data-route-back=search]').click();
   await expect(query).toBeEnabled();
   expect(h.formalWrites()).toEqual([]);
 });
@@ -190,7 +192,7 @@ for (const kind of ['authoring', 'place-search'] as const) {
         : page.locator('[data-place-query]');
     await field.fill(`SYNTHETIC ${kind} protected draft`);
     let prompts = 0;
-    page.on('dialog', async (dialog) => {
+    await onConfirmation(page, async (dialog) => {
       prompts++;
       await dialog.dismiss();
     });
@@ -209,14 +211,17 @@ for (const kind of ['authoring', 'place-search'] as const) {
       // A normal handle gesture must respect the same draft protection.
       await expect(page.locator('#detail')).toBeVisible();
       await expect(field).toHaveValue(`SYNTHETIC ${kind} protected draft`);
-      expect(prompts).toBe(1);
+      await expect.poll(() => prompts).toBe(1);
+      await expect(page.locator('dialog.confirmation')).toHaveCount(0);
     }
     // The modal blocks background touch. Exercise its navigation handler without hiding it.
     await page.locator('.connection').evaluate((e: HTMLElement) => e.click());
     await expect(field).toHaveValue(`SYNTHETIC ${kind} protected draft`);
+    await expect.poll(() => prompts).toBe(kind === 'place-search' ? 2 : 1);
+    await expect(page.locator('dialog.confirmation')).toHaveCount(0);
     await dragHandle(page);
     await expect(field).toHaveValue(`SYNTHETIC ${kind} protected draft`);
-    expect(prompts).toBe(kind === 'place-search' ? 3 : 2);
+    await expect.poll(() => prompts).toBe(kind === 'place-search' ? 3 : 2);
     expect(h.planning()).toEqual([]);
     expect(h.formalWrites()).toEqual([]);
   });

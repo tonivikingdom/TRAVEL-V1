@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SYNTHETIC 卡片设计评审夹具</title>
+  <body>
+    <main>
+      <h1>SYNTHETIC · 仅设计评审</h1>
+      <p>
+        改名、分享、整趟删除缺少服务接口。以下只演示交互，不保存、不分享、不删除真实数据。
+      </p>
+      <article class="review-card">
+        <button class="card-open">
+          SYNTHETIC 东京旅行 · 长名称用于窄屏体验
+        </button>
+        <button data-rename aria-label="重命名旅行" title="重命名旅行">
+          ✎
+        </button>
+        <div class="desktop-actions">
+          <button data-share aria-label="分享旅行" title="分享旅行">
+            分享
+          </button>
+          <button data-delete aria-label="删除旅行" title="删除旅行">
+            删除
+          </button>
+        </div>
+        <button class="mobile-menu" aria-label="旅行操作" aria-expanded="false">
+          ⋯
+        </button>
+        <div class="review-menu" hidden>
+          <button data-rename>重命名</button><button data-share>分享</button
+          ><button data-delete class="delete-item">删除旅行</button>
+        </div>
+        <form hidden>
+          <label>旅行名称<input name="name" maxlength="200" required /></label
+          ><button>保存名称（仅演示）</button
+          ><button type="button" data-cancel>取消</button>
+        </form>
+      </article>
+      <p role="status"></p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

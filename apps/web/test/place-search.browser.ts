@@ -1,3 +1,8 @@
+import {
+  chooseSavedPlace,
+  openPlaceSearch,
+} from './helpers/replanning-acceptance.js';
+import { onConfirmation, onceConfirmation } from './helpers/confirmation.js';
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import type { PlaceSearchResponse, TripView } from '@travel/contracts';
@@ -176,7 +181,6 @@ async function open(page: Page) {
   await page.goto('/');
   await page.locator('[data-trip]').click();
   await page.locator('[data-action=add-arrangement]').click();
-  await page.getByRole('button', { name: '地点', exact: true }).click();
   await expect(page.locator('select[name=place] option')).toHaveCount(3);
 }
 async function search(page: Page) {
@@ -219,11 +223,9 @@ test('explicit ambiguous selection and add; search/select/cancel have zero write
   await expect(page.locator('select[name=place]')).toHaveValue(
     'search:SYNTHETIC-token-1',
   );
-  await page.locator('select[name=place]').selectOption({ index: 1 });
+  await chooseSavedPlace(page, { index: 1 });
   await expect(page.locator('[data-selected-summary]')).toBeHidden();
-  await page
-    .locator('select[name=place]')
-    .selectOption('search:SYNTHETIC-token-1');
+  await chooseSavedPlace(page, 'search:SYNTHETIC-token-1');
   await expect(page.locator('[data-selected-summary]')).toBeVisible();
   let releaseIdentity: () => void = () => {};
   let identityStarted: () => void = () => {};
@@ -242,7 +244,7 @@ test('explicit ambiguous selection and add; search/select/cancel have zero write
   });
   await page.locator('#authoring-add button.primary').click();
   await identityWaiting;
-  await page.locator('select[name=place]').selectOption({ index: 1 });
+  await chooseSavedPlace(page, { index: 1 });
   releaseIdentity();
   await expect(page.locator('#save-status')).toContainText('本次提交已保存');
   await expect(page.locator('#save-status')).toContainText('新修改仍未保存');
@@ -251,6 +253,8 @@ test('explicit ambiguous selection and add; search/select/cancel have zero write
   expect(submitted.selectionToken).toBe('SYNTHETIC-token-1');
   expect(submitted.baseTripVersion).toBe(fixtureTrip().version);
   const firstKey = submitted.idempotencyKey;
+  await openPlaceSearch(page);
+  await page.locator('[data-place-search]').click();
   await page.locator('[data-candidate="0"]').click();
   await expect(page.locator('#save-status')).toContainText('还有未保存的修改');
   await page.locator('#authoring-add button.primary').click();
@@ -264,6 +268,7 @@ test('cancel clears candidate and prevents formal writes', async ({ page }) => {
   await open(page);
   await search(page);
   await page.locator('[data-candidate="0"]').click();
+  await openPlaceSearch(page);
   await page.locator('[data-place-cancel]').click();
   await expect(page.locator('select[name=place]')).toHaveValue('');
   await expect(page.locator('[data-search-status]')).toContainText('未保存');
@@ -283,7 +288,7 @@ test('provider failure preserves note draft and saved-place fallback', async ({
   await expect(page.locator('textarea[name=note]')).toHaveValue(
     'SYNTHETIC 未保存草稿',
   );
-  await page.locator('select[name=place]').selectOption({ index: 1 });
+  await chooseSavedPlace(page, { index: 1 });
   await page.locator('#authoring-add button.primary').click();
   await expect(page.locator('#save-status')).toContainText('本次提交已保存');
   expect(writes).toBe(1);
@@ -388,7 +393,7 @@ test('enlarged text and provider unavailable visual fallback', async ({
   );
   await page.locator('[data-search-status]').scrollIntoViewIfNeeded();
   await capture(page, 'mobile-provider-unavailable', info.project.name);
-  await page.locator('select[name=place]').selectOption({ index: 1 });
+  await chooseSavedPlace(page, { index: 1 });
   await page.locator('select[name=place]').scrollIntoViewIfNeeded();
   await capture(page, 'mobile-saved-fallback', info.project.name);
 });
@@ -425,7 +430,7 @@ test('unknown selection write then expired evidence reads authority and retains 
   const query = await page.locator('[data-place-query]').inputValue();
   expect(query).not.toBe('');
   let prompts = 0;
-  page.on('dialog', async (dialog) => {
+  await onConfirmation(page, async (dialog) => {
     prompts++;
     await dialog.dismiss();
   });
@@ -509,11 +514,11 @@ test.describe('SYNTHETIC Place Search with integrated mobile touch hardening', (
       await page.mouse.move(handle.x + 15, handle.y + 60);
       await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
       await page.mouse.up();
-      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.locator('#detail')).toBeVisible();
 
       handle = (await page.locator('.handle').boundingBox())!;
       let discardPrompts = 0;
-      page.once('dialog', async (dialog) => {
+      await onceConfirmation(page, async (dialog) => {
         discardPrompts++;
         await dialog.dismiss();
       });
@@ -521,7 +526,7 @@ test.describe('SYNTHETIC Place Search with integrated mobile touch hardening', (
       await page.mouse.down();
       await page.mouse.move(handle.x + 15, handle.y + 140, { steps: 8 });
       await page.mouse.up();
-      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.locator('#detail')).toBeVisible();
       await expect(note).toHaveValue(
         'SYNTHETIC 東京駅の長い住所と保存前の草稿',
       );
@@ -589,7 +594,6 @@ test('Today Impact returns to explicit Place Search authoring without consuming 
   await page.getByRole('button', { name: '关闭详情', exact: true }).click();
   await page.getByRole('button', { name: '全部日程', exact: true }).click();
   await page.locator('[data-action=add-arrangement]').click();
-  await page.getByRole('button', { name: '地点', exact: true }).click();
   await search(page);
   await page.locator('[data-candidate="1"]').click();
   await page

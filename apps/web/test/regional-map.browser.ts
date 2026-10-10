@@ -1,3 +1,4 @@
+import { onConfirmation } from './helpers/confirmation.js';
 import { test, expect, type Page } from '@playwright/test';
 import {
   fixtureTrip,
@@ -253,7 +254,7 @@ test('pending capability completion never resets note dirty state or drawer guar
     .locator('#note-edit textarea')
     .fill('SYNTHETIC before async capability');
   let prompts = 0;
-  page.on('dialog', async (d) => {
+  await onConfirmation(page, async (d) => {
     prompts++;
     await d.dismiss();
   });

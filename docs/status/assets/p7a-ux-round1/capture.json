@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "baseline": "4f6b31a262acdf9ac634f0ad58eab437ca79d4cb",
+  "beforePort": 5176,
+  "afterPort": 5174,
+  "widths": [
+    390,
+    1440
+  ],
+  "businessWrites": 0
+}

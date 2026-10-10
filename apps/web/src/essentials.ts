@@ -196,7 +196,7 @@ export function essentialsBody(value: EssentialsContent, backup: boolean) {
   const location = (
     p: StaticBackupView['routes'][number]['legs'][number]['from'],
   ) =>
-    `<strong>${esc(p.name)}</strong><p>${esc(p.address ?? '地址未提供')}</p><p class="muted">${p.latitude === null || p.longitude === null ? '坐标未提供' : `${esc(p.latitude)}, ${esc(p.longitude)}`}</p>${!backup && placeMap(p) ? `<a href="${esc(placeMap(p))}" target="_blank" rel="noopener noreferrer">查看地图</a>` : ''}`;
+    `<strong>${esc(p.name)}</strong><p>${esc(p.address ?? '地址未提供')}</p><details><summary>地点资料详情</summary><p class="muted">${p.latitude === null || p.longitude === null ? '坐标未提供' : `${esc(p.latitude)}, ${esc(p.longitude)}`}</p></details>${!backup && placeMap(p) ? `<a href="${esc(placeMap(p))}" target="_blank" rel="noopener noreferrer">查看地图</a>` : ''}`;
   const flightCard = (f: BackupFlight, label: string) =>
     `<details><summary>${label} · ${esc(f.flightNumber)}</summary><p>资料保存于 ${esc(backupTimestamp(f.fetchedAt))}，不是重新查询的结果。</p>${(
       ['departure', 'arrival'] as const
@@ -234,7 +234,7 @@ export function essentialsBody(value: EssentialsContent, backup: boolean) {
   }</section>`;
 }
 export function downloadBackup(backup: StaticBackupView) {
-  const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>静态旅行备份</title><style>body{font:18px/1.6 system-ui;color:#183552;background:#f6f9ff;margin:auto;padding:20px;max-width:760px;overflow-wrap:anywhere}article,section{margin:16px 0}article{background:white;padding:16px;border:1px solid #dce7f3;border-radius:14px}summary{cursor:pointer}b{font-size:1.1em}p{white-space:pre-wrap}details{margin:12px 0}</style><main><h1>正在查看备份</h1><p>备份生成于 ${esc(backupTimestamp(backup.generatedAt))}<br>Trip version ${backup.tripVersion}<br>此内容不会自动更新。不能用于判断现在的交通或航班状态。</p>${essentialsBody(backup, true)}<p>地点搜索：Powered by <a href="https://www.geoapify.com/">Geoapify</a> · <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a></p><p>Trip ID: ${esc(backup.tripId)}<br>备份 ID: ${esc(backup.id)} · travel-static-backup-v1</p></main></html>`;
+  const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>静态旅行备份</title><style>body{font:18px/1.6 system-ui;color:#183552;background:#f6f9ff;margin:auto;padding:20px;max-width:760px;overflow-wrap:anywhere}article,section{margin:16px 0}article{background:white;padding:16px;border:1px solid #dce7f3;border-radius:14px}summary{cursor:pointer}b{font-size:1.1em}p{white-space:pre-wrap}details{margin:12px 0}</style><main><h1>正在查看备份</h1><p>备份生成于 ${esc(backupTimestamp(backup.generatedAt))}<br>此内容不会自动更新。不能用于判断现在的交通或航班状态。</p>${essentialsBody(backup, true)}<p>地点搜索：Powered by <a href="https://www.geoapify.com/">Geoapify</a> · <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a></p><p>这份私人备份包含备注，请妥善保管，不作为公开分享内容。</p><details><summary>备份资料详情</summary><p>资料版本 ${backup.tripVersion}<br>Trip ID: ${esc(backup.tripId)}<br>备份 ID: ${esc(backup.id)} · travel-static-backup-v1</p></details></main></html>`;
   const url = URL.createObjectURL(
     new Blob([html], { type: 'text/html;charset=utf-8' }),
   );

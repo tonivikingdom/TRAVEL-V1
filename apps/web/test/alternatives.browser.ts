@@ -1,3 +1,5 @@
+import { chooseSearchLanguage } from './helpers/replanning-acceptance.js';
+import { onConfirmation } from './helpers/confirmation.js';
 import { test, expect, type Page } from '@playwright/test';
 import type {
   GroundTransitRouteReevaluationHandoffView,
@@ -586,9 +588,8 @@ for (const destination of ['impact', 'adjustment'] as const)
     await page.locator('[data-close]').click();
     await page.getByRole('button', { name: '全部日程', exact: true }).click();
     await page.locator('[data-action=add-arrangement]').click();
-    await page.getByRole('button', { name: '地点', exact: true }).click();
     await page.locator('[data-place-query]').fill('  SYNTHETIC 東京駅 draft  ');
-    await page.locator('[data-place-language]').selectOption('zh');
+    await chooseSearchLanguage(page, 'zh');
     await page
       .locator('#authoring-add textarea[name=note]')
       .fill('SYNTHETIC keep note');
@@ -596,7 +597,7 @@ for (const destination of ['impact', 'adjustment'] as const)
       .locator('#authoring-add')
       .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]);
     let prompts = 0;
-    page.on('dialog', async (d) => {
+    await onConfirmation(page, async (d) => {
       prompts++;
       await d.dismiss();
     });
@@ -611,7 +612,8 @@ for (const destination of ['impact', 'adjustment'] as const)
         .evaluate((e, html) => e.insertAdjacentHTML('beforeend', html), entry);
       await page.locator('[data-impact-handoff]').click();
     }
-    expect(prompts).toBe(1);
+    await expect.poll(() => prompts).toBe(1);
+    await expect(page.locator('dialog.confirmation')).toHaveCount(0);
     await expect(page.locator('[data-place-query]')).toHaveValue(
       '  SYNTHETIC 東京駅 draft  ',
     );
@@ -672,7 +674,7 @@ for (const exit of ['button', 'escape', 'drag'] as const)
   test(`integrated Preview ${exit} closes without Adopt`, async ({ page }) => {
     await choose(page);
     await page
-      .locator('.preview-presentation .preview-details > summary')
+      .locator('.preview-presentation .preview-details:last-child > summary')
       .click();
     if (exit === 'button') await page.locator('[data-close]').click();
     else if (exit === 'escape') await page.keyboard.press('Escape');

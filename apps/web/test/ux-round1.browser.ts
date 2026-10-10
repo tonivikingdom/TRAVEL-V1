@@ -3,6 +3,37 @@ import { mkdir } from 'node:fs/promises';
 import { browserHarness, noOverflow } from './helpers/replanning-acceptance.js';
 import { regionalCapabilityFixture } from './regional-map-fixture.js';
 const assets = 'docs/status/assets/p7a-ux-round1/after';
+test('SYNTHETIC malformed civil dates and clock ranges stay field errors without writes', async ({
+  page,
+}) => {
+  const h = await browserHarness(page);
+  await h.enter();
+  await page.locator('[data-node]').first().click();
+  await page.locator('.edit > summary').click();
+  const form = page.locator('#time-edit');
+  const before = h.calls.filter((c) => c.method === 'POST');
+  for (const value of [
+    '2030-10-01T99:99',
+    '2030-02-31T10:00',
+    '2030-10-01T10:60',
+  ]) {
+    await form
+      .locator('[name=when]')
+      .evaluate((input: HTMLInputElement, raw) => {
+        input.value = raw;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }, value);
+    await form.evaluate((f: HTMLFormElement) => f.requestSubmit());
+    await expect(form.locator('[name=when]')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await expect(form.locator('.date-trigger')).toBeFocused();
+    await expect(form.locator('.field-error:not([hidden])')).toHaveCount(1);
+  }
+  expect(h.calls.filter((c) => c.method === 'POST')).toEqual(before);
+  expect(h.formalWrites()).toEqual([]);
+});
 test('SYNTHETIC missing saved place focuses the visible selection without writes', async ({
   page,
 }) => {

@@ -1,6 +1,16 @@
 import { esc } from './model.js';
 
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+function validCivilDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]),
+    month = Number(match[2]),
+    day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]!;
+}
 let sequence = 0;
 const fields = (form: HTMLFormElement) =>
   [...form.querySelectorAll<Field>('input,select,textarea')].filter(
@@ -71,11 +81,18 @@ export function fieldProblem(field: Field): string {
       return '请输入有效的邮箱地址';
     if (field.type === 'url' && field.validity.typeMismatch)
       return '请粘贴完整的登录链接';
-    if (
-      field.getAttribute('type') === 'datetime-local' &&
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u.test(value)
-    )
-      return '请选择日期并输入时间（HH:mm）';
+    if (field.getAttribute('type') === 'date' && !validCivilDate(value))
+      return '请选择有效的日期';
+    if (field.getAttribute('type') === 'datetime-local') {
+      const parts = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/u.exec(value);
+      if (
+        !parts ||
+        !validCivilDate(parts[1]!) ||
+        Number(parts[2]) > 23 ||
+        Number(parts[3]) > 59
+      )
+        return '请选择有效日期并输入时间（00:00–23:59）';
+    }
   }
   return field.validity.valid ? '' : `请检查${label}的格式或范围`;
 }

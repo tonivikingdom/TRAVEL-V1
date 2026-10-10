@@ -1,3 +1,4 @@
+import { onConfirmation } from './helpers/confirmation.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { dragHandle, noOverflow } from './helpers/replanning-acceptance.js';
@@ -59,6 +60,8 @@ for (const mode of ['DRIVING', 'TRANSIT'] as const) {
     await h.enter();
     await h.open();
     await page.getByRole('button', { name: '搜索路线', exact: true }).tap();
+    await expect(page.locator('.candidate')).toBeVisible();
+    await page.locator('[data-route-back=search]').tap();
     await expect(
       page.getByRole('button', { name: '搜索路线', exact: true }),
     ).toBeEnabled();
@@ -73,7 +76,7 @@ for (const mode of ['DRIVING', 'TRANSIT'] as const) {
       h.queries()[0]!.body!.travelMode,
       'The existing selected mode must reach the region router',
     ).toBe(mode);
-    await expect(page.locator('.candidate')).toBeVisible();
+    await expect(page.locator('#candidates .candidate')).toHaveCount(1);
     expect(h.writes()).toEqual([]);
   });
 }
@@ -270,7 +273,7 @@ for (const width of [320, 375, 390, 430]) {
     await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
     await expect(page.locator('#detail')).toBeVisible();
     let confirms = 0;
-    page.on('dialog', async (d) => {
+    await onConfirmation(page, async (d) => {
       confirms++;
       await d.dismiss();
     });
@@ -343,9 +346,10 @@ for (const source of ['MISSING', 'OTHER', 'FLIGHT'] as const) {
           new Event('submit', { bubbles: true, cancelable: true }),
         ),
       );
-    await expect(page.locator('#save-status')).toContainText(
-      '尚未发送路线请求',
-    );
+    await expect(
+      page.locator('#route-search .field-error:not([hidden])'),
+    ).toContainText('请选择查询方式');
+    expect(h.queries()).toEqual([]);
     await evidence(
       page,
       `unknown-mode-${source.toLowerCase()}`,
@@ -423,7 +427,10 @@ for (const fixed of [false, true]) {
     });
     const before = JSON.stringify(h.trip);
     await h.enter();
-    await h.open();
+    await page.locator('.connection').tap();
+    await expect(
+      page.locator('section[data-route-stage=current]'),
+    ).toBeVisible();
     const clocks = page.locator('.saved-legs .clock-end span');
     await expect(clocks).toHaveText(
       fixed ? ['出发 · 计划', '到达 · 计划'] : ['出发 · 预计', '到达 · 预计'],
@@ -440,6 +447,7 @@ for (const fixed of [false, true]) {
       fixed ? 'fixed-saved-detail' : 'aggregate-saved-detail',
       info.project.name,
     );
+    await page.locator('[data-route-search-open]').tap();
     await page.getByRole('button', { name: '搜索路线', exact: true }).tap();
     await expect(page.locator('.candidate')).toBeVisible();
     if (fixed)
@@ -453,7 +461,9 @@ for (const fixed of [false, true]) {
     await expect(page.locator('.preview-presentation')).toContainText(
       fixed ? '新方案计划到达' : '新方案预计到达',
     );
-    await page.locator('.preview-presentation .preview-details summary').tap();
+    await page
+      .locator('.preview-presentation .preview-details:last-child summary')
+      .tap();
     const segment = page.locator(
       '.preview-presentation .preview-details li small',
     );

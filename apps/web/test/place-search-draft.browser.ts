@@ -1,3 +1,9 @@
+import {
+  chooseSavedPlace,
+  openPlaceSearch,
+  chooseSearchLanguage,
+} from './helpers/replanning-acceptance.js';
+import { onConfirmation, onceConfirmation } from './helpers/confirmation.js';
 import { expect, test, type Page } from '@playwright/test';
 import { fixtureSchedule, tripId, visit } from './fixture.js';
 import {
@@ -14,7 +20,6 @@ test.beforeEach(async ({ page }) => {
 });
 async function addPlace(page: Page) {
   await page.locator('[data-action=add-arrangement]').click();
-  await page.getByRole('button', { name: '地点', exact: true }).click();
 }
 async function loaded(page: Page) {
   await expect(page.locator('select[name=place] option')).toHaveCount(3);
@@ -47,7 +52,7 @@ for (const timing of ['before-load', 'after-load'] as const) {
           await page
             .locator('[data-place-query]')
             .fill('  SYNTHETIC 東京駅 draft  ');
-        else await page.locator('[data-place-language]').selectOption('en');
+        else await chooseSearchLanguage(page, 'en');
         await expect(page.locator('#save-status')).toContainText(
           '还有未保存的修改',
         );
@@ -58,7 +63,7 @@ for (const timing of ['before-load', 'after-load'] as const) {
           '还有未保存的修改',
         );
         let prompts = 0;
-        page.on('dialog', async (dialog) => {
+        await onConfirmation(page, async (dialog) => {
           prompts++;
           await dialog.dismiss();
         });
@@ -97,19 +102,21 @@ test('language-only Escape refusal and Impact replacement retain the draft', asy
   await page.locator('[data-view=today]').click();
   await addPlace(page);
   await loaded(page);
-  await page.locator('[data-place-language]').selectOption('zh');
+  await chooseSearchLanguage(page, 'zh');
   let prompts = 0;
-  page.on('dialog', async (dialog) => {
+  await onConfirmation(page, async (dialog) => {
     prompts++;
     await dialog.dismiss();
   });
   await page.keyboard.press('Escape');
+  await expect.poll(() => prompts).toBe(1);
+  await expect(page.locator('dialog.confirmation')).toHaveCount(0);
   await page
     .locator('[data-action=view-impact]')
     .evaluate((e: HTMLElement) => e.click());
   await expect(page.locator('[data-place-language]')).toHaveValue('zh');
   await expect(page.locator('#detail')).toBeVisible();
-  expect(prompts).toBe(2);
+  await expect.poll(() => prompts).toBe(2);
   zeroWrites();
 });
 
@@ -122,9 +129,10 @@ test('accepted discard closes and starts a fresh search draft; pristine loading 
   await expect(page.locator('#save-status')).toContainText(
     '当前表单与已提交内容一致',
   );
+  await openPlaceSearch(page);
   await page.locator('[data-place-query]').fill('SYNTHETIC discard');
-  await page.locator('[data-place-language]').selectOption('en');
-  page.once('dialog', (dialog) => dialog.accept());
+  await chooseSearchLanguage(page, 'en');
+  await onceConfirmation(page, (dialog) => dialog.accept());
   await page.locator('[data-close]').click();
   await expect(page.locator('#detail')).not.toBeVisible();
   await addPlace(page);
@@ -148,11 +156,13 @@ for (const other of ['none', 'note', 'saved-place'] as const) {
       await page
         .locator('textarea[name=note]')
         .fill('SYNTHETIC unrelated note');
-    if (other === 'saved-place')
-      await page.locator('select[name=place]').selectOption({ index: 1 });
+    if (other === 'saved-place') await chooseSavedPlace(page, { index: 1 });
     const saved = await page.locator('select[name=place]').inputValue();
+    await openPlaceSearch(page);
+    await openPlaceSearch(page);
     await page.locator('[data-place-query]').fill('SYNTHETIC cancel');
-    await page.locator('[data-place-language]').selectOption('en');
+    await chooseSearchLanguage(page, 'en');
+    await openPlaceSearch(page);
     await page.locator('[data-place-cancel]').click();
     await expect(page.locator('[data-place-query]')).toHaveValue('');
     await expect(page.locator('[data-place-language]')).toHaveValue('ja');
@@ -161,7 +171,7 @@ for (const other of ['none', 'note', 'saved-place'] as const) {
       other === 'note' ? 'SYNTHETIC unrelated note' : '',
     );
     let prompts = 0;
-    page.on('dialog', async (dialog) => {
+    await onConfirmation(page, async (dialog) => {
       prompts++;
       await dialog.dismiss();
     });
@@ -180,6 +190,7 @@ test('cancel in-flight search prevents late candidates and preserves note protec
   await addPlace(page);
   await loaded(page);
   await page.locator('textarea[name=note]').fill('SYNTHETIC keep note');
+  await openPlaceSearch(page);
   await page.locator('[data-place-query]').fill('SYNTHETIC late');
   const hold = responseGate();
   h.state.placeSearchGate = hold;
@@ -196,7 +207,7 @@ test('cancel in-flight search prevents late candidates and preserves note protec
   await expect(page.locator('textarea[name=note]')).toHaveValue(
     'SYNTHETIC keep note',
   );
-  page.once('dialog', (dialog) => dialog.dismiss());
+  await onceConfirmation(page, (dialog) => dialog.dismiss());
   await dragHandle(page);
   await expect(page.locator('#detail')).toBeVisible();
   zeroWrites();
@@ -208,15 +219,17 @@ test('selected search candidate and note retain protection; cancel removes candi
   await h.enter();
   await addPlace(page);
   await loaded(page);
+  await openPlaceSearch(page);
   await page.locator('[data-place-query]').fill('SYNTHETIC candidate');
   await page.locator('[data-place-search]').click();
   await page.locator('[data-candidate]').click();
   await page.locator('textarea[name=note]').fill('SYNTHETIC selected note');
-  page.once('dialog', (dialog) => dialog.dismiss());
+  await onceConfirmation(page, (dialog) => dialog.dismiss());
   await dragHandle(page);
   await expect(page.locator('select[name=place]')).toHaveValue(
     'search:SYNTHETIC_P6C2_TOKEN',
   );
+  await openPlaceSearch(page);
   await page.locator('[data-place-cancel]').click();
   await expect(page.locator('select[name=place]')).toHaveValue('');
   await expect(page.locator('textarea[name=note]')).toHaveValue(
@@ -233,9 +246,10 @@ for (const editedWhilePending of [false, true]) {
     await h.enter();
     await addPlace(page);
     await loaded(page);
-    await page.locator('select[name=place]').selectOption({ index: 1 });
+    await chooseSavedPlace(page, { index: 1 });
+    await openPlaceSearch(page);
     await page.locator('[data-place-query]').fill('SYNTHETIC submitted search');
-    await page.locator('[data-place-language]').selectOption('en');
+    await chooseSearchLanguage(page, 'en');
     const day = h.trip.days[0]!;
     const fresh = {
       ...h.trip,
@@ -278,8 +292,9 @@ for (const editedWhilePending of [false, true]) {
     await page.locator('#authoring-add button.primary').click();
     await hold.entered;
     if (editedWhilePending) {
+      await openPlaceSearch(page);
       await page.locator('[data-place-query]').fill('SYNTHETIC newer search');
-      await page.locator('[data-place-language]').selectOption('zh');
+      await chooseSearchLanguage(page, 'zh');
     }
     hold.release();
     await expect(page.locator('#save-status')).toContainText('本次提交已保存');
@@ -305,7 +320,7 @@ for (const editedWhilePending of [false, true]) {
     );
     expect(writes).toHaveLength(1);
     let prompts = 0;
-    page.on('dialog', async (dialog) => {
+    await onConfirmation(page, async (dialog) => {
       prompts++;
       await dialog.dismiss();
     });

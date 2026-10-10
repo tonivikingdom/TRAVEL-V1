@@ -1,3 +1,4 @@
+import { onConfirmation } from './helpers/confirmation.js';
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { previewCases } from './preview-fixture.js';
@@ -13,7 +14,6 @@ test('SYNTHETIC search-only draft refuses route/Preview replacement and retains 
   const h = await browserHarness(page);
   await h.enter();
   await page.locator('[data-action=add-arrangement]').click();
-  await page.getByRole('button', { name: '地点', exact: true }).click();
   await expect(page.locator('select[name=place] option')).toHaveCount(3);
   await page
     .locator('[data-place-query]')
@@ -22,7 +22,7 @@ test('SYNTHETIC search-only draft refuses route/Preview replacement and retains 
     .locator('#authoring-add')
     .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]);
   let prompts = 0;
-  page.on('dialog', async (dialog) => {
+  await onConfirmation(page, async (dialog) => {
     prompts++;
     await dialog.dismiss();
   });
@@ -57,7 +57,6 @@ test('SYNTHETIC Preview open/expand/close leaves pristine authoring values and w
   await h.enter();
   const add = async () => {
     await page.locator('[data-action=add-arrangement]').click();
-    await page.getByRole('button', { name: '地点', exact: true }).click();
     await expect(page.locator('select[name=place] option')).toHaveCount(3);
   };
   await add();
@@ -67,7 +66,7 @@ test('SYNTHETIC Preview open/expand/close leaves pristine authoring values and w
       .evaluate((form: HTMLFormElement) => [...new FormData(form).entries()]);
   const before = await snapshot();
   let prompts = 0;
-  page.on('dialog', async (dialog) => {
+  await onConfirmation(page, async (dialog) => {
     prompts++;
     await dialog.dismiss();
   });
@@ -75,7 +74,7 @@ test('SYNTHETIC Preview open/expand/close leaves pristine authoring values and w
   await h.prepare();
   await expect(page.locator('.preview-presentation')).toBeVisible();
   await page
-    .locator('.preview-presentation .preview-details > summary')
+    .locator('.preview-presentation .preview-details:last-child > summary')
     .click();
   await page.locator('[data-close]').click();
   await expect(page.locator('#detail')).not.toBeVisible();
@@ -106,7 +105,7 @@ for (const kind of previewCases) {
     await expect(
       page.getByRole('region', { name: '路线调整预览' }),
     ).toBeVisible();
-    await expect(page.locator('.preview-details')).not.toHaveAttribute(
+    await expect(page.locator('.preview-details').last()).not.toHaveAttribute(
       'open',
       '',
     );
@@ -128,8 +127,11 @@ for (const kind of previewCases) {
       });
     }
     await page.getByText('查看交通与换乘详情', { exact: true }).click();
-    await expect(page.locator('.preview-details')).toHaveAttribute('open', '');
-    await expect(page.locator('.preview-details')).not.toContainText(
+    await expect(page.locator('.preview-details').last()).toHaveAttribute(
+      'open',
+      '',
+    );
+    await expect(page.locator('.preview-details').last()).not.toContainText(
       'old-edge',
     );
     const header = await page
@@ -159,9 +161,9 @@ for (const width of [320, 375, 390, 430]) {
       if (enlarged)
         await page.addStyleTag({ content: ':root { font-size: 24px; }' });
       await expect(page.locator('.preview-scope')).toBeVisible();
-      await page.locator('.preview-details > summary').click();
+      await page.locator('.preview-details:last-child > summary').click();
       const box = await page
-        .locator('.preview-details > summary')
+        .locator('.preview-details:last-child > summary')
         .boundingBox();
       expect(box!.height).toBeGreaterThanOrEqual(44);
       expect(
@@ -297,7 +299,7 @@ for (const blocked of [false, true]) {
     );
     const adopt = page.getByRole('button', { name: '使用这条路线' });
     await page
-      .locator('.preview-presentation .preview-details > summary')
+      .locator('.preview-presentation .preview-details:last-child > summary')
       .click();
     expect(adopts).toBe(0);
     if (blocked) {

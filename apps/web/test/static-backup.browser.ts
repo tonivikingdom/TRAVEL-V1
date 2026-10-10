@@ -225,7 +225,10 @@ test('live stays default; essentials is secondary and read-only; explicit backup
   expect(backup!.routes[0]!.legs).toHaveLength(4);
   await capture(page, 'mobile-backup-current');
   const before = calls.length;
-  await page.locator('summary').first().click();
+  await page
+    .getByText('查看已采用路线与上下车资料', { exact: true })
+    .first()
+    .click();
   await expect(page.locator('.essential-leg').first()).toContainText(
     '上车 / 起点',
   );
@@ -251,7 +254,7 @@ test('old artifact stays immutable after live version changes, then default retu
   );
   await page.locator('[data-action=view-backup]').click();
   await expect(page.locator('.backup-warning')).toContainText(
-    '在线行程已修改为版本 2',
+    '在线行程已有修改',
   );
   expect(JSON.stringify(backup)).toBe(old);
   await capture(page, 'mobile-backup-stale');
@@ -329,7 +332,7 @@ test('generation VERSION_CONFLICT preserves old backup and requires reload', asy
   await page.locator('[data-action=generate-backup]').click();
   await expect(page.locator('[role=status]')).toContainText('行程或方案已变化');
   await page.locator('[data-action=view-backup]').click();
-  await expect(page.locator('.backup-stamp')).toContainText('Trip version 1');
+  await expect(page.locator('.technical-details')).toContainText('资料版本 1');
 });
 test('owner switch and logout clear local owner artifacts', async ({
   page,
@@ -338,6 +341,9 @@ test('owner switch and logout clear local owner artifacts', async ({
   await page.locator('[data-action=close-materials]').click();
   otherOwner = true;
   await page.reload();
+  // Account authority is asynchronous; assert cleanup after the new owner's
+  // authenticated list is visible, rather than during the loading frame.
+  await expect(page.locator('[data-trip]').first()).toBeVisible();
   expect(
     await page.evaluate(() =>
       Object.keys(localStorage).filter((k) =>
@@ -394,7 +400,10 @@ test('downloaded standalone HTML is escaped, readable and makes zero network req
   standalone.on('request', (req) => network.push(req.url()));
   await standalone.setContent(html);
   await expect(standalone.locator('h1')).toHaveText('正在查看备份');
-  await standalone.locator('summary').first().click();
+  await standalone
+    .getByText('查看已采用路线与上下车资料', { exact: true })
+    .first()
+    .click();
   await expect(standalone.locator('.essential-leg').first()).toBeVisible();
   expect(network).toEqual([]);
   await standalone.close();
@@ -537,7 +546,10 @@ test('unknown address, route position and plan times are not invented; damaged l
   expect(backup!.days[0]!.nodes[0]!.place!.address).toBeNull();
   expect(backup!.routes[0]!.legs[0]!.from.latitude).toBeNull();
   await expect(page.locator('.essentials')).toContainText('地址未提供');
-  await page.locator('summary').first().click();
+  await page
+    .getByText('查看已采用路线与上下车资料', { exact: true })
+    .first()
+    .click();
   await expect(page.locator('.essential-leg').first()).toContainText(
     '起点坐标 未知',
   );
@@ -573,7 +585,10 @@ test('Today clock ticks never rerender the static reader or collapse saved legs'
   await page.locator('[data-action=essentials]').click();
   await page.locator('[data-action=generate-backup]').click();
   await expect(page.locator('.backup-label')).toBeVisible();
-  await page.locator('summary').first().click();
+  await page
+    .getByText('查看已采用路线与上下车资料', { exact: true })
+    .first()
+    .click();
   await expect(page.locator('.essential-leg').first()).toBeVisible();
   const before = [...calls];
   await page.clock.fastForward(90000);
@@ -693,7 +708,7 @@ test('direct materials recovers same Trip at updated version only after fresh li
     'SYNTHETIC 恢复后的版本 2',
   );
   await page.locator('[data-action=generate-backup]').click();
-  await expect(page.locator('.backup-stamp')).toContainText('Trip version 2');
+  await expect(page.locator('.technical-details')).toContainText('资料版本 2');
   expect(sentBodies).toHaveLength(1);
   expect(sentBodies[0]!.baseTripVersion).toBe(2);
 });
@@ -839,7 +854,7 @@ test('backup to live version change requires reload without mixing N and N+1', a
   await expect(page.locator('.essentials')).toHaveCount(0);
   expect(calls.slice(before)).toEqual([`GET /trips/${tripId}`]);
   await page.locator('[data-local-backup]').click();
-  await expect(page.locator('.backup-stamp')).toContainText('Trip version 1');
+  await expect(page.locator('.technical-details')).toContainText('资料版本 1');
   await page.locator('[data-action=close-materials]').click();
   await page.locator('[data-action=reload]').click();
   await page.locator('[data-trip]').click();

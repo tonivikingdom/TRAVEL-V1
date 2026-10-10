@@ -1,3 +1,4 @@
+import { onConfirmation } from './helpers/confirmation.js';
 import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { test, expect, type Page } from '@playwright/test';
 import {
@@ -281,23 +282,27 @@ test('dirty note survives map pan, handle drag, close and detail replacement', a
   await ready(page);
   await page.locator('#note-edit textarea').fill('SYNTHETIC unsaved note');
   let prompts = 0;
-  page.on('dialog', async (dialog) => {
+  await onConfirmation(page, async (dialog) => {
     prompts++;
     await dialog.dismiss();
   });
   await drag(page, '.mini-map-viewport');
   expect(prompts).toBe(0);
   await drag(page, '[data-drag]');
+  await expect.poll(() => prompts).toBe(1);
+  await expect(page.locator('dialog.confirmation')).toHaveCount(0);
   await expect(page.locator('#note-edit textarea')).toHaveValue(
     'SYNTHETIC unsaved note',
   );
   await page.getByRole('button', { name: '关闭详情' }).click();
+  await expect.poll(() => prompts).toBe(2);
+  await expect(page.locator('dialog.confirmation')).toHaveCount(0);
   await page.evaluate(
     (id) =>
       document.querySelector<HTMLButtonElement>(`[data-node="${id}"]`)!.click(),
     toId,
   );
-  expect(prompts).toBe(3);
+  await expect.poll(() => prompts).toBe(3);
   await expect(page.locator('#note-edit textarea')).toHaveValue(
     'SYNTHETIC unsaved note',
   );

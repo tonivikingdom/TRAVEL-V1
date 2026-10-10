@@ -1,3 +1,4 @@
+import { onceConfirmation } from './helpers/confirmation.js';
 import { test, expect } from '@playwright/test';
 import type { TripImpactView } from '@travel/contracts';
 import { fixtureSchedule } from './fixture.js';
@@ -367,7 +368,7 @@ test.describe('Impact inherits mobile drawer protection', () => {
       await page.locator('#detail').evaluate((e) => (e.scrollTop = 0));
       const dirtyHandle = (await page.locator('.handle').boundingBox())!;
       let prompts = 0;
-      page.once('dialog', async (d) => {
+      await onceConfirmation(page, async (d) => {
         prompts++;
         await d.dismiss();
       });

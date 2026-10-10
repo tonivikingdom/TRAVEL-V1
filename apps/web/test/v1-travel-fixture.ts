@@ -1,3 +1,4 @@
+import { openRouteSearch } from './helpers/replanning-acceptance.js';
 import { expect, type Page } from '@playwright/test';
 import type {
   RouteCandidateLegView,
@@ -414,6 +415,7 @@ export async function travelHarness(
   }
   async function open() {
     await page.locator('.connection').tap();
+    await openRouteSearch(page);
     await expect(page.locator('#route-search')).toBeVisible();
   }
   const queries = () => calls.filter((c) => c.path.endsWith('/routes/query'));

@@ -194,6 +194,7 @@ export async function browserHarness(page: Page) {
   }
   async function open() {
     await page.locator('.connection').click();
+    await openRouteSearch(page);
     await expect(page.locator('#route-search')).toBeVisible();
     await chooseFixtureQueryMode(page);
   }
@@ -265,7 +266,57 @@ export async function evidence(page: Page, name: string, project: string) {
 /** Explicit SYNTHETIC user choice for existing tests with a missing connection.
  * Their walking candidate is fixture evidence, never a production default. */
 export async function chooseFixtureQueryMode(page: Page) {
+  await openRouteSearch(page);
   const select = page.locator('#route-search select[name=travelMode]');
   if ((await select.count()) && (await select.inputValue()) === '')
     await select.selectOption('WALKING');
+}
+
+export async function openRouteSearch(page: Page) {
+  for (const selector of [
+    '[data-route-search-open]',
+    '[data-route-back=candidates]',
+    '[data-route-back=search]',
+  ]) {
+    const button = page.locator(selector);
+    if (await button.isVisible()) await button.click();
+  }
+}
+
+export async function chooseSavedPlace(
+  page: Page,
+  value: string | { index: number },
+) {
+  if (typeof value === 'string' && value.startsWith('search:')) {
+    await page.locator('[data-source=search]').click();
+    await page.locator('[data-place-search]').click();
+    await page.locator(`[data-candidate="${value.split('-').at(-1)}"]`).click();
+    return;
+  }
+  const source = page.locator('[data-source=saved]');
+  if (
+    (await source.isVisible()) &&
+    (await source.getAttribute('aria-pressed')) !== 'true'
+  )
+    await source.click();
+  await page.locator('select[name=place]').selectOption(value);
+}
+
+export async function chooseSearchLanguage(page: Page, value: string) {
+  await openPlaceSearch(page);
+  const select = page.locator('[data-place-language]');
+  if (!(await select.isVisible()))
+    await select.locator('xpath=ancestor::details').locator('summary').click();
+  await select.selectOption(value);
+}
+
+export async function openPlaceSearch(page: Page) {
+  const source = page.locator('[data-source=search]');
+  if (
+    (await source.isVisible()) &&
+    (await source.getAttribute('aria-pressed')) !== 'true'
+  )
+    await source.click();
+  const change = page.locator('[data-place-change]');
+  if (await change.isVisible()) await change.click();
 }

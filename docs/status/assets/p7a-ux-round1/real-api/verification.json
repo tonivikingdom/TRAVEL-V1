@@ -1,0 +1,250 @@
+{
+  "synthetic": true,
+  "baseline": "4f6b31a262acdf9ac634f0ad58eab437ca79d4cb",
+  "checks": {
+    "formalWeb": {
+      "url": "http://127.0.0.1:5175/",
+      "status": 200
+    },
+    "magicLinkLoginAndWorkerDelivery": {
+      "email": "synthetic-p7a@synthetic.example.test",
+      "landingOrigin": "http://127.0.0.1:5175"
+    },
+    "createTrip": {
+      "tripId": "591fc930-a50f-4b82-aa00-24aba80b385e",
+      "emptyTripOwnsNoDates": true
+    },
+    "addPlaces": {
+      "persistedNodes": 2,
+      "source": "SyntheticPlaceSearchProvider"
+    },
+    "editPlaceTime": {
+      "localTime": "2030-10-13 10:00 Asia/Tokyo",
+      "persistedInstant": "2030-10-13T01:00:00.000Z"
+    },
+    "queryReadOnly": {
+      "version": 4,
+      "provider": "SYNTHETIC"
+    },
+    "previewReadOnly": {
+      "version": 4
+    },
+    "adopt": {
+      "versionIncrement": 1,
+      "persistedTransportEdges": 1
+    },
+    "undo": {
+      "versionIncrement": 1,
+      "persistedTransportEdges": 0,
+      "undoneRoute": 1
+    },
+    "mobileViewport": {
+      "width": 390,
+      "horizontalOverflow": false,
+      "realPhoneTested": false
+    },
+    "browserAndApiErrors": {
+      "pageErrors": 0,
+      "failedApiRequests": 0
+    }
+  },
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/auth/magic-link/request",
+      "status": 202
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/magic-link/consume",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/place-search",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/place-selection",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/place-search",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/place-selection",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/commands",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/places/22df09f9-cae9-4319-b57f-82f84c6c0076/provider-capability",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/places/32ea545f-1e6c-4583-a65e-8e45f62e2d96/provider-capability",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/routes/query",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/previews",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/previews/aaf409a1-67b2-42ad-96ff-2219cd6e2d90/adopt",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/places/22df09f9-cae9-4319-b57f-82f84c6c0076/provider-capability",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/places/32ea545f-1e6c-4583-a65e-8e45f62e2d96/provider-capability",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/operations/fb6fdfd5-1721-4a95-9569-4d0a2a8a00bd/undo",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/schedule/evaluate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/places/22df09f9-cae9-4319-b57f-82f84c6c0076/provider-capability",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/trips/591fc930-a50f-4b82-aa00-24aba80b385e/places/32ea545f-1e6c-4583-a65e-8e45f62e2d96/provider-capability",
+      "status": 200
+    }
+  ],
+  "browserErrors": [],
+  "status": "PASS"
+}

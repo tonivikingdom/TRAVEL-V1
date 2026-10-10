@@ -254,10 +254,10 @@ export function previewMarkup(v: PreviewPresentation): string {
   return `<section class="preview-presentation" aria-label="路线调整预览">
     <header><span class="preview-eyebrow">调整范围</span><h3>这条路线</h3><strong class="preview-scope">${esc(v.scope)}</strong><p>${esc(v.endpoints)}</p></header>
     ${v.blockers.length ? `<section class="preview-important" aria-label="不能采用的原因"><h4>当前不能采用</h4>${list(v.blockers)}</section>` : ''}
-    <section><h4>保持不变</h4>${list(v.preserved)}</section>
+    <details class="preview-details"><summary>保持不变</summary>${list(v.preserved)}</details>
     <section><h4>关键变化</h4>${list(v.changes)}</section>
     ${v.important.length ? `<section class="preview-important"><h4>重要影响</h4>${list(v.important)}</section>` : ''}
-    <section><h4>计划时间</h4>${list(v.times)}<p class="muted">这是待采用的计划；尚未改变你的行程。与原计划的完整时间差未提供。</p></section>
+    <section class="preview-times"><h4>新方案时间</h4>${list(v.times)}<details><summary>关于时间影响</summary><p class="muted">尚未改变你的行程。与原计划的完整时间差未提供。</p></details></section>
     ${v.adjustments.length ? `<label class="check preview-consent"><input id="accept-adjustments" type="checkbox"><span>我同意将以下最短停留改为：${v.adjustments.map(esc).join('；')}</span></label>` : ''}
     <details class="preview-details"><summary>查看交通与换乘详情</summary>${v.replacements.length ? `<h4>将替换的交通</h4>${list(v.replacements)}` : ''}<h4>新方案分段</h4><ol>${v.segments.map((s) => `<li><strong>${esc(s.service)}</strong><p>${esc(s.endpoints)}</p><small>${esc(s.time)}</small></li>`).join('')}</ol>${!v.segments.length ? '<p>分段信息未提供。</p>' : ''}</details>
   </section>`;

@@ -1,3 +1,8 @@
+import {
+  onConfirmation,
+  onceConfirmation,
+  clearConfirmation,
+} from './helpers/confirmation.js';
 import { chooseFixtureQueryMode } from './helpers/replanning-acceptance.js';
 import { regionalCapabilityFixture } from './regional-map-fixture.js';
 import { expect, test, type Page } from '@playwright/test';
@@ -261,8 +266,8 @@ test('place detail saves notes via API and rereads after reload', async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await enter(page);
   await page.locator('[data-node]').first().click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByRole('dialog').locator('.times')).toContainText(
+  await expect(page.locator('#detail')).toBeVisible();
+  await expect(page.locator('#detail').locator('.times')).toContainText(
     '13:00',
   );
   await screenshot(page, 'mobile-place');
@@ -292,14 +297,14 @@ test('dirty failure survives X and Escape; closing returns focus to recovery whe
   failSave = true;
   await page.getByRole('button', { name: '保存备注' }).click();
   await expect(page.locator('#save-status')).toContainText('已变化');
-  page.on('dialog', (dialog) => dialog.dismiss());
+  await onConfirmation(page, (dialog) => dialog.dismiss());
   await page.getByRole('button', { name: '关闭详情' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('textarea')).toHaveValue('unsaved');
   await page.locator('textarea').fill('');
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.locator('#detail')).not.toBeVisible();
   await expect(page.locator('.timeline')).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: '重新载入', exact: true }),
@@ -317,14 +322,14 @@ test('drag threshold and short bounce; input interaction does not drag', async (
   await page.mouse.down();
   await page.mouse.move(box.x + 15, box.y + 40, { steps: 5 });
   await page.mouse.up();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   await page.locator('textarea').fill('');
   const next = (await handle.boundingBox())!;
   await page.mouse.move(next.x + 15, next.y + 2);
   await page.mouse.down();
   await page.mouse.move(next.x + 15, next.y + 140, { steps: 10 });
   await page.mouse.up();
-  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.locator('#detail')).not.toBeVisible();
 });
 test('native modal contains focus and background interaction, scrollable body', async ({
   page,
@@ -343,7 +348,7 @@ test('native modal contains focus and background interaction, scrollable body', 
     'hidden',
   );
   await page.locator('textarea').fill('input remains functional');
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
 });
 test('route condition is hotel departure, pipeline stays internal until explicit use', async ({
   page,
@@ -485,7 +490,7 @@ test('offline hides stale formal itinerary; recovery requires server reload', as
   await page.locator('[data-node]').first().click();
   await page.locator('textarea').fill('SYNTHETIC preserved offline draft');
   await page.evaluate(() => dispatchEvent(new Event('offline')));
-  await expect(page.getByRole('dialog').locator('.times')).toBeHidden();
+  await expect(page.locator('#detail').locator('.times')).toBeHidden();
   await expect(page.getByRole('link', { name: '查看地图' })).toBeHidden();
   await expect(page.locator('textarea')).toHaveValue(
     'SYNTHETIC preserved offline draft',
@@ -501,7 +506,7 @@ test('offline hides stale formal itinerary; recovery requires server reload', as
   await expect(page.locator('textarea')).toHaveValue(
     'SYNTHETIC preserved offline draft',
   );
-  await expect(page.getByRole('dialog').locator('.times')).toBeVisible();
+  await expect(page.locator('#detail').locator('.times')).toBeVisible();
   await page.getByRole('button', { name: '已核对，保留草稿继续编辑' }).click();
   await page.getByRole('button', { name: '保存备注' }).click();
   await expect(page.locator('#save-status')).toContainText('已保存');
@@ -565,9 +570,9 @@ test('saving one form does not clear another form dirty protection', async ({
   await page.locator('textarea').fill('saved note');
   await page.getByRole('button', { name: '保存备注' }).click();
   await expect(page.locator('#save-status')).toContainText('已保存');
-  page.on('dialog', (d) => d.dismiss());
+  await onConfirmation(page, (d) => d.dismiss());
   await page.getByRole('button', { name: '关闭详情' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   await expect(page.locator('#time-edit input[name=when]')).toHaveValue(
     '2030-10-01T18:00',
   );
@@ -710,13 +715,13 @@ for (const [formId, field, first, later, button] of [
     await expect(input).toHaveValue(later);
     await expect(page.locator('#save-status')).toContainText('未保存');
     let prompted = false;
-    page.once('dialog', async (dialog) => {
+    await onceConfirmation(page, async (dialog) => {
       prompted = true;
       await dialog.dismiss();
     });
     await page.getByRole('button', { name: '关闭详情' }).click();
     expect(prompted).toBe(true);
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.locator('#detail')).toBeVisible();
   });
 }
 test('draft recovers a version conflict inside the open detail', async ({
@@ -728,7 +733,7 @@ test('draft recovers a version conflict inside the open detail', async ({
   failSave = true;
   await page.getByRole('button', { name: '保存备注' }).click();
   await expect(page.locator('#save-status')).toContainText('已变化');
-  page.on('dialog', (dialog) => dialog.dismiss());
+  await onConfirmation(page, (dialog) => dialog.dismiss());
   await page.getByRole('button', { name: '关闭详情' }).click();
   await expect(page.locator('#draft-recovery')).toBeVisible();
   await expect(page.locator('textarea')).toHaveValue('retained draft');
@@ -958,7 +963,7 @@ for (const kind of ['time', 'dwell'] as const) {
       await page.locator('.edit > summary').click();
       if (pending === 'time') {
         await page.locator('textarea').fill('explicitly discarded old draft');
-        page.on('dialog', (dialog) => dialog.accept());
+        await onConfirmation(page, (dialog) => dialog.accept());
       }
       holdSave = true;
       await page
@@ -991,10 +996,10 @@ for (const kind of ['time', 'dwell'] as const) {
       ).toHaveCount(0);
       await expect(field).toHaveValue(value);
       await expect(page.locator('#save-status')).toContainText('未保存');
-      page.removeAllListeners('dialog');
-      page.on('dialog', (dialog) => dialog.dismiss());
+      clearConfirmation(page);
+      await onConfirmation(page, (dialog) => dialog.dismiss());
       await page.getByRole('button', { name: '关闭详情' }).click();
-      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.locator('#detail')).toBeVisible();
       await expect(field).toHaveValue(value);
       expect(commands.at(-1)?.command).toMatchObject({
         type: kind === 'time' ? 'REMOVE_TIME_INTENT' : 'REMOVE_MIN_DWELL',
@@ -1011,9 +1016,9 @@ test('R2 abandoning recovery draft ends its context before unrelated route searc
   failSave = true;
   await page.getByRole('button', { name: '保存备注' }).click();
   await expect(page.locator('#draft-recovery')).toBeVisible();
-  page.on('dialog', (dialog) => dialog.accept());
+  await onConfirmation(page, (dialog) => dialog.accept());
   await page.getByRole('button', { name: '关闭详情' }).click();
-  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.locator('#detail')).not.toBeVisible();
   failSave = false;
   await page.getByRole('button', { name: '重新载入' }).click();
   await page.getByRole('button', { name: '东京慢旅行' }).click();
@@ -1103,12 +1108,12 @@ for (const kind of ['time', 'dwell'] as const) {
     ).toHaveValue('');
     await expect(page.locator('#save-status')).not.toContainText('未保存');
     let confirmation = false;
-    page.on('dialog', (dialog) => {
+    await onConfirmation(page, (dialog) => {
       confirmation = true;
       void dialog.dismiss();
     });
     await page.getByRole('button', { name: '关闭详情' }).click();
-    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await expect(page.locator('#detail')).not.toBeVisible();
     expect(confirmation).toBe(false);
   });
   for (const outcome of ['command-failure', 'read-failure'] as const) {
@@ -1439,6 +1444,7 @@ for (const width of [320, 375, 390, 430, 1440]) {
     ).toBe(true);
     if (width === 390) await screenshot(page, 'ui-mobile-transport-first');
     if (width === 1440) await screenshot(page, 'ui-desktop-transport');
+    await page.locator('[data-route-search-open]').click();
     const search = page.getByRole('button', { name: '搜索路线' });
     await search.scrollIntoViewIfNeeded();
     await expect(search).toBeInViewport();
@@ -1496,6 +1502,7 @@ for (const width of [320, 375, 390, 430]) {
             : 'ui-mobile-cross-zone-long',
         );
     }
+    await page.locator('[data-route-search-open]').click();
     await page
       .getByRole('button', { name: '搜索路线' })
       .scrollIntoViewIfNeeded();
@@ -1511,9 +1518,7 @@ test('transport refinement captures place default and expanded editor without ch
   await enter(page);
   await screenshot(page, 'ui-mobile-day');
   await page.locator('[data-node]').first().click();
-  await expect(page.getByRole('dialog').locator('.times')).toContainText(
-    '停留',
-  );
+  await expect(page.locator('#detail').locator('.times')).toContainText('停留');
   await screenshot(page, 'ui-mobile-place');
   await page.locator('.edit > summary').click();
   await screenshot(page, 'ui-mobile-place-edit');
@@ -1691,7 +1696,7 @@ test('losing handle pointer capture cancels the drag without dismissing or retai
     .dispatchEvent('lostpointercapture', { pointerId: 1 });
   await expect(page.locator('#detail')).toHaveCSS('transform', 'none');
   await page.mouse.up();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
 });
 
 test('sheet title and close control allow native touch scrolling outside handle', async ({
@@ -1719,15 +1724,15 @@ test('handle drag obeys discard confirmation and content scroll never dismisses 
     .locator('textarea')
     .evaluate((element) => element.scrollIntoView());
   await page.mouse.wheel(0, 180);
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   await page.locator('#detail').evaluate((element) => (element.scrollTop = 0));
   const box = (await page.locator('.handle').boundingBox())!;
-  page.once('dialog', (dialog) => dialog.dismiss());
+  await onceConfirmation(page, (dialog) => dialog.dismiss());
   await page.mouse.move(box.x + 15, box.y + 2);
   await page.mouse.down();
   await page.mouse.move(box.x + 15, box.y + 140, { steps: 8 });
   await page.mouse.up();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#detail')).toBeVisible();
   await expect(page.locator('textarea')).toHaveValue(
     'SYNTHETIC protected drag draft',
   );

@@ -1,0 +1,32 @@
+name: MagicPath desktop preview
+
+on:
+  pull_request:
+    paths:
+      - 'ui-previews/magicpath-desktop/**'
+      - 'design-snapshots/magicpath/**'
+      - '.github/workflows/magicpath-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-preview:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui-previews/magicpath-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:snapshot
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build

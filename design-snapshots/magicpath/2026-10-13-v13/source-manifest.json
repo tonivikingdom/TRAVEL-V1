@@ -1,0 +1,166 @@
+{
+  "componentId": "460296927121121280",
+  "files": [
+    {
+      "normalizedTextSha256": "fe718e7babb14f3cbad2d97f08889b9ce5215ed3fe0e43b2b8cfbfb3b9b844e8",
+      "bytes": 253,
+      "sha256": "fe718e7babb14f3cbad2d97f08889b9ce5215ed3fe0e43b2b8cfbfb3b9b844e8",
+      "path": ".gitignore"
+    },
+    {
+      "normalizedTextSha256": "36e695d90f11bf40fb1af82f2236ee2361d2ac32c494037dd929ad74130e8687",
+      "bytes": 251,
+      "sha256": "36e695d90f11bf40fb1af82f2236ee2361d2ac32c494037dd929ad74130e8687",
+      "path": ".prettierignore"
+    },
+    {
+      "normalizedTextSha256": "6d1adb0d1b27f55cb855c000e966bf296f6701f7f098749fc810e13653b6aa27",
+      "bytes": 179,
+      "sha256": "6d1adb0d1b27f55cb855c000e966bf296f6701f7f098749fc810e13653b6aa27",
+      "path": ".prettierrc"
+    },
+    {
+      "normalizedTextSha256": "6e94b7742765792c58b51aed1d98e78988ef468a8906f7bb723417f98f2b29e3",
+      "bytes": 426,
+      "sha256": "6e94b7742765792c58b51aed1d98e78988ef468a8906f7bb723417f98f2b29e3",
+      "path": "components.json"
+    },
+    {
+      "normalizedTextSha256": "baef93693977f205212b595bd036e0f546033d6cb4d555e1ce1c4e713e52237f",
+      "bytes": 764,
+      "sha256": "baef93693977f205212b595bd036e0f546033d6cb4d555e1ce1c4e713e52237f",
+      "path": "eslint.config.js"
+    },
+    {
+      "normalizedTextSha256": "0cd0ea9d2db58490c09d7a80d2fa84098dc36e3dd73b5221dbb6809941a12c4e",
+      "bytes": 303,
+      "sha256": "0cd0ea9d2db58490c09d7a80d2fa84098dc36e3dd73b5221dbb6809941a12c4e",
+      "path": "index.html"
+    },
+    {
+      "normalizedTextSha256": "f9dad8a7cd9a95e8393ce42c7d5f379c2dea4855b0616fe2dde7eb0c9a1c287e",
+      "bytes": 1818,
+      "sha256": "f9dad8a7cd9a95e8393ce42c7d5f379c2dea4855b0616fe2dde7eb0c9a1c287e",
+      "path": "package.json"
+    },
+    {
+      "normalizedTextSha256": "8392602cb61e0a4534a6085042c8dfebb6cea68a7a298f68b6a6f7d594d75e6c",
+      "bytes": 762,
+      "sha256": "8392602cb61e0a4534a6085042c8dfebb6cea68a7a298f68b6a6f7d594d75e6c",
+      "path": "tsconfig.app.json"
+    },
+    {
+      "normalizedTextSha256": "3727519fb7bc2436eea9fa91a34e05e77e89036122e1e84b9b72bb0040055c81",
+      "bytes": 201,
+      "sha256": "3727519fb7bc2436eea9fa91a34e05e77e89036122e1e84b9b72bb0040055c81",
+      "path": "tsconfig.json"
+    },
+    {
+      "normalizedTextSha256": "e279e9d15c19afff9c944f8648ec7fa462145929b39b3e017ae755c78dd8b784",
+      "bytes": 595,
+      "sha256": "e279e9d15c19afff9c944f8648ec7fa462145929b39b3e017ae755c78dd8b784",
+      "path": "tsconfig.node.json"
+    },
+    {
+      "normalizedTextSha256": "b72e0c09b5d5fb5a8ffca625f7431b8902f93830f77cbbca308045564fb4759d",
+      "bytes": 332,
+      "sha256": "b72e0c09b5d5fb5a8ffca625f7431b8902f93830f77cbbca308045564fb4759d",
+      "path": "vite.config.ts"
+    },
+    {
+      "normalizedTextSha256": "a6869dc3593fa2183730ba25c901914b642a0d0b1d37125082d39d77d7f9d3d7",
+      "bytes": 173062,
+      "sha256": "a6869dc3593fa2183730ba25c901914b642a0d0b1d37125082d39d77d7f9d3d7",
+      "path": "yarn.lock"
+    },
+    {
+      "normalizedTextSha256": "fb8977e6c239ab9de0322a03b1e042052c3bfb080a3099424962a3360adc8909",
+      "bytes": 493,
+      "sha256": "fb8977e6c239ab9de0322a03b1e042052c3bfb080a3099424962a3360adc8909",
+      "path": "src/App.tsx"
+    },
+    {
+      "normalizedTextSha256": "a905f70fe46e882b84b2e74f1d35e8bb935fd7266fcf0f61a5a31f63fbe8c9be",
+      "bytes": 5176,
+      "sha256": "a905f70fe46e882b84b2e74f1d35e8bb935fd7266fcf0f61a5a31f63fbe8c9be",
+      "path": "src/index.css"
+    },
+    {
+      "normalizedTextSha256": "79e98853dcc9b0dc602ca86f753920c9965cf8f25402276ae9900f0e0a9aca40",
+      "bytes": 2420,
+      "sha256": "79e98853dcc9b0dc602ca86f753920c9965cf8f25402276ae9900f0e0a9aca40",
+      "path": "src/main.tsx"
+    },
+    {
+      "normalizedTextSha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "bytes": 38,
+      "sha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "path": "src/vite-env.d.ts"
+    },
+    {
+      "normalizedTextSha256": "5e00a7834d2b355c297e7b6f2d538488a6cac5d4e610ed53f06dfae02fd3b24e",
+      "bytes": 11967,
+      "sha256": "5e00a7834d2b355c297e7b6f2d538488a6cac5d4e610ed53f06dfae02fd3b24e",
+      "path": "src/components/generated/GeneratedComponent.css"
+    },
+    {
+      "normalizedTextSha256": "239f27ab95dcd1c1aacd9333df9a632946e294935bc1b8028f6f77a81ac97ba5",
+      "bytes": 12899,
+      "sha256": "239f27ab95dcd1c1aacd9333df9a632946e294935bc1b8028f6f77a81ac97ba5",
+      "path": "src/components/generated/GeneratedComponent.tsx"
+    },
+    {
+      "normalizedTextSha256": "58b2cc5fa259358e9192125abf072c832144193d87f3d66a90b13089a0196cef",
+      "bytes": 576,
+      "sha256": "58b2cc5fa259358e9192125abf072c832144193d87f3d66a90b13089a0196cef",
+      "path": "src/hooks/use-mobile.ts"
+    },
+    {
+      "normalizedTextSha256": "9a24ca1bafd0182c8e5babc6104cc381045b27d561857e020a7af50bba9c25f7",
+      "bytes": 860,
+      "sha256": "9a24ca1bafd0182c8e5babc6104cc381045b27d561857e020a7af50bba9c25f7",
+      "path": "src/lib/utils.ts"
+    },
+    {
+      "normalizedTextSha256": "5f794b59d7ee5fd8262d54bfbc60ae19e682062ea07a1788b5726785df181b1d",
+      "bytes": 456,
+      "sha256": "5f794b59d7ee5fd8262d54bfbc60ae19e682062ea07a1788b5726785df181b1d",
+      "path": "src/settings/theme.ts"
+    },
+    {
+      "normalizedTextSha256": "ce4f03aadc94e8cdf317bc0e8e43b73825fb33127ea0ccf8a9be3c5684f92279",
+      "bytes": 83,
+      "sha256": "ce4f03aadc94e8cdf317bc0e8e43b73825fb33127ea0ccf8a9be3c5684f92279",
+      "path": "src/settings/types.d.ts"
+    }
+  ],
+  "previewUrl": "https://designs.magicpath.ai/v1/vibrantly-dusk-6071",
+  "revisionId": "460575445763645440",
+  "sourceUrl": "https://www.magicpath.ai/files/460289538988863488",
+  "adaptations": [
+    "Cache exact asset URLs locally; preserve original resources",
+    "App.tsx theme let to const for exported scaffold lint",
+    "Independent pnpm workspace and lockfile imported from original yarn.lock; preview command binds loopback 4178"
+  ],
+  "version": "v13 · latest",
+  "projectName": "旅途计划 · 桌面首页｜头像菜单",
+  "baselineMain": "4f6b31a262acdf9ac634f0ad58eab437ca79d4cb",
+  "componentName": "旅途计划｜桌面首页 · 默认状态（1920×1080）",
+  "exportedAt": "2026-10-13T14:31:49+08:00",
+  "actualCanvasSize": {
+    "width": 1440,
+    "height": 1024
+  },
+  "archive": {
+    "bytes": 82642,
+    "sha256": "9f836b476c29df4eae579b6a4ab9c660352d7b8317893f8226ecf35c21ee56ba",
+    "path": "magicpath-project.zip"
+  },
+  "projectId": "460289538988863488",
+  "exportMethod": "Authorized website Code / Download codebase",
+  "dataClassification": "SYNTHETIC design demonstration only; no business API/auth/database connection",
+  "requestedViewport": {
+    "width": 1920,
+    "height": 1080
+  }
+}

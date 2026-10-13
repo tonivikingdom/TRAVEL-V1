@@ -6,6 +6,8 @@
 
 - 第一阶段：保存快照并建立独立桌面预览，停止于 Draft PR 和用户验收。
 - 分支：`feat/issue-66-magicpath-desktop-preview`。
+- Draft PR：[#67](https://github.com/tonivikingdom/TRAVEL-V1/pull/67)，保持未合并。
+- 源码与资源交付提交：`a90fe6bb788c21932462db5713a2656e9e9ca5a5`；后续 CI 配置与本报告更新的最终 HEAD 以 PR 提交记录为准。
 - main 基线：`4f6b31a262acdf9ac634f0ad58eab437ca79d4cb`。
 - Issue：[UI Design Migration #66](https://github.com/tonivikingdom/TRAVEL-V1/issues/66)。
 - MagicPath：[源项目](https://www.magicpath.ai/files/460289538988863488)，[v13 发布预览](https://designs.magicpath.ai/v1/vibrantly-dusk-6071)。
@@ -61,6 +63,8 @@ MagicPath v13 原版：
 验证路径：浏览器打开页面 → 本地静态脚本与资源 → 导出组件本地 React 状态 → 原有演示结果展示。没有业务服务请求或真实数据源。React 检查确认现有状态/hooks、事件清理、按钮标签和键盘 Escape 行为可运行；没有为性能或风格重构生成组件。
 
 原模板首次 lint 仅发现 `App.tsx` 的 `theme` 从未重新赋值，已改为 `const` 后通过。首次根 lint 暴露上述解析器冲突，已将独立预览交由专用检查，未弱化业务目录检查。全业务集成和数据库测试不属于此次源码迁移验证，不宣称已经重跑通过；PR 的既有 CI 结果以 GitHub 实际状态为准。
+
+独立预览 CI 首次运行在 pnpm 安装阶段发现版本冲突：action 默认读取根 `package.json` 的 pnpm 11.19.0，和预览的 11.25.0 不一致。已将 action 的 `package_json_file` 明确指向独立预览，并为预览声明相同的 pnpm 11.25.0；没有更改业务根目录的版本。该次失败未执行源码检查，修正后的结果以 PR 最新检查为准。
 
 ## 资源与保留差异
 

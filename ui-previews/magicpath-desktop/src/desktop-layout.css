@@ -1,0 +1,42 @@
+/* PR #67 desktop-only layout adjustments. The exported component stays intact. */
+@media (min-width: 960px) {
+  html,
+  body,
+  #root {
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
+    background: #f8fbfe;
+  }
+
+  body {
+    display: block;
+  }
+
+  .tp2-desktop {
+    --tp2-content-max: clamp(1408px, 80vw, 1728px);
+    --tp2-content-gutter: max(36px, calc((100% - var(--tp2-content-max)) / 2));
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  .tp2-content,
+  .tp2-header {
+    max-width: var(--tp2-content-max);
+  }
+
+  .tp2-hero {
+    height: clamp(360px, calc(20vh + 224px), 560px);
+    height: clamp(360px, calc(20dvh + 224px), 560px);
+  }
+
+  .tp2-pop {
+    right: var(--tp2-content-gutter);
+  }
+
+  .tp2-pop-notifications {
+    right: calc(var(--tp2-content-gutter) + 61px);
+  }
+}

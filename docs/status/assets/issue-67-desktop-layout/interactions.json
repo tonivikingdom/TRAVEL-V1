@@ -1,0 +1,67 @@
+{
+  "checks": [
+    {
+      "action": "出行中 1",
+      "tripCount": 1,
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\":\n    - /placeholder: 搜索旅程、目的地或备注\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\":\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\" [active] [selected]:\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 出行中\n    - button \"日本 · 樱花之旅操作菜单\":\n    - heading \"日本 · 樱花之旅\" [level=3]\n    - paragraph: 2026.10.10 — 2026.10.18\n    - generic: 东京 · 京都 · 大阪\n    - generic: 9天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "待出行 2",
+      "tripCount": 2,
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\":\n    - /placeholder: 搜索旅程、目的地或备注\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\":\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\" [active] [selected]:\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 待出行\n    - button \"瑞士 · 湖光山色之旅操作菜单\":\n    - heading \"瑞士 · 湖光山色之旅\" [level=3]\n    - paragraph: 2026.12.20 — 2026.12.30\n    - generic: 苏黎世 · 因特拉肯\n    - generic: 11天\n  - article:\n    - text: 待出行\n    - button \"冰岛 · 极光追寻之旅操作菜单\":\n    - heading \"冰岛 · 极光追寻之旅\" [level=3]\n    - paragraph: 2027.02.06 — 2027.02.16\n    - generic: 雷克雅未克 · 黄金圈\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "已结束 1",
+      "tripCount": 1,
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\":\n    - /placeholder: 搜索旅程、目的地或备注\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\":\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\" [active] [selected]:\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 已结束\n    - button \"意大利 · 托斯卡纳之旅操作菜单\":\n    - heading \"意大利 · 托斯卡纳之旅\" [level=3]\n    - paragraph: 2026.05.12 — 2026.05.22\n    - generic: 佛罗伦萨 · 锡耶纳\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "全部 4",
+      "tripCount": 4,
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\":\n    - /placeholder: 搜索旅程、目的地或备注\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\" [active] [selected]:\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 出行中\n    - button \"日本 · 樱花之旅操作菜单\":\n    - heading \"日本 · 樱花之旅\" [level=3]\n    - paragraph: 2026.10.10 — 2026.10.18\n    - generic: 东京 · 京都 · 大阪\n    - generic: 9天\n  - article:\n    - text: 待出行\n    - button \"瑞士 · 湖光山色之旅操作菜单\":\n    - heading \"瑞士 · 湖光山色之旅\" [level=3]\n    - paragraph: 2026.12.20 — 2026.12.30\n    - generic: 苏黎世 · 因特拉肯\n    - generic: 11天\n  - article:\n    - text: 待出行\n    - button \"冰岛 · 极光追寻之旅操作菜单\":\n    - heading \"冰岛 · 极光追寻之旅\" [level=3]\n    - paragraph: 2027.02.06 — 2027.02.16\n    - generic: 雷克雅未克 · 黄金圈\n    - generic: 11天\n  - article:\n    - text: 已结束\n    - button \"意大利 · 托斯卡纳之旅操作菜单\":\n    - heading \"意大利 · 托斯卡纳之旅\" [level=3]\n    - paragraph: 2026.05.12 — 2026.05.22\n    - generic: 佛罗伦萨 · 锡耶纳\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "搜索瑞士",
+      "matches": 1,
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\" [active]:\n    - /placeholder: 搜索旅程、目的地或备注\n    - text: 瑞士\n  - generic: 搜索结果\n  - button \"瑞士 · 湖光山色之旅 苏黎世 · 因特拉肯\":\n    - generic: 瑞士 · 湖光山色之旅\n    - generic: 苏黎世 · 因特拉肯\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\" [selected]:\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 出行中\n    - button \"日本 · 樱花之旅操作菜单\":\n    - heading \"日本 · 樱花之旅\" [level=3]\n    - paragraph: 2026.10.10 — 2026.10.18\n    - generic: 东京 · 京都 · 大阪\n    - generic: 9天\n  - article:\n    - text: 待出行\n    - button \"瑞士 · 湖光山色之旅操作菜单\":\n    - heading \"瑞士 · 湖光山色之旅\" [level=3]\n    - paragraph: 2026.12.20 — 2026.12.30\n    - generic: 苏黎世 · 因特拉肯\n    - generic: 11天\n  - article:\n    - text: 待出行\n    - button \"冰岛 · 极光追寻之旅操作菜单\":\n    - heading \"冰岛 · 极光追寻之旅\" [level=3]\n    - paragraph: 2027.02.06 — 2027.02.16\n    - generic: 雷克雅未克 · 黄金圈\n    - generic: 11天\n  - article:\n    - text: 已结束\n    - button \"意大利 · 托斯卡纳之旅操作菜单\":\n    - heading \"意大利 · 托斯卡纳之旅\" [level=3]\n    - paragraph: 2026.05.12 — 2026.05.22\n    - generic: 佛罗伦萨 · 锡耶纳\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "搜索无匹配",
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\" [active]:\n    - /placeholder: 搜索旅程、目的地或备注\n    - text: 无匹配示例\n  - generic: 搜索结果\n  - paragraph: 没有找到相关旅程\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\" [selected]:\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 出行中\n    - button \"日本 · 樱花之旅操作菜单\":\n    - heading \"日本 · 樱花之旅\" [level=3]\n    - paragraph: 2026.10.10 — 2026.10.18\n    - generic: 东京 · 京都 · 大阪\n    - generic: 9天\n  - article:\n    - text: 待出行\n    - button \"瑞士 · 湖光山色之旅操作菜单\":\n    - heading \"瑞士 · 湖光山色之旅\" [level=3]\n    - paragraph: 2026.12.20 — 2026.12.30\n    - generic: 苏黎世 · 因特拉肯\n    - generic: 11天\n  - article:\n    - text: 待出行\n    - button \"冰岛 · 极光追寻之旅操作菜单\":\n    - heading \"冰岛 · 极光追寻之旅\" [level=3]\n    - paragraph: 2027.02.06 — 2027.02.16\n    - generic: 雷克雅未克 · 黄金圈\n    - generic: 11天\n  - article:\n    - text: 已结束\n    - button \"意大利 · 托斯卡纳之旅操作菜单\":\n    - heading \"意大利 · 托斯卡纳之旅\" [level=3]\n    - paragraph: 2026.05.12 — 2026.05.22\n    - generic: 佛罗伦萨 · 锡耶纳\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "卡片操作菜单",
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\":\n    - /placeholder: 搜索旅程、目的地或备注\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\" [selected]:\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\":\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 出行中\n    - button \"日本 · 樱花之旅操作菜单\" [expanded] [active]:\n    - button \"重命名\"\n    - button \"分享旅程\"\n    - button \"删除旅程\"\n    - heading \"日本 · 樱花之旅\" [level=3]\n    - paragraph: 2026.10.10 — 2026.10.18\n    - generic: 东京 · 京都 · 大阪\n    - generic: 9天\n  - article:\n    - text: 待出行\n    - button \"瑞士 · 湖光山色之旅操作菜单\":\n    - heading \"瑞士 · 湖光山色之旅\" [level=3]\n    - paragraph: 2026.12.20 — 2026.12.30\n    - generic: 苏黎世 · 因特拉肯\n    - generic: 11天\n  - article:\n    - text: 待出行\n    - button \"冰岛 · 极光追寻之旅操作菜单\":\n    - heading \"冰岛 · 极光追寻之旅\" [level=3]\n    - paragraph: 2027.02.06 — 2027.02.16\n    - generic: 雷克雅未克 · 黄金圈\n    - generic: 11天\n  - article:\n    - text: 已结束\n    - button \"意大利 · 托斯卡纳之旅操作菜单\":\n    - heading \"意大利 · 托斯卡纳之旅\" [level=3]\n    - paragraph: 2026.05.12 — 2026.05.22\n    - generic: 佛罗伦萨 · 锡耶纳\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。"
+    },
+    {
+      "action": "新建旅程演示",
+      "snapshot": "- banner:\n  - generic \"旅途计划 Travel Planner\":\n    - generic: 旅途计划\n    - generic: TRAVEL PLANNER\n  - textbox \"搜索旅程\":\n    - /placeholder: 搜索旅程、目的地或备注\n  - button \"通知\":\n  - button \"头像菜单\"\n- region \"探索世界\":\n  - text: YOUR NEXT JOURNEY STARTS HERE\n  - heading \"去看更大的世界\" [level=1]\n  - paragraph: 用行程，收藏生活的风景\n  - paragraph: 每一段旅程，都值得认真期待。\n- main:\n  - heading \"我的旅程\" [level=2]\n  - tablist \"筛选旅程\":\n    - tab \"全部 4\" [selected]:\n      - text: 全部\n      - generic: \"4\"\n    - tab \"出行中 1\":\n      - text: 出行中\n      - generic: \"1\"\n    - tab \"待出行 2\":\n      - text: 待出行\n      - generic: \"2\"\n    - tab \"已结束 1\":\n      - text: 已结束\n      - generic: \"1\"\n  - button \"新建旅程 从这里，开启下一段旅程\" [active]:\n    - strong: 新建旅程\n    - generic: 从这里，开启下一段旅程\n  - article:\n    - text: 出行中\n    - button \"日本 · 樱花之旅操作菜单\":\n    - heading \"日本 · 樱花之旅\" [level=3]\n    - paragraph: 2026.10.10 — 2026.10.18\n    - generic: 东京 · 京都 · 大阪\n    - generic: 9天\n  - article:\n    - text: 待出行\n    - button \"瑞士 · 湖光山色之旅操作菜单\":\n    - heading \"瑞士 · 湖光山色之旅\" [level=3]\n    - paragraph: 2026.12.20 — 2026.12.30\n    - generic: 苏黎世 · 因特拉肯\n    - generic: 11天\n  - article:\n    - text: 待出行\n    - button \"冰岛 · 极光追寻之旅操作菜单\":\n    - heading \"冰岛 · 极光追寻之旅\" [level=3]\n    - paragraph: 2027.02.06 — 2027.02.16\n    - generic: 雷克雅未克 · 黄金圈\n    - generic: 11天\n  - article:\n    - text: 已结束\n    - button \"意大利 · 托斯卡纳之旅操作菜单\":\n    - heading \"意大利 · 托斯卡纳之旅\" [level=3]\n    - paragraph: 2026.05.12 — 2026.05.22\n    - generic: 佛罗伦萨 · 锡耶纳\n    - generic: 11天\n  - paragraph: 每一次出发，都从一个好计划开始。\n- status:\n  - generic: 新建旅程流程将在下一阶段确定\n  - button \"关闭提示\":"
+    }
+  ],
+  "scrolling": {
+    "documentHeight": 1241,
+    "footer": {
+      "bottom": 1041.8333740234375,
+      "height": 16.5,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 1025.3333740234375,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 1025.3333740234375
+    },
+    "lastCard": {
+      "bottom": 1001.3333740234376,
+      "height": 268,
+      "left": 184.33334350585935,
+      "right": 554.8333435058594,
+      "top": 733.3333740234375,
+      "width": 370.5,
+      "x": 184.33334350585935,
+      "y": 733.3333740234375
+    },
+    "scrollY": 160.6666717529297,
+    "viewportHeight": 1080
+  },
+  "logs": []
+}

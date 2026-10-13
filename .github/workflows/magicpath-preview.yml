@@ -5,6 +5,7 @@ on:
     paths:
       - 'ui-previews/magicpath-desktop/**'
       - 'design-snapshots/magicpath/**'
+      - 'docs/status/assets/issue-67-desktop-layout/**'
       - '.github/workflows/magicpath-preview.yml'
   workflow_dispatch:
 
@@ -28,6 +29,7 @@ jobs:
           node-version: 24.19.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:snapshot
+      - run: pnpm verify:layout-evidence
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build

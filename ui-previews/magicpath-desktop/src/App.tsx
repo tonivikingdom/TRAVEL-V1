@@ -1,5 +1,6 @@
 import { Theme } from './settings/types';
 import { GeneratedComponent } from './components/generated/GeneratedComponent';
+import './desktop-layout.css';
 
 const theme: Theme = 'light';
 

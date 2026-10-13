@@ -1,0 +1,149 @@
+[
+  {
+    "case": "1920x1080",
+    "account": {
+      "expanded": "true",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 184.33334350585935,
+        "right": 1720.3333435058594,
+        "top": 0,
+        "width": 1536,
+        "x": 184.33334350585935,
+        "y": 0
+      },
+      "panel": {
+        "bottom": 358.66668701171875,
+        "height": 277.66668701171875,
+        "left": 1420.3333740234375,
+        "right": 1720.3333740234375,
+        "top": 81,
+        "width": 300,
+        "x": 1420.3333740234375,
+        "y": 81
+      }
+    },
+    "notification": {
+      "expanded": "true",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 184.33334350585935,
+        "right": 1720.3333435058594,
+        "top": 0,
+        "width": 1536,
+        "x": 184.33334350585935,
+        "y": 0
+      },
+      "panel": {
+        "bottom": 374.3333435058594,
+        "height": 293.3333435058594,
+        "left": 1299.3333740234375,
+        "right": 1659.3333740234375,
+        "top": 81,
+        "width": 360,
+        "x": 1299.3333740234375,
+        "y": 81
+      }
+    }
+  },
+  {
+    "case": "2560x1440",
+    "account": {
+      "expanded": "true",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 416,
+        "right": 2144,
+        "top": 0,
+        "width": 1728,
+        "x": 416,
+        "y": 0
+      },
+      "panel": {
+        "bottom": 358.66668701171875,
+        "height": 277.66668701171875,
+        "left": 1844,
+        "right": 2144,
+        "top": 81,
+        "width": 300,
+        "x": 1844,
+        "y": 81
+      }
+    },
+    "notification": {
+      "expanded": "true",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 416,
+        "right": 2144,
+        "top": 0,
+        "width": 1728,
+        "x": 416,
+        "y": 0
+      },
+      "panel": {
+        "bottom": 374.3333435058594,
+        "height": 293.3333435058594,
+        "left": 1723,
+        "right": 2083,
+        "top": 81,
+        "width": 360,
+        "x": 1723,
+        "y": 81
+      }
+    }
+  },
+  {
+    "case": "3840x2160",
+    "account": {
+      "expanded": "true",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 1056,
+        "right": 2784,
+        "top": 0,
+        "width": 1728,
+        "x": 1056,
+        "y": 0
+      },
+      "panel": {
+        "bottom": 358.66668701171875,
+        "height": 277.66668701171875,
+        "left": 2484,
+        "right": 2784,
+        "top": 81,
+        "width": 300,
+        "x": 2484,
+        "y": 81
+      }
+    },
+    "notification": {
+      "expanded": "true",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 1056,
+        "right": 2784,
+        "top": 0,
+        "width": 1728,
+        "x": 1056,
+        "y": 0
+      },
+      "panel": {
+        "bottom": 374.3333435058594,
+        "height": 293.3333435058594,
+        "left": 2363,
+        "right": 2723,
+        "top": 81,
+        "width": 360,
+        "x": 2363,
+        "y": 81
+      }
+    }
+  }
+]

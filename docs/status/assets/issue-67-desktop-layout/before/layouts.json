@@ -1,0 +1,1114 @@
+[
+  {
+    "case": "1920x1080",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 248.33334350585935,
+      "right": 1656.3333435058594,
+      "top": 441,
+      "width": 1408,
+      "x": 248.33334350585935,
+      "y": 441
+    },
+    "document": {
+      "height": 1157,
+      "width": 1905
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 248.33334350585935,
+      "right": 1656.3333435058594,
+      "top": 0,
+      "width": 1408,
+      "x": 248.33334350585935,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 88,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 0,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1080,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "1920x1080",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 256,
+      "right": 1664,
+      "top": 441,
+      "width": 1408,
+      "x": 256,
+      "y": 441
+    },
+    "document": {
+      "height": 1080,
+      "width": 1920
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 256,
+      "right": 1664,
+      "top": 0,
+      "width": 1408,
+      "x": 256,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1920,
+      "top": 88,
+      "width": 1920,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 1920,
+      "top": 0,
+      "width": 1920,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1080,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "2560x1440",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 576,
+      "right": 1984,
+      "top": 441,
+      "width": 1408,
+      "x": 576,
+      "y": 441
+    },
+    "document": {
+      "height": 1440,
+      "width": 2560
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 576,
+      "right": 1984,
+      "top": 0,
+      "width": 1408,
+      "x": 576,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 2560,
+      "top": 88,
+      "width": 2560,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 2560,
+      "top": 0,
+      "width": 2560,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1440,
+      "scrollY": 0,
+      "width": 2560
+    }
+  },
+  {
+    "case": "2560x1440",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 576,
+      "right": 1984,
+      "top": 441,
+      "width": 1408,
+      "x": 576,
+      "y": 441
+    },
+    "document": {
+      "height": 1440,
+      "width": 2560
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 576,
+      "right": 1984,
+      "top": 0,
+      "width": 1408,
+      "x": 576,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 2560,
+      "top": 88,
+      "width": 2560,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 2560,
+      "top": 0,
+      "width": 2560,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1440,
+      "scrollY": 0,
+      "width": 2560
+    }
+  },
+  {
+    "case": "3840x2160",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 1216,
+      "right": 2624,
+      "top": 441,
+      "width": 1408,
+      "x": 1216,
+      "y": 441
+    },
+    "document": {
+      "height": 2160,
+      "width": 3840
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 1216,
+      "right": 2624,
+      "top": 0,
+      "width": 1408,
+      "x": 1216,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 3840,
+      "top": 88,
+      "width": 3840,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 3840,
+      "top": 0,
+      "width": 3840,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 2160,
+      "scrollY": 0,
+      "width": 3840
+    }
+  },
+  {
+    "case": "3840x2160",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 1216,
+      "right": 2624,
+      "top": 441,
+      "width": 1408,
+      "x": 1216,
+      "y": 441
+    },
+    "document": {
+      "height": 2160,
+      "width": 3840
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 1216,
+      "right": 2624,
+      "top": 0,
+      "width": 1408,
+      "x": 1216,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 3840,
+      "top": 88,
+      "width": 3840,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 3840,
+      "top": 0,
+      "width": 3840,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 2160,
+      "scrollY": 0,
+      "width": 3840
+    }
+  },
+  {
+    "case": "scale-125-1536x864",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 441,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 441
+    },
+    "document": {
+      "height": 1157,
+      "width": 1521
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 0,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 88,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 0,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 864,
+      "scrollY": 0,
+      "width": 1536
+    }
+  },
+  {
+    "case": "scale-125-1536x864",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 441,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 441
+    },
+    "document": {
+      "height": 1080,
+      "width": 1521
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 0,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 88,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 0,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 864,
+      "scrollY": 0,
+      "width": 1536
+    }
+  },
+  {
+    "case": "scale-150-1707x960",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 142,
+      "right": 1550,
+      "top": 441,
+      "width": 1408,
+      "x": 142,
+      "y": 441
+    },
+    "document": {
+      "height": 1157,
+      "width": 1692
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 142,
+      "right": 1550,
+      "top": 0,
+      "width": 1408,
+      "x": 142,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1692,
+      "top": 88,
+      "width": 1692,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 1692,
+      "top": 0,
+      "width": 1692,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 960,
+      "scrollY": 0,
+      "width": 1707
+    }
+  },
+  {
+    "case": "scale-150-1707x960",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 142,
+      "right": 1550,
+      "top": 441,
+      "width": 1408,
+      "x": 142,
+      "y": 441
+    },
+    "document": {
+      "height": 1080,
+      "width": 1692
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 142,
+      "right": 1550,
+      "top": 0,
+      "width": 1408,
+      "x": 142,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1692,
+      "top": 88,
+      "width": 1692,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 1692,
+      "top": 0,
+      "width": 1692,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 960,
+      "scrollY": 0,
+      "width": 1707
+    }
+  },
+  {
+    "case": "scale-150-1280x720",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 441,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 441
+    },
+    "document": {
+      "height": 1157,
+      "width": 1265
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "284.667px 284.667px 284.667px 284.667px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 0,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 88,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 0,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 720,
+      "scrollY": 0,
+      "width": 1280
+    }
+  },
+  {
+    "case": "scale-150-1280x720",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 441,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 441
+    },
+    "document": {
+      "height": 1080,
+      "width": 1265
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "284.667px 284.667px 284.667px 284.667px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 0,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 88,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 0,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 720,
+      "scrollY": 0,
+      "width": 1280
+    }
+  },
+  {
+    "case": "short-desktop-1920x600",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 248.33334350585935,
+      "right": 1656.3333435058594,
+      "top": 441,
+      "width": 1408,
+      "x": 248.33334350585935,
+      "y": 441
+    },
+    "document": {
+      "height": 1157,
+      "width": 1905
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 248.33334350585935,
+      "right": 1656.3333435058594,
+      "top": 0,
+      "width": 1408,
+      "x": 248.33334350585935,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 88,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 0,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 600,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "short-desktop-1920x600",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 248.33334350585935,
+      "right": 1656.3333435058594,
+      "top": 441,
+      "width": 1408,
+      "x": 248.33334350585935,
+      "y": 441
+    },
+    "document": {
+      "height": 1080,
+      "width": 1905
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 248.33334350585935,
+      "right": 1656.3333435058594,
+      "top": 0,
+      "width": 1408,
+      "x": 248.33334350585935,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 88,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 0,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 600,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "scale-200-960x540",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1156.5,
+      "height": 715.5,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 441,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 441
+    },
+    "document": {
+      "height": 1157,
+      "width": 945
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "278.885px 278.885px 278.896px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 0,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 88,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1156.5,
+      "height": 1156.5,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 0,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 540,
+      "scrollY": 0,
+      "width": 960
+    }
+  },
+  {
+    "case": "scale-200-960x540",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgba(0, 0, 0, 0)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "oklch(1 0 0)",
+      "html": "rgba(0, 0, 0, 0)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 870.5,
+      "height": 429.5,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 441,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 441
+    },
+    "document": {
+      "height": 1080,
+      "width": 945
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "278.885px 278.885px 278.896px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 0,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 444,
+      "height": 356,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 88,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 0,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 540,
+      "scrollY": 0,
+      "width": 960
+    }
+  }
+]

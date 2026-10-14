@@ -8,6 +8,7 @@ export default tseslint.config(
       '**/coverage/**',
       '**/dist/**',
       '**/node_modules/**',
+      'ui-previews/**',
       '浏览器阅读版.html',
     ],
   },

@@ -1,0 +1,78 @@
+/* Desktop review changes, separate from the original MagicPath export. */
+@media (min-width: 960px) {
+  .tp2-trips-toolbar {
+    justify-content: center;
+  }
+  .tp2-filters .tp2-filter-traveling {
+    --status-color: #168b75;
+    --status-soft: #eafff8;
+  }
+  .tp2-filters .tp2-filter-future {
+    --status-color: #2a7ed7;
+    --status-soft: #eaf4ff;
+  }
+  .tp2-filters .tp2-filter-done {
+    --status-color: #647586;
+    --status-soft: #f0f3f6;
+  }
+  .tp2-filters button:not(.tp2-filter-all) {
+    color: var(--status-color);
+    background: var(--status-soft);
+    border-color: var(--status-color);
+  }
+  .tp2-filters button:not(.tp2-filter-all).active {
+    color: #fff;
+    background: var(--status-color);
+    box-shadow: 0 4px 12px #365b8420;
+  }
+  .tp2-tag {
+    font-size: 14px;
+    justify-content: center;
+    gap: 6px;
+  }
+  .tp2-tag[style] {
+    width: 104px !important;
+    max-width: 104px !important;
+    height: 34px !important;
+  }
+  .tp2-tag-done {
+    color: #647586;
+    background: #f0f3f6;
+  }
+  .tp2-tag-future {
+    background: #eaf4ff;
+  }
+  .tp2-trip-details {
+    padding: 9px 16px;
+    gap: 2px;
+  }
+  .tp2-trip-details h3 {
+    margin: 0;
+    line-height: 23px;
+  }
+  .tp2-date {
+    line-height: 18px;
+  }
+  .tp2-trip-footer {
+    margin-top: 1px;
+    line-height: 18px;
+  }
+  .tp2-trip-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 20px;
+    color: #547697;
+    border-top: 1px solid #edf2f8;
+    padding-top: 3px;
+    margin-top: auto;
+  }
+  .tp2-travelers {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+}

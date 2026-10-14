@@ -1,0 +1,16 @@
+{
+  "sourceSize": [
+    1920,
+    1080
+  ],
+  "localSize": [
+    1920,
+    1080
+  ],
+  "meanAbsoluteChannelDifference": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "note": "JPEG screenshots captured in the same browser at requested 1920x1080; pixel metrics are evidence, not a claim of exact rendering equivalence."
+}

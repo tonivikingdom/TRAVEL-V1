@@ -1,0 +1,22 @@
+{
+  "desktop1440": {
+    "documentWidth": 1425,
+    "gridColumns": "324.667px 324.667px 324.667px 324.667px",
+    "heroHeight": "356px",
+    "viewport": {
+      "height": 900,
+      "scrollY": 0,
+      "width": 1440
+    }
+  },
+  "desktop1024": {
+    "documentWidth": 1009,
+    "gridColumns": "300.219px 300.219px 300.229px",
+    "heroHeight": "356px",
+    "viewport": {
+      "height": 900,
+      "scrollY": 0,
+      "width": 1024
+    }
+  }
+}

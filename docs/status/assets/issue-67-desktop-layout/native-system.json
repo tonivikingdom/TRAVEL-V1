@@ -1,0 +1,277 @@
+{
+  "before": {
+    "all": {
+      "backgrounds": {
+        "#root": "rgba(0, 0, 0, 0)",
+        ".tp2-desktop": "rgb(248, 251, 254)",
+        "body": "oklch(1 0 0)",
+        "html": "rgba(0, 0, 0, 0)"
+      },
+      "cardHeights": [
+        268,
+        268,
+        268,
+        268,
+        268
+      ],
+      "content": {
+        "bottom": 1156.5,
+        "height": 715.5,
+        "left": 576,
+        "right": 1984,
+        "top": 441,
+        "width": 1408,
+        "x": 576,
+        "y": 441
+      },
+      "document": {
+        "height": 1279,
+        "width": 2560
+      },
+      "fontStatus": "loaded",
+      "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 576,
+        "right": 1984,
+        "top": 0,
+        "width": 1408,
+        "x": 576,
+        "y": 0
+      },
+      "hero": {
+        "bottom": 444,
+        "height": 356,
+        "left": 0,
+        "right": 2560,
+        "top": 88,
+        "width": 2560,
+        "x": 0,
+        "y": 88
+      },
+      "minHeight": "1080px",
+      "root": {
+        "bottom": 1156.5,
+        "height": 1156.5,
+        "left": 0,
+        "right": 2560,
+        "top": 0,
+        "width": 2560,
+        "x": 0,
+        "y": 0
+      },
+      "tripCount": 4,
+      "viewport": {
+        "dpr": 1.5,
+        "height": 1279,
+        "scrollY": 0,
+        "width": 2560
+      }
+    },
+    "ended": {
+      "backgrounds": {
+        "#root": "rgba(0, 0, 0, 0)",
+        ".tp2-desktop": "rgb(248, 251, 254)",
+        "body": "oklch(1 0 0)",
+        "html": "rgba(0, 0, 0, 0)"
+      },
+      "cardHeights": [
+        268,
+        268
+      ],
+      "content": {
+        "bottom": 870.5,
+        "height": 429.5,
+        "left": 576,
+        "right": 1984,
+        "top": 441,
+        "width": 1408,
+        "x": 576,
+        "y": 441
+      },
+      "document": {
+        "height": 1279,
+        "width": 2560
+      },
+      "fontStatus": "loaded",
+      "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 576,
+        "right": 1984,
+        "top": 0,
+        "width": 1408,
+        "x": 576,
+        "y": 0
+      },
+      "hero": {
+        "bottom": 444,
+        "height": 356,
+        "left": 0,
+        "right": 2560,
+        "top": 88,
+        "width": 2560,
+        "x": 0,
+        "y": 88
+      },
+      "minHeight": "1080px",
+      "root": {
+        "bottom": 1080,
+        "height": 1080,
+        "left": 0,
+        "right": 2560,
+        "top": 0,
+        "width": 2560,
+        "x": 0,
+        "y": 0
+      },
+      "tripCount": 1,
+      "viewport": {
+        "dpr": 1.5,
+        "height": 1279,
+        "scrollY": 0,
+        "width": 2560
+      }
+    }
+  },
+  "after": {
+    "all": {
+      "backgrounds": {
+        "#root": "rgb(248, 251, 254)",
+        ".tp2-desktop": "rgb(248, 251, 254)",
+        "body": "rgb(248, 251, 254)",
+        "html": "rgb(248, 251, 254)"
+      },
+      "cardHeights": [
+        268,
+        268,
+        268,
+        268,
+        268
+      ],
+      "content": {
+        "bottom": 1280.3646240234375,
+        "height": 715.5,
+        "left": 408.3333435058594,
+        "right": 2136.3333435058594,
+        "top": 564.8646240234375,
+        "width": 1728,
+        "x": 408.3333435058594,
+        "y": 564.8646240234375
+      },
+      "document": {
+        "height": 1281,
+        "width": 2545
+      },
+      "fontStatus": "loaded",
+      "gridColumns": "418.5px 418.5px 418.5px 418.5px",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 408.3333435058594,
+        "right": 2136.3333435058594,
+        "top": 0,
+        "width": 1728,
+        "x": 408.3333435058594,
+        "y": 0
+      },
+      "hero": {
+        "bottom": 567.8645935058594,
+        "height": 479.8645935058594,
+        "left": 0,
+        "right": 2544.666748046875,
+        "top": 88,
+        "width": 2544.666748046875,
+        "x": 0,
+        "y": 88
+      },
+      "minHeight": "1279.33px",
+      "root": {
+        "bottom": 1280.3646240234375,
+        "height": 1280.3646240234375,
+        "left": 0,
+        "right": 2544.666748046875,
+        "top": 0,
+        "width": 2544.666748046875,
+        "x": 0,
+        "y": 0
+      },
+      "tripCount": 4,
+      "viewport": {
+        "dpr": 1.5,
+        "height": 1279,
+        "scrollY": 0,
+        "width": 2560
+      }
+    },
+    "ended": {
+      "backgrounds": {
+        "#root": "rgb(248, 251, 254)",
+        ".tp2-desktop": "rgb(248, 251, 254)",
+        "body": "rgb(248, 251, 254)",
+        "html": "rgb(248, 251, 254)"
+      },
+      "cardHeights": [
+        268,
+        268
+      ],
+      "content": {
+        "bottom": 994.3646240234376,
+        "height": 429.5,
+        "left": 416,
+        "right": 2144,
+        "top": 564.8646240234375,
+        "width": 1728,
+        "x": 416,
+        "y": 564.8646240234375
+      },
+      "document": {
+        "height": 1279,
+        "width": 2560
+      },
+      "fontStatus": "loaded",
+      "gridColumns": "418.5px 418.5px 418.5px 418.5px",
+      "header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 416,
+        "right": 2144,
+        "top": 0,
+        "width": 1728,
+        "x": 416,
+        "y": 0
+      },
+      "hero": {
+        "bottom": 567.8645935058594,
+        "height": 479.8645935058594,
+        "left": 0,
+        "right": 2560,
+        "top": 88,
+        "width": 2560,
+        "x": 0,
+        "y": 88
+      },
+      "minHeight": "1279.33px",
+      "root": {
+        "bottom": 1279.3333740234375,
+        "height": 1279.3333740234375,
+        "left": 0,
+        "right": 2560,
+        "top": 0,
+        "width": 2560,
+        "x": 0,
+        "y": 0
+      },
+      "tripCount": 1,
+      "viewport": {
+        "dpr": 1.5,
+        "height": 1279,
+        "scrollY": 0,
+        "width": 2560
+      }
+    }
+  },
+  "note": "Actual current browser/OS scale, no viewport override or OS setting change. Browser zoom/OS DPI are not inferred beyond observed DPR."
+}

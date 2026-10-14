@@ -1,0 +1,919 @@
+{
+  "baselineCommit": "115516d28fad59ffa2a155914fcdbaf3a554fc58",
+  "overlaySha256": "896c9ddca163a961e514f608bc74c232b16fcb5e983d8cca5f0ec9c758eb5a40",
+  "captureMethod": "Actual browser screenshots. Explicit CSS viewport captures use 1 CSS px per image px; native-system images retain the browser screenshot dimensions. No image resizing or reconstruction.",
+  "screenshots": [
+    {
+      "path": "after/1920x1080-account.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 220084,
+      "sha256": "24816afa2578418f9b852fed2fcb1ec12369e075d703ea3ecbc574784a1dfb2d",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/1920x1080-all-full.jpg",
+      "width": 1904,
+      "height": 1240,
+      "bytes": 231124,
+      "sha256": "a6998fe82eb2013ff6b62a3d385cfa9a365fde612dde3990e9f4c35791fea884",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/1920x1080-all.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 225706,
+      "sha256": "221e016a53cf93938c15701ae184952646ca0a04129a720b2f657738193976d2",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/1920x1080-ended.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 164644,
+      "sha256": "cb1871b5e43ef0b8f85b4ec830728aea16915dc6839f2e53af5adfdbb4db1a50",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/2560x1440-all.jpg",
+      "width": 2560,
+      "height": 1440,
+      "bytes": 280999,
+      "sha256": "a79ffaf919dc1fb6730d39d1b5bc691b6511bc1abaa03560a42fda9b71ce12ed",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/2560x1440-ended.jpg",
+      "width": 2560,
+      "height": 1440,
+      "bytes": 209453,
+      "sha256": "5198403e1c2cc56ceeb6cea7eb28461adba2cf3b237ed9abbb3e8d39bc63e5e8",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/3840x2160-all.jpg",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 343783,
+      "sha256": "06b5a8047b3ad522413504a17d39ecf7c471f17e3e3ab0d6ac93ea9cbb74d5a4",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/3840x2160-ended.jpg",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 270864,
+      "sha256": "b29835acafa939d5f2727d560fb621ccadf3562acd206a93227d46962f3b48e0",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/native-system-all.jpg",
+      "width": 2545,
+      "height": 1272,
+      "bytes": 265655,
+      "sha256": "1f4d97489d86d953b1080b4e730b3664918d4f5ce9824fde4c9e63d593a82dc7",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "after/native-system-ended.jpg",
+      "width": 2559,
+      "height": 1279,
+      "bytes": 191807,
+      "sha256": "18416f51a5a878e653591a2989d7d61c7a522588c4c8cb6c52dbe515069f9f46",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-125-1536x864-all.jpg",
+      "width": 1536,
+      "height": 864,
+      "bytes": 180094,
+      "sha256": "ba095681aa401bf501d8a6415097719d8df767fa57d32ddff77b138ed4188cfd",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          250,
+          255
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-125-1536x864-ended.jpg",
+      "width": 1536,
+      "height": 864,
+      "bytes": 140036,
+      "sha256": "a4d3002ad4c9fc36b927c5031e6b34579383726f82850dbbd24b20236b659915",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-150-1280x720-all.jpg",
+      "width": 1280,
+      "height": 720,
+      "bytes": 141685,
+      "sha256": "2a69783db8b4bb139ce3237e178a17d9e715ed960c4f8c52520eeeb43665ae74",
+      "bottomSamples": [
+        [
+          246,
+          250,
+          253
+        ],
+        [
+          240,
+          245,
+          251
+        ],
+        [
+          246,
+          250,
+          253
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-150-1280x720-ended.jpg",
+      "width": 1280,
+      "height": 720,
+      "bytes": 113216,
+      "sha256": "bc3d0c4b6165f86a92638f2eead7eeb3064bb7e787ee0ff459d5a9ce75cdaf0d",
+      "bottomSamples": [
+        [
+          246,
+          250,
+          253
+        ],
+        [
+          244,
+          247,
+          252
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-150-1707x960-all.jpg",
+      "width": 1707,
+      "height": 960,
+      "bytes": 194317,
+      "sha256": "e3236f88ad39721ee0e2d7d136785b5f8ab0561b4cd3fe950c3c84df2048e9b9",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-150-1707x960-ended.jpg",
+      "width": 1707,
+      "height": 960,
+      "bytes": 148971,
+      "sha256": "ae3e1a726a299a2be864d32b8834c7cbafc613ad8343a45bd9cf0dcf01d06e7d",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-200-960x540-all.jpg",
+      "width": 960,
+      "height": 540,
+      "bytes": 79162,
+      "sha256": "695c3d105c1a26d58c7bbd48b236401ae914660830a7c9d66ebd2329e47609f9",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          89,
+          120,
+          149
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/scale-200-960x540-ended.jpg",
+      "width": 960,
+      "height": 540,
+      "bytes": 77811,
+      "sha256": "604c39249619a5daf5bbf96bb9ef4733125c4b316607c521f8eacd1bec86ab9b",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          145,
+          136,
+          181
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/short-desktop-1920x600-all.jpg",
+      "width": 1920,
+      "height": 600,
+      "bytes": 135860,
+      "sha256": "05f80adfc138cbe0ea5e82bb843b3192dab672ceb0345b1d168190f2ed5cd219",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          243,
+          243,
+          253
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "after/short-desktop-1920x600-ended.jpg",
+      "width": 1920,
+      "height": 600,
+      "bytes": 113977,
+      "sha256": "767767176e0260b1c698a2570f25eae9b3828d0ec213455e54c6b173adde55f9",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          244,
+          247,
+          252
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/1920x1080-all.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 202756,
+      "sha256": "f67646b4b064896028b0d9b0d0694677119bb91e4febac6430b75e7156f00041",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/1920x1080-ended.jpg",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 143137,
+      "sha256": "a6e1fd168ede875b3710c965607bfa289fe084b559afdf174c52e3cd206945a5",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/2560x1440-all.jpg",
+      "width": 2560,
+      "height": 1440,
+      "bytes": 226191,
+      "sha256": "e0eb4055e51936f3c39efc03d2820587906a55a22f73046322f3a79607f3357a",
+      "bottomSamples": [
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "before/2560x1440-ended.jpg",
+      "width": 2560,
+      "height": 1440,
+      "bytes": 162623,
+      "sha256": "b4a144385aaa10b1ecb3c712c5a85d15deb10559858da2e3c97f455e90ea5fad",
+      "bottomSamples": [
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "before/3840x2160-all.jpg",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 273230,
+      "sha256": "d330d23d6390e4b61a070b8bf15cfb08f7c1b8f3d46a6f10b12b4da15b3b8e42",
+      "bottomSamples": [
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "before/3840x2160-ended.jpg",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 205937,
+      "sha256": "048bbebc81f4c5c6ec6c6758c0498fd6e0b3af21b751482620d66e0bd4bb119e",
+      "bottomSamples": [
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "before/native-system-all.jpg",
+      "width": 2559,
+      "height": 1279,
+      "bytes": 214153,
+      "sha256": "37b72dee9ae5fdfa8c5863b7f76ccbffa5c59b1c962c7aba5d14267cf387b397",
+      "bottomSamples": [
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "before/native-system-ended.jpg",
+      "width": 2559,
+      "height": 1279,
+      "bytes": 155000,
+      "sha256": "efe082d13ab6d8c4a6e4a5a0f55e6aac1ace9f6e1c8b111628bb824687a2a58f",
+      "bottomSamples": [
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-125-1536x864-all.jpg",
+      "width": 1536,
+      "height": 864,
+      "bytes": 171269,
+      "sha256": "cd3df81f8e49640ec29f503ce5b26108df7166b29caeb80988ebd5b67beff546",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-125-1536x864-ended.jpg",
+      "width": 1536,
+      "height": 864,
+      "bytes": 129916,
+      "sha256": "354ac6f73bf9334703947b91146ea336ac46f14695e8a8505e3da085a0195d23",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-150-1280x720-all.jpg",
+      "width": 1280,
+      "height": 720,
+      "bytes": 143530,
+      "sha256": "b0e1563dcb218fe7cc6f5398a5c53f06c1c39c2b9c07ed6e52ba8c28526182fc",
+      "bottomSamples": [
+        [
+          246,
+          250,
+          253
+        ],
+        [
+          240,
+          245,
+          251
+        ],
+        [
+          246,
+          250,
+          253
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-150-1280x720-ended.jpg",
+      "width": 1280,
+      "height": 720,
+      "bytes": 113454,
+      "sha256": "4b675bfaa74683fd98e63acefe4dfa2e0800523638a360fa602e63a8ce4108b4",
+      "bottomSamples": [
+        [
+          246,
+          250,
+          253
+        ],
+        [
+          244,
+          247,
+          252
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-150-1707x960-all.jpg",
+      "width": 1707,
+      "height": 960,
+      "bytes": 191423,
+      "sha256": "fbbc7da632b5208945fb2674640f2bca6b1821370c0d9fc1fcc9c6acb41a0b14",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-150-1707x960-ended.jpg",
+      "width": 1707,
+      "height": 960,
+      "bytes": 136330,
+      "sha256": "16caf4670fdf3f2eecc3faaf7bf5fa9af4ab3de43525ad7f42365e9ae911dfb4",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-200-960x540-all.jpg",
+      "width": 960,
+      "height": 540,
+      "bytes": 80132,
+      "sha256": "b1c9633e85ce4b25c9389aa19896780f71051baa28977551d396dbba2040050e",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          107,
+          137,
+          165
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/scale-200-960x540-ended.jpg",
+      "width": 960,
+      "height": 540,
+      "bytes": 77936,
+      "sha256": "bd5937b2c113647c026fbbb046e5eb435e98413c433975762b0a7fb015013b7d",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          149,
+          138,
+          181
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/short-desktop-1920x600-all.jpg",
+      "width": 1920,
+      "height": 600,
+      "bytes": 134886,
+      "sha256": "d341cb87e4e5c6f6c296a91efb2566ec4d5ea09b3f82b12a8848e31ed32b9589",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          241,
+          244,
+          253
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    },
+    {
+      "path": "before/short-desktop-1920x600-ended.jpg",
+      "width": 1920,
+      "height": 600,
+      "bytes": 113273,
+      "sha256": "65a398f742aab66280fc614c2f1c970928a8abea15a11b56a01527c0b6de34f1",
+      "bottomSamples": [
+        [
+          247,
+          251,
+          254
+        ],
+        [
+          244,
+          247,
+          252
+        ],
+        [
+          247,
+          251,
+          254
+        ]
+      ]
+    }
+  ]
+}

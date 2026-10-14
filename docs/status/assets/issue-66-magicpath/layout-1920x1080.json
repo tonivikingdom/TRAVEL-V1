@@ -1,0 +1,186 @@
+{
+  "source": {
+    "boxes": {
+      ".tp2-bottom-note": {
+        "bottom": 1118.5,
+        "height": 16.5,
+        "left": 256,
+        "right": 1664,
+        "top": 1102,
+        "width": 1408,
+        "x": 256,
+        "y": 1102
+      },
+      ".tp2-desktop": {
+        "bottom": 1156.5,
+        "height": 1156.5,
+        "left": 0,
+        "right": 1920,
+        "top": 0,
+        "width": 1920,
+        "x": 0,
+        "y": 0
+      },
+      ".tp2-header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 256,
+        "right": 1664,
+        "top": 0,
+        "width": 1408,
+        "x": 256,
+        "y": 0
+      },
+      ".tp2-hero": {
+        "bottom": 444,
+        "height": 356,
+        "left": 0,
+        "right": 1920,
+        "top": 88,
+        "width": 1920,
+        "x": 0,
+        "y": 88
+      },
+      ".tp2-new-card": {
+        "bottom": 792,
+        "height": 268,
+        "left": 256,
+        "right": 594.5,
+        "top": 524,
+        "width": 338.5,
+        "x": 256,
+        "y": 524
+      },
+      ".tp2-trip": {
+        "bottom": 792,
+        "height": 268,
+        "left": 612.5,
+        "right": 951,
+        "top": 524,
+        "width": 338.5,
+        "x": 612.5,
+        "y": 524
+      },
+      ".tp2-trip-grid": {
+        "bottom": 1078,
+        "height": 554,
+        "left": 256,
+        "right": 1664,
+        "top": 524,
+        "width": 1408,
+        "x": 256,
+        "y": 524
+      },
+      ".tp2-trips-toolbar": {
+        "bottom": 509,
+        "height": 68,
+        "left": 256,
+        "right": 1664,
+        "top": 441,
+        "width": 1408,
+        "x": 256,
+        "y": 441
+      }
+    },
+    "font": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", Arial, sans-serif",
+    "fonts": "loaded",
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1080,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  "local": {
+    "boxes": {
+      ".tp2-bottom-note": {
+        "bottom": 1118.5,
+        "height": 16.5,
+        "left": 248.33334350585935,
+        "right": 1656.3333435058594,
+        "top": 1102,
+        "width": 1408,
+        "x": 248.33334350585935,
+        "y": 1102
+      },
+      ".tp2-desktop": {
+        "bottom": 1156.5,
+        "height": 1156.5,
+        "left": 0,
+        "right": 1904.666748046875,
+        "top": 0,
+        "width": 1904.666748046875,
+        "x": 0,
+        "y": 0
+      },
+      ".tp2-header": {
+        "bottom": 88,
+        "height": 88,
+        "left": 248.33334350585935,
+        "right": 1656.3333435058594,
+        "top": 0,
+        "width": 1408,
+        "x": 248.33334350585935,
+        "y": 0
+      },
+      ".tp2-hero": {
+        "bottom": 444,
+        "height": 356,
+        "left": 0,
+        "right": 1904.666748046875,
+        "top": 88,
+        "width": 1904.666748046875,
+        "x": 0,
+        "y": 88
+      },
+      ".tp2-new-card": {
+        "bottom": 792,
+        "height": 268,
+        "left": 248.33334350585935,
+        "right": 586.8333435058594,
+        "top": 524,
+        "width": 338.5,
+        "x": 248.33334350585935,
+        "y": 524
+      },
+      ".tp2-trip": {
+        "bottom": 792,
+        "height": 268,
+        "left": 604.8333740234375,
+        "right": 943.3333740234376,
+        "top": 524,
+        "width": 338.5,
+        "x": 604.8333740234375,
+        "y": 524
+      },
+      ".tp2-trip-grid": {
+        "bottom": 1078,
+        "height": 554,
+        "left": 248.33334350585935,
+        "right": 1656.3333435058594,
+        "top": 524,
+        "width": 1408,
+        "x": 248.33334350585935,
+        "y": 524
+      },
+      ".tp2-trips-toolbar": {
+        "bottom": 509,
+        "height": 68,
+        "left": 248.33334350585935,
+        "right": 1656.3333435058594,
+        "top": 441,
+        "width": 1408,
+        "x": 248.33334350585935,
+        "y": 441
+      }
+    },
+    "font": "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", Arial, sans-serif",
+    "fonts": "loaded",
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1080,
+      "scrollY": 0,
+      "width": 1920
+    }
+  }
+}

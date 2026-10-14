@@ -1,0 +1,1114 @@
+[
+  {
+    "case": "1920x1080",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1240.5,
+      "height": 715.5,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 525,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 525
+    },
+    "document": {
+      "height": 1241,
+      "width": 1905
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "370.5px 370.5px 370.5px 370.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 0,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 528,
+      "height": 440,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 88,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1240.5,
+      "height": 1240.5,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 0,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1080,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "1920x1080",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 954.5,
+      "height": 429.5,
+      "left": 192,
+      "right": 1728,
+      "top": 525,
+      "width": 1536,
+      "x": 192,
+      "y": 525
+    },
+    "document": {
+      "height": 1080,
+      "width": 1920
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "370.5px 370.5px 370.5px 370.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 192,
+      "right": 1728,
+      "top": 0,
+      "width": 1536,
+      "x": 192,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 528,
+      "height": 440,
+      "left": 0,
+      "right": 1920,
+      "top": 88,
+      "width": 1920,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1080px",
+    "root": {
+      "bottom": 1080,
+      "height": 1080,
+      "left": 0,
+      "right": 1920,
+      "top": 0,
+      "width": 1920,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1080,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "2560x1440",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1312.5,
+      "height": 715.5,
+      "left": 416,
+      "right": 2144,
+      "top": 597,
+      "width": 1728,
+      "x": 416,
+      "y": 597
+    },
+    "document": {
+      "height": 1440,
+      "width": 2560
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "418.5px 418.5px 418.5px 418.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 416,
+      "right": 2144,
+      "top": 0,
+      "width": 1728,
+      "x": 416,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 600,
+      "height": 512,
+      "left": 0,
+      "right": 2560,
+      "top": 88,
+      "width": 2560,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1440px",
+    "root": {
+      "bottom": 1440,
+      "height": 1440,
+      "left": 0,
+      "right": 2560,
+      "top": 0,
+      "width": 2560,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1440,
+      "scrollY": 0,
+      "width": 2560
+    }
+  },
+  {
+    "case": "2560x1440",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1026.5,
+      "height": 429.5,
+      "left": 416,
+      "right": 2144,
+      "top": 597,
+      "width": 1728,
+      "x": 416,
+      "y": 597
+    },
+    "document": {
+      "height": 1440,
+      "width": 2560
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "418.5px 418.5px 418.5px 418.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 416,
+      "right": 2144,
+      "top": 0,
+      "width": 1728,
+      "x": 416,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 600,
+      "height": 512,
+      "left": 0,
+      "right": 2560,
+      "top": 88,
+      "width": 2560,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "1440px",
+    "root": {
+      "bottom": 1440,
+      "height": 1440,
+      "left": 0,
+      "right": 2560,
+      "top": 0,
+      "width": 2560,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 1440,
+      "scrollY": 0,
+      "width": 2560
+    }
+  },
+  {
+    "case": "3840x2160",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1360.5,
+      "height": 715.5,
+      "left": 1056,
+      "right": 2784,
+      "top": 645,
+      "width": 1728,
+      "x": 1056,
+      "y": 645
+    },
+    "document": {
+      "height": 2160,
+      "width": 3840
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "418.5px 418.5px 418.5px 418.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 1056,
+      "right": 2784,
+      "top": 0,
+      "width": 1728,
+      "x": 1056,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 648,
+      "height": 560,
+      "left": 0,
+      "right": 3840,
+      "top": 88,
+      "width": 3840,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "2160px",
+    "root": {
+      "bottom": 2160,
+      "height": 2160,
+      "left": 0,
+      "right": 3840,
+      "top": 0,
+      "width": 3840,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 2160,
+      "scrollY": 0,
+      "width": 3840
+    }
+  },
+  {
+    "case": "3840x2160",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1074.5,
+      "height": 429.5,
+      "left": 1056,
+      "right": 2784,
+      "top": 645,
+      "width": 1728,
+      "x": 1056,
+      "y": 645
+    },
+    "document": {
+      "height": 2160,
+      "width": 3840
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "418.5px 418.5px 418.5px 418.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 1056,
+      "right": 2784,
+      "top": 0,
+      "width": 1728,
+      "x": 1056,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 648,
+      "height": 560,
+      "left": 0,
+      "right": 3840,
+      "top": 88,
+      "width": 3840,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "2160px",
+    "root": {
+      "bottom": 2160,
+      "height": 2160,
+      "left": 0,
+      "right": 3840,
+      "top": 0,
+      "width": 3840,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 2160,
+      "scrollY": 0,
+      "width": 3840
+    }
+  },
+  {
+    "case": "scale-125-1536x864",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1197.2916870117188,
+      "height": 715.5,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 481.7916870117187,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 481.7916870117187
+    },
+    "document": {
+      "height": 1197,
+      "width": 1521
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 0,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 484.7916870117187,
+      "height": 396.7916870117187,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 88,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "864px",
+    "root": {
+      "bottom": 1197.291748046875,
+      "height": 1197.291748046875,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 0,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 864,
+      "scrollY": 0,
+      "width": 1536
+    }
+  },
+  {
+    "case": "scale-125-1536x864",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 911.2916870117188,
+      "height": 429.5,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 481.7916870117187,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 481.7916870117187
+    },
+    "document": {
+      "height": 911,
+      "width": 1521
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 56.33333587646485,
+      "right": 1464.3333358764648,
+      "top": 0,
+      "width": 1408,
+      "x": 56.33333587646485,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 484.7916870117187,
+      "height": 396.7916870117187,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 88,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "864px",
+    "root": {
+      "bottom": 911.2916870117188,
+      "height": 911.2916870117188,
+      "left": 0,
+      "right": 1520.666748046875,
+      "top": 0,
+      "width": 1520.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 864,
+      "scrollY": 0,
+      "width": 1536
+    }
+  },
+  {
+    "case": "scale-150-1707x960",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1216.5,
+      "height": 715.5,
+      "left": 142,
+      "right": 1550,
+      "top": 501,
+      "width": 1408,
+      "x": 142,
+      "y": 501
+    },
+    "document": {
+      "height": 1217,
+      "width": 1692
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 142,
+      "right": 1550,
+      "top": 0,
+      "width": 1408,
+      "x": 142,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 504,
+      "height": 416,
+      "left": 0,
+      "right": 1692,
+      "top": 88,
+      "width": 1692,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "960px",
+    "root": {
+      "bottom": 1216.5,
+      "height": 1216.5,
+      "left": 0,
+      "right": 1692,
+      "top": 0,
+      "width": 1692,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 960,
+      "scrollY": 0,
+      "width": 1707
+    }
+  },
+  {
+    "case": "scale-150-1707x960",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 930.5,
+      "height": 429.5,
+      "left": 149.6666717529297,
+      "right": 1557.6666717529297,
+      "top": 501,
+      "width": 1408,
+      "x": 149.6666717529297,
+      "y": 501
+    },
+    "document": {
+      "height": 960,
+      "width": 1707
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "338.5px 338.5px 338.5px 338.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 149.6666717529297,
+      "right": 1557.6666717529297,
+      "top": 0,
+      "width": 1408,
+      "x": 149.6666717529297,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 504,
+      "height": 416,
+      "left": 0,
+      "right": 1707.3333740234375,
+      "top": 88,
+      "width": 1707.3333740234375,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "960px",
+    "root": {
+      "bottom": 960,
+      "height": 960,
+      "left": 0,
+      "right": 1707.3333740234375,
+      "top": 0,
+      "width": 1707.3333740234375,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 960,
+      "scrollY": 0,
+      "width": 1707
+    }
+  },
+  {
+    "case": "scale-150-1280x720",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1168.5,
+      "height": 715.5,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 453,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 453
+    },
+    "document": {
+      "height": 1169,
+      "width": 1265
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "284.667px 284.667px 284.667px 284.667px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 0,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 456,
+      "height": 368,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 88,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "720px",
+    "root": {
+      "bottom": 1168.5,
+      "height": 1168.5,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 0,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 720,
+      "scrollY": 0,
+      "width": 1280
+    }
+  },
+  {
+    "case": "scale-150-1280x720",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 882.5,
+      "height": 429.5,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 453,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 453
+    },
+    "document": {
+      "height": 883,
+      "width": 1265
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "284.667px 284.667px 284.667px 284.667px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 1228.666748046875,
+      "top": 0,
+      "width": 1192.666748046875,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 456,
+      "height": 368,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 88,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "720px",
+    "root": {
+      "bottom": 882.5,
+      "height": 882.5,
+      "left": 0,
+      "right": 1264.666748046875,
+      "top": 0,
+      "width": 1264.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 720,
+      "scrollY": 0,
+      "width": 1280
+    }
+  },
+  {
+    "case": "short-desktop-1920x600",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1160.5,
+      "height": 715.5,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 445,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 445
+    },
+    "document": {
+      "height": 1161,
+      "width": 1905
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "370.5px 370.5px 370.5px 370.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 0,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 448,
+      "height": 360,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 88,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "600px",
+    "root": {
+      "bottom": 1160.5,
+      "height": 1160.5,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 0,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 600,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "short-desktop-1920x600",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 874.5,
+      "height": 429.5,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 445,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 445
+    },
+    "document": {
+      "height": 875,
+      "width": 1905
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "370.5px 370.5px 370.5px 370.5px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 184.33334350585935,
+      "right": 1720.3333435058594,
+      "top": 0,
+      "width": 1536,
+      "x": 184.33334350585935,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 448,
+      "height": 360,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 88,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "600px",
+    "root": {
+      "bottom": 874.5,
+      "height": 874.5,
+      "left": 0,
+      "right": 1904.666748046875,
+      "top": 0,
+      "width": 1904.666748046875,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 600,
+      "scrollY": 0,
+      "width": 1920
+    }
+  },
+  {
+    "case": "scale-200-960x540",
+    "state": "all",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268,
+      268,
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 1160.5,
+      "height": 715.5,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 445,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 445
+    },
+    "document": {
+      "height": 1161,
+      "width": 945
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "278.885px 278.885px 278.896px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 0,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 448,
+      "height": 360,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 88,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "540px",
+    "root": {
+      "bottom": 1160.5,
+      "height": 1160.5,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 0,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 4,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 540,
+      "scrollY": 0,
+      "width": 960
+    }
+  },
+  {
+    "case": "scale-200-960x540",
+    "state": "ended",
+    "backgrounds": {
+      "#root": "rgb(248, 251, 254)",
+      ".tp2-desktop": "rgb(248, 251, 254)",
+      "body": "rgb(248, 251, 254)",
+      "html": "rgb(248, 251, 254)"
+    },
+    "cardHeights": [
+      268,
+      268
+    ],
+    "content": {
+      "bottom": 874.5,
+      "height": 429.5,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 445,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 445
+    },
+    "document": {
+      "height": 875,
+      "width": 945
+    },
+    "fontStatus": "loaded",
+    "gridColumns": "278.885px 278.885px 278.896px",
+    "header": {
+      "bottom": 88,
+      "height": 88,
+      "left": 36,
+      "right": 908.6666870117188,
+      "top": 0,
+      "width": 872.6666870117188,
+      "x": 36,
+      "y": 0
+    },
+    "hero": {
+      "bottom": 448,
+      "height": 360,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 88,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 88
+    },
+    "minHeight": "540px",
+    "root": {
+      "bottom": 874.5,
+      "height": 874.5,
+      "left": 0,
+      "right": 944.6666870117188,
+      "top": 0,
+      "width": 944.6666870117188,
+      "x": 0,
+      "y": 0
+    },
+    "tripCount": 1,
+    "viewport": {
+      "dpr": 1.0000000298023224,
+      "height": 540,
+      "scrollY": 0,
+      "width": 960
+    }
+  }
+]

@@ -1,12 +1,7 @@
 [
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268,
-      268,
-      268,
-      268
-    ],
+    "cardHeights": [268, 268, 268, 268],
     "cards": [
       {
         "cardBottom": 856.6666870117188,
@@ -78,17 +73,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      1920,
-      1080
-    ],
+    "viewport": [1920, 1080],
     "state": "all"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268
-    ],
+    "cardHeights": [268],
     "cards": [
       {
         "cardBottom": 876,
@@ -130,20 +120,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      1920,
-      1080
-    ],
+    "viewport": [1920, 1080],
     "state": "ended"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268,
-      268,
-      268,
-      268
-    ],
+    "cardHeights": [268, 268, 268, 268],
     "cards": [
       {
         "cardBottom": 948,
@@ -215,17 +197,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      2560,
-      1440
-    ],
+    "viewport": [2560, 1440],
     "state": "all"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268
-    ],
+    "cardHeights": [268],
     "cards": [
       {
         "cardBottom": 948,
@@ -267,20 +244,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      2560,
-      1440
-    ],
+    "viewport": [2560, 1440],
     "state": "ended"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268,
-      268,
-      268,
-      268
-    ],
+    "cardHeights": [268, 268, 268, 268],
     "cards": [
       {
         "cardBottom": 996,
@@ -352,17 +321,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      3840,
-      2160
-    ],
+    "viewport": [3840, 2160],
     "state": "all"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268
-    ],
+    "cardHeights": [268],
     "cards": [
       {
         "cardBottom": 996,
@@ -404,20 +368,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      3840,
-      2160
-    ],
+    "viewport": [3840, 2160],
     "state": "ended"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268,
-      268,
-      268,
-      268
-    ],
+    "cardHeights": [268, 268, 268, 268],
     "cards": [
       {
         "cardBottom": 676.6666870117188,
@@ -489,17 +445,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      1280,
-      720
-    ],
+    "viewport": [1280, 720],
     "state": "all"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268
-    ],
+    "cardHeights": [268],
     "cards": [
       {
         "cardBottom": 676.6666870117188,
@@ -541,20 +492,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      1280,
-      720
-    ],
+    "viewport": [1280, 720],
     "state": "ended"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268,
-      268,
-      268,
-      268
-    ],
+    "cardHeights": [268, 268, 268, 268],
     "cards": [
       {
         "cardBottom": 586.6666870117188,
@@ -626,17 +569,12 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      960,
-      540
-    ],
+    "viewport": [960, 540],
     "state": "all"
   },
   {
     "background": "rgb(248, 251, 254)",
-    "cardHeights": [
-      268
-    ],
+    "cardHeights": [268],
     "cards": [
       {
         "cardBottom": 586.6666870117188,
@@ -678,10 +616,7 @@
         "text": "已结束"
       }
     ],
-    "viewport": [
-      960,
-      540
-    ],
+    "viewport": [960, 540],
     "state": "ended"
   }
 ]

@@ -22,13 +22,13 @@ CSS 视口 1920×1080、2560×1440、3840×2160、1280×720、960×540，各检�
 
 本轮截图直接保存浏览器原生返回的像素，未重绘或调整尺寸。CSS 视口来自 DOM 测量；截图文件的像素尺寸不冒充精确 CSS 视口尺寸。完整测量、交互记录、源码与截图 SHA-256 见 [证据目录](assets/issue-67-card-review/manifest.json)。
 
-| CSS 视口 | 全部 | 已结束 |
-| --- | --- | --- |
+| CSS 视口  | 全部                                                  | 已结束                                                  |
+| --------- | ----------------------------------------------------- | ------------------------------------------------------- |
 | 1920×1080 | [截图](assets/issue-67-card-review/1920x1080-all.jpg) | [截图](assets/issue-67-card-review/1920x1080-ended.jpg) |
 | 2560×1440 | [截图](assets/issue-67-card-review/2560x1440-all.jpg) | [截图](assets/issue-67-card-review/2560x1440-ended.jpg) |
 | 3840×2160 | [截图](assets/issue-67-card-review/3840x2160-all.jpg) | [截图](assets/issue-67-card-review/3840x2160-ended.jpg) |
-| 1280×720 | [截图](assets/issue-67-card-review/1280x720-all.jpg) | [截图](assets/issue-67-card-review/1280x720-ended.jpg) |
-| 960×540 | [截图](assets/issue-67-card-review/960x540-all.jpg) | [截图](assets/issue-67-card-review/960x540-ended.jpg) |
+| 1280×720  | [截图](assets/issue-67-card-review/1280x720-all.jpg)  | [截图](assets/issue-67-card-review/1280x720-ended.jpg)  |
+| 960×540   | [截图](assets/issue-67-card-review/960x540-all.jpg)   | [截图](assets/issue-67-card-review/960x540-ended.jpg)   |
 
 修改前见 [第一轮响应式布局报告](ISSUE-67-DESKTOP-RESPONSIVE.md)，其 38 张截图与记录属于 5ad5fc9 历史验收。本轮 `verify:card-evidence` 绑定当前渲染源码和截图；原 `verify:layout-evidence` 保留验证上一轮归档证据，不将旧截图当成本轮效果。
 

@@ -27,6 +27,10 @@ for (const entry of manifest.files.filter(entry => entry.path.startsWith('src/')
     text = text.replaceAll('/assets/' + path.basename(asset.path), asset.sourceUrl);
   if (entry.path === 'src/App.tsx') {
     text = text.replace("const theme: Theme = 'light';", "let theme: Theme = 'light';");
+    text = text.replace(
+      './components/desktop/DesktopPreview',
+      './components/generated/GeneratedComponent'
+    );
     text = text.replace("import './desktop-layout.css';\n", '');
   }
   assert.equal(
@@ -36,5 +40,5 @@ for (const entry of manifest.files.filter(entry => entry.path.startsWith('src/')
   );
 }
 console.log(
-  `PASS: original ZIP, ${assets.length} cached resources, all ${manifest.files.filter(entry => entry.path.startsWith('src/')).length} exported source files; declared resource URLs, App theme let→const and separate desktop CSS import adapted.`
+  `PASS: original ZIP, ${assets.length} cached resources, all ${manifest.files.filter(entry => entry.path.startsWith('src/')).length} exported source files; declared resource URLs, App theme let→const and separate desktop CSS import and desktop adapter import adapted; original generated source retained.`
 );

@@ -1,0 +1,39 @@
+{
+  "checks": [
+    {
+      "filter": "出行中 1",
+      "count": 1
+    },
+    {
+      "filter": "待出行 2",
+      "count": 2
+    },
+    {
+      "filter": "已结束 1",
+      "count": 1
+    },
+    {
+      "filter": "全部 4",
+      "count": 4
+    },
+    {
+      "searchMatches": 1
+    },
+    {
+      "account": true
+    },
+    {
+      "notifications": true
+    },
+    {
+      "tripMenu": true
+    },
+    {
+      "escapeClosesMenu": true
+    },
+    {
+      "belowDesktopOriginal": true
+    }
+  ],
+  "logs": []
+}

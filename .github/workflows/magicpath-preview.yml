@@ -6,6 +6,7 @@ on:
       - 'ui-previews/magicpath-desktop/**'
       - 'design-snapshots/magicpath/**'
       - 'docs/status/assets/issue-67-desktop-layout/**'
+      - 'docs/status/assets/issue-67-card-review/**'
       - '.github/workflows/magicpath-preview.yml'
   workflow_dispatch:
 
@@ -30,6 +31,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:snapshot
       - run: pnpm verify:layout-evidence
+      - run: pnpm verify:card-evidence
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build

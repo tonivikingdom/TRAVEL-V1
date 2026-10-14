@@ -107,5 +107,5 @@ assert.equal(native.before.all.viewport.width, native.after.all.viewport.width);
 assert.equal(native.before.all.viewport.height, native.after.all.viewport.height);
 assert.ok(native.after.ended.root.height >= native.after.ended.viewport.height);
 console.log(
-  `PASS: ${cases.size} CSS viewports × 2 states, ${screenshots.screenshots.length} screenshot hashes/dimensions, native DPR, background, four-column limit, 268px cards, popup alignment, interactions and vertical scrolling. Recorded browser evidence is tied to the current CSS; this does not rerun a browser in CI.`
+  `PASS: ${cases.size} CSS viewports × 2 states, ${screenshots.screenshots.length} screenshot hashes/dimensions, native DPR, background, four-column limit, 268px cards, popup alignment, interactions and vertical scrolling. Historical 5ad5fc9 browser evidence is tied to desktop-layout.css; current card review is verified separately; this does not rerun a browser in CI.`
 );

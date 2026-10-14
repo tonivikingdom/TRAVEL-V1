@@ -8,6 +8,7 @@
     "dev": "vite --host 127.0.0.1 --port 4178 --strictPort",
     "typecheck": "tsc -b",
     "verify:snapshot": "node tools/verify-snapshot.mjs",
+    "verify:card-evidence": "node tools/verify-card-evidence.mjs",
     "verify:layout-evidence": "node tools/verify-layout-evidence.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

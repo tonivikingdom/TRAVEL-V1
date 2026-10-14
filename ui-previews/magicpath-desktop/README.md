@@ -47,3 +47,5 @@ pnpm preview
 [响应式布局报告与前后截图](../../docs/status/ISSUE-67-DESKTOP-RESPONSIVE.md)包含三种主要 CSS 视口、缩放对应的实际尺寸、单卡片背景、原生 DPR 和交互验证。`verify:layout-evidence` 检查录制证据、截图哈希/尺寸及其对应的 CSS 指纹，不替代重新运行浏览器；更改覆盖层后应重新捕获证据。
 
 原稿名称标注 1920×1080，但实际 MagicPath 画布组件为 1440×1024。[第一阶段历史报告](../../docs/status/ISSUE-66-MAGICPATH-DESKTOP.md)保留了原样迁移的 356px 主视觉基线。原始 ZIP 和素材快照没有修改；新的桌面优化可以通过移除覆盖层导入恢复基准布局。
+
+桌面第二轮评审：见 [卡片、状态和居中报告](../../docs/status/ISSUE-67-CARD-REVIEW.md)，当前证据运行 pnpm verify:card-evidence。原导出源码保留，960 CSS px 以下继续使用原组件。

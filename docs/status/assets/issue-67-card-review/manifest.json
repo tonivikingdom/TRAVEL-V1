@@ -1,0 +1,26 @@
+{
+  "capturedOn": "2026-10-14",
+  "capture": "Unmodified native in-app browser screenshots; file pixel dimensions are not asserted to equal CSS viewport dimensions.",
+  "sourceHashes": {
+    "src/App.tsx": "c4c978da91f7be1e5cc5c882d035a4185797f728bbbb5c80c7b6609766ccf101",
+    "src/desktop-layout.css": "896c9ddca163a961e514f608bc74c232b16fcb5e983d8cca5f0ec9c758eb5a40",
+    "src/desktop-details.css": "599bac4cb1bc224ed925cdd70aa28e4ada0140c9b11a2fedbc8448a8d2910569",
+    "src/components/desktop/DesktopHome.tsx": "3523a183b676078722f8ed0e8bb4a04cfe6c5f9440a2e6350542bbccdbdda466",
+    "src/components/desktop/DesktopPreview.tsx": "cfd7f0012f75dbfe054559920acb2f3efcaa5a22bcf1cdd10bd812e3eb1ad0fb",
+    "src/components/generated/GeneratedComponent.tsx": "23f401a7c2f8414fd6894eac86e681f22e026141e6b06b3c86843f6195a54eea",
+    "src/components/generated/GeneratedComponent.css": "5340f314e81f6e6b62d5e95b0882739dc913d5c116056711dd876e1df8e2bafd",
+    "src/index.css": "3aa115ed5e701d7e5d96c0e8b229b08e698223c0b49c8481020986a5b4e2d6d4"
+  },
+  "screenshotHashes": {
+    "1280x720-all.jpg": "5a9ccf3baac79a6bd40fdeeed948361bd74ca1b2a3ddfa3ab459eaf0498229fe",
+    "1280x720-ended.jpg": "cf6ef0ee27790206cf906786b338acca2496c32571a785bf720b5e67abdb9f89",
+    "1920x1080-all.jpg": "b1b42db6a05aa2d3d87542a9801c1a0e112f5f3fb3b91eca6baa3ef66e1de0ef",
+    "1920x1080-ended.jpg": "bb29825639946f483880e1d03d16594e597e5acd88eef2563c43649264cf83c7",
+    "2560x1440-all.jpg": "be840443de3ae5fb2dd3f868c124569974792e208ddbb39d6d48700c1c41ef06",
+    "2560x1440-ended.jpg": "266e3c807c5a9828bdd9974fb5f3b7856281f5957c67df91b990b7d6e8cd70a7",
+    "3840x2160-all.jpg": "3268a04c5336d1aca91725a28b3e26b98960b33842bbed8528d6da38a73f9ff5",
+    "3840x2160-ended.jpg": "39a608831ba3ee2fe1b0db0f3b3406f78133c270cdf237fd012216a201264515",
+    "960x540-all.jpg": "a52a5c788d502c122b4b129acbfc7aa3eec19f9428d0c717203c72dde54df71a",
+    "960x540-ended.jpg": "86a54e64bcc55436e9439352560395a7da6157a0c85402f9410d5753a125e0d6"
+  }
+}
